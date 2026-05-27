@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rolerag-poc"
+version = "0.1.0"
+description = "Personal RoleRAG proof of concept"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "openai>=1.40",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "python-dotenv>=1.0",
+  "rich>=13.7",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+rolerag = "app.cli:main"
+
+[tool.setuptools]
+packages = ["app", "app.llm"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["app"]
