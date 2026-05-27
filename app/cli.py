@@ -12,6 +12,7 @@ from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.llm.router import ModelTask, choose_route
 from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.persistence import DataFileNotFoundError, DataValidationError, FileDataLoader
 
 app = typer.Typer(help="RoleRAG CLI")
 
@@ -31,13 +32,20 @@ def _build_local_provider(settings: Settings) -> LlmProvider:
     )
 
 
+def _build_file_loader() -> FileDataLoader:
+    return FileDataLoader()
+
+
 async def _run_turn(
     *,
     settings: Settings,
     provider: LlmProvider,
     turn_input: TurnInput,
+    world_id: str,
+    scene_id: str,
 ) -> TurnResult:
     orchestrator = TurnOrchestrator(
+        loader=_build_file_loader(),
         provider=provider,
         local_model=settings.local_llm_model,
         cloud_model=settings.cloud_llm_model,
@@ -47,7 +55,11 @@ async def _run_turn(
         cloud_temperature=settings.cloud_llm_temperature,
         cloud_mode=settings.cloud_mode,
     )
-    return await orchestrator.run_turn(turn_input)
+    return await orchestrator.run_turn(
+        turn_input=turn_input,
+        world_id=world_id,
+        scene_id=scene_id,
+    )
 
 
 @app.command()
@@ -84,6 +96,8 @@ def route(
 def turn(
     message: Annotated[str, typer.Option(help="Player message for the demo turn")],
     session_id: Annotated[str, typer.Option(help="Session identifier")] = "demo-session",
+    world_id: Annotated[str, typer.Option(help="World identifier")] = "demo_world",
+    scene_id: Annotated[str, typer.Option(help="Scene identifier")] = "rose-gallery",
     active_persona_id: Annotated[
         str,
         typer.Option(help="Active demo persona identifier"),
@@ -96,7 +110,19 @@ def turn(
         message=message,
         active_persona_id=active_persona_id,
     )
-    result = asyncio.run(_run_turn(settings=settings, provider=provider, turn_input=turn_input))
+    try:
+        result = asyncio.run(
+            _run_turn(
+                settings=settings,
+                provider=provider,
+                turn_input=turn_input,
+                world_id=world_id,
+                scene_id=scene_id,
+            )
+        )
+    except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
     typer.echo(result.text)
 
 

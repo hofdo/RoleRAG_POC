@@ -1,0 +1,12 @@
+{
+  "id": "archivist",
+  "name": "Iria Vale",
+  "role": "npc",
+  "public_description": "A composed palace archivist with an excellent memory.",
+  "private_description": "She is quietly aiding the coup against the regent.",
+  "speaking_style": "Precise, dry, and difficult to rattle.",
+  "values": ["order", "discretion"],
+  "goals": ["protect the archive", "limit political damage"],
+  "secrets": ["She forged one inventory ledger to hide a missing document."],
+  "forbidden_knowledge": ["The vault key sequence beneath the rose seal."]
+}

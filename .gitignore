@@ -16,6 +16,8 @@ data/*
 !data/worlds/.gitkeep
 !data/personas/
 !data/personas/.gitkeep
+!data/scenes/
+!data/scenes/*.json
 !data/sessions/
 !data/sessions/.gitkeep
 !data/documents/

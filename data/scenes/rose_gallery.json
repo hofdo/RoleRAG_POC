@@ -1,0 +1,13 @@
+{
+  "id": "rose-gallery",
+  "title": "Rose Gallery",
+  "location": "Winter Palace",
+  "current_time": "late evening",
+  "active_personas": ["archivist"],
+  "player_visible_summary": "Courtiers drift between mirrors and roses while musicians play softly.",
+  "gm_private_summary": "A regent loyalist is watching every exchange from the south alcove.",
+  "recent_events": [
+    "A servant spilled wine near the west door.",
+    "The regent left the chamber moments ago."
+  ]
+}

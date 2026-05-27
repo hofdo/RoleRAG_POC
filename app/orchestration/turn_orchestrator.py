@@ -1,43 +1,28 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from app.agents import ActorAgent
 from app.domain import PersonaCard, SceneState, TurnInput, TurnResult
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode, ModelTask, choose_route
 from app.orchestration.context_builder import build_actor_messages
+from app.persistence import DemoWorldRecord
 
-DEMO_PERSONA = PersonaCard(
-    id="archivist",
-    name="Iria Vale",
-    role="npc",
-    public_description="A composed palace archivist with an excellent memory.",
-    private_description="She is quietly aiding the coup against the regent.",
-    speaking_style="Precise, dry, and difficult to rattle.",
-    values=["order", "discretion"],
-    goals=["protect the archive", "limit political damage"],
-    secrets=["She forged one inventory ledger to hide a missing document."],
-    forbidden_knowledge=["The vault key sequence beneath the rose seal."],
-)
 
-DEMO_SCENE = SceneState(
-    id="rose-gallery",
-    title="Rose Gallery",
-    location="Winter Palace",
-    current_time="late evening",
-    active_personas=["archivist"],
-    player_visible_summary="Courtiers drift between mirrors and roses while musicians play softly.",
-    gm_private_summary="A regent loyalist is watching every exchange from the south alcove.",
-    recent_events=[
-        "A servant spilled wine near the west door.",
-        "The regent left the chamber moments ago.",
-    ],
-)
+class TurnDataLoader(Protocol):
+    def load_world(self, world_id: str) -> DemoWorldRecord: ...
+
+    def load_persona(self, persona_id: str) -> PersonaCard: ...
+
+    def load_scene(self, scene_id: str) -> SceneState: ...
 
 
 class TurnOrchestrator:
     def __init__(
         self,
         *,
+        loader: TurnDataLoader,
         provider: LlmProvider,
         local_model: str,
         cloud_model: str,
@@ -47,6 +32,7 @@ class TurnOrchestrator:
         cloud_temperature: float,
         cloud_mode: CloudMode | str,
     ) -> None:
+        self.loader = loader
         self.provider = provider
         self.actor_agent = ActorAgent()
         self.local_model = local_model
@@ -57,9 +43,17 @@ class TurnOrchestrator:
         self.cloud_temperature = cloud_temperature
         self.cloud_mode = CloudMode(cloud_mode)
 
-    async def run_turn(self, turn_input: TurnInput) -> TurnResult:
-        persona = self._get_demo_persona(turn_input.active_persona_id)
-        scene = DEMO_SCENE
+    async def run_turn(self, *, turn_input: TurnInput, world_id: str, scene_id: str) -> TurnResult:
+        world = self.loader.load_world(world_id)
+        if turn_input.active_persona_id not in world.persona_ids:
+            raise ValueError(
+                f"Unknown persona for world {world_id}: {turn_input.active_persona_id}"
+            )
+        if scene_id not in world.scene_ids:
+            raise ValueError(f"Unknown scene for world {world_id}: {scene_id}")
+
+        persona = self.loader.load_persona(turn_input.active_persona_id)
+        scene = self.loader.load_scene(scene_id)
         route = choose_route(
             task=ModelTask.ACTOR_RESPONSE,
             cloud_mode=self.cloud_mode,
@@ -80,8 +74,3 @@ class TurnOrchestrator:
             messages=messages,
         )
         return TurnResult(text=text, route=route)
-
-    def _get_demo_persona(self, active_persona_id: str) -> PersonaCard:
-        if active_persona_id != DEMO_PERSONA.id:
-            raise ValueError(f"Unknown demo persona: {active_persona_id}")
-        return DEMO_PERSONA

@@ -1,0 +1,7 @@
+{
+  "id": "demo_world",
+  "name": "Winter Palace Intrigue",
+  "default_scene_id": "rose-gallery",
+  "persona_ids": ["archivist"],
+  "scene_ids": ["rose-gallery"]
+}
