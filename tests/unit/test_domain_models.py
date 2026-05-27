@@ -72,7 +72,7 @@ def test_scene_state_requires_player_visible_summary() -> None:
             id="scene-1",
             title="Rose Gallery",
             location="Winter Palace",
-        )
+        )  # type: ignore[call-arg]
 
 
 def test_scene_state_serializes_safe_empty_defaults() -> None:
@@ -141,7 +141,7 @@ def test_memory_episode_requires_visibility() -> None:
             scene_id="scene-1",
             summary="The player noticed the duke's ring.",
             importance=3,
-        )
+        )  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize("visibility", ["secret", "public", ""])
@@ -153,7 +153,7 @@ def test_memory_episode_rejects_invalid_visibility(visibility: str) -> None:
             scene_id="scene-1",
             summary="The player noticed the duke's ring.",
             importance=3,
-            visibility=visibility,
+            visibility=visibility,  # type: ignore[arg-type]
         )
 
 
@@ -178,7 +178,7 @@ def test_retrieved_chunk_rejects_invalid_visibility(visibility: str) -> None:
             source="memory",
             text="The old treaty was burned.",
             score=0.82,
-            visibility=visibility,
+            visibility=visibility,  # type: ignore[arg-type]
         )
 
 
@@ -241,7 +241,7 @@ def test_turn_input_requires_active_persona_id() -> None:
         TurnInput(
             session_id="session-1",
             message="I ask the archivist what she really knows.",
-        )
+        )  # type: ignore[call-arg]
 
 
 def test_turn_result_accepts_nested_model_route() -> None:
