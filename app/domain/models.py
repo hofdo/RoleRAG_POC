@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain.visibility import Visibility
 from app.llm.router import ModelRoute
@@ -57,6 +57,27 @@ class MemoryEpisode(BaseModel):
     importance: int = Field(ge=1, le=5)
     visibility: Visibility
     tags: list[str] = Field(default_factory=list)
+
+
+class MemoryCandidate(BaseModel):
+    summary: str
+    visibility: Visibility
+    importance: int = Field(ge=1, le=5)
+    tags: list[str] = Field(default_factory=list)
+    scene_id: str | None = None
+    actor_id: str | None = None
+
+
+class MemoryCuratorResult(BaseModel):
+    write_memory: bool
+    memories: list[MemoryCandidate] = Field(default_factory=list)
+    reason: str
+
+    @model_validator(mode="after")
+    def validate_write_memory_has_candidates(self) -> "MemoryCuratorResult":
+        if self.write_memory and not self.memories:
+            raise ValueError("write_memory=true requires at least one memory candidate")
+        return self
 
 
 class RetrievedChunk(BaseModel):

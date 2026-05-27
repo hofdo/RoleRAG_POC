@@ -4,10 +4,17 @@ from typing import Protocol
 from uuid import uuid4
 
 from app.agents import ActorAgent
-from app.domain import PersonaCard, SceneState, SessionState, TurnInput, TurnResult
+from app.domain import (
+    MemoryCuratorResult,
+    PersonaCard,
+    SceneState,
+    SessionState,
+    TurnInput,
+    TurnResult,
+)
 from app.llm.provider import LlmProvider
-from app.llm.router import CloudMode, ModelTask, choose_route
-from app.memory import RecentDialogueStore
+from app.llm.router import CloudMode, ModelRoute, ModelTask, choose_route
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_builder import build_actor_messages
 from app.persistence import DemoWorldRecord, SessionNotFoundError
 from app.persistence.repositories import SessionRepository, TurnRepository
@@ -19,6 +26,20 @@ class TurnDataLoader(Protocol):
     def load_persona(self, persona_id: str) -> PersonaCard: ...
 
     def load_scene(self, scene_id: str) -> SceneState: ...
+
+
+class MemoryCuratingAgent(Protocol):
+    async def curate(
+        self,
+        *,
+        provider: LlmProvider,
+        route: ModelRoute,
+        session: SessionState,
+        scene: SceneState,
+        persona: PersonaCard,
+        user_message: str,
+        assistant_message: str,
+    ) -> MemoryCuratorResult: ...
 
 
 class TurnOrchestrator:
@@ -37,12 +58,16 @@ class TurnOrchestrator:
         local_temperature: float,
         cloud_temperature: float,
         cloud_mode: CloudMode | str,
+        memory_store: MemoryEpisodeStore | None = None,
+        memory_curator: MemoryCuratingAgent | None = None,
     ) -> None:
         self.loader = loader
         self.provider = provider
         self.session_repository = session_repository
         self.turn_repository = turn_repository
         self.recent_dialogue_store = recent_dialogue_store
+        self.memory_store = memory_store
+        self.memory_curator = memory_curator
         self.actor_agent = ActorAgent()
         self.local_model = local_model
         self.cloud_model = cloud_model
@@ -139,4 +164,45 @@ class TurnOrchestrator:
             session.id,
             updated_at=persisted_turn.created_at,
         )
-        return TurnResult(text=text, route=route)
+
+        warnings: list[str] = []
+        memory_written = False
+        if self.memory_curator is not None and self.memory_store is not None:
+            memory_route = choose_route(
+                task=ModelTask.MEMORY_EXTRACTION,
+                cloud_mode=self.cloud_mode,
+                local_model=self.local_model,
+                cloud_model=self.cloud_model,
+                local_max_tokens=self.local_max_tokens,
+                cloud_max_tokens=self.cloud_max_tokens,
+                local_temperature=self.local_temperature,
+                cloud_temperature=self.cloud_temperature,
+                failed_local_attempts=0,
+                retrieval_confidence=None,
+                scene_complexity=1,
+            )
+            try:
+                memory_result = await self.memory_curator.curate(
+                    provider=self.provider,
+                    route=memory_route,
+                    session=session,
+                    scene=scene,
+                    persona=persona,
+                    user_message=turn_input.message,
+                    assistant_message=text,
+                )
+                if memory_result.write_memory:
+                    persisted_memories = self.memory_store.persist_memories(
+                        session_id=session.id,
+                        memories=memory_result.memories,
+                    )
+                    memory_written = len(persisted_memories) > 0
+            except Exception as exc:
+                warnings.append(f"memory curation skipped: {exc}")
+
+        return TurnResult(
+            text=text,
+            route=route,
+            memory_written=memory_written,
+            warnings=warnings,
+        )

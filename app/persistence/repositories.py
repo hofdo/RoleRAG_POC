@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from typing import Protocol
+from uuid import uuid4
 
-from app.domain import SessionState, StoredTurn
+from app.domain import MemoryCandidate, MemoryEpisode, SessionState, StoredTurn, Visibility
 from app.llm.router import ModelProviderName, ModelRoute
 from app.persistence.sqlite import parse_datetime, serialize_datetime, utc_now
 
@@ -38,6 +40,21 @@ class TurnRepository(Protocol):
     def list_recent_turns(self, session_id: str, limit: int) -> list[StoredTurn]: ...
 
     def count_turns(self, session_id: str) -> int: ...
+
+
+class MemoryRepository(Protocol):
+    def append_memories(
+        self,
+        *,
+        session_id: str,
+        memories: list[MemoryCandidate],
+    ) -> list[MemoryEpisode]: ...
+
+    def list_memories_for_session(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[MemoryEpisode]: ...
 
 
 class SQLiteSessionRepository:
@@ -238,3 +255,98 @@ class SQLiteTurnRepository:
             ),
             created_at=parse_datetime(row["created_at"]),
         )
+
+
+class SQLiteMemoryRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def append_memories(
+        self,
+        *,
+        session_id: str,
+        memories: list[MemoryCandidate],
+    ) -> list[MemoryEpisode]:
+        created_at = utc_now()
+        episodes: list[MemoryEpisode] = []
+        for memory in memories:
+            episode = MemoryEpisode(
+                id=str(uuid4()),
+                session_id=session_id,
+                scene_id=memory.scene_id or "",
+                actor_id=memory.actor_id,
+                summary=memory.summary,
+                importance=memory.importance,
+                visibility=memory.visibility,
+                tags=memory.tags,
+            )
+            self.connection.execute(
+                """
+                INSERT INTO memory_episodes (
+                    id,
+                    session_id,
+                    scene_id,
+                    actor_id,
+                    summary,
+                    importance,
+                    visibility,
+                    tags_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    episode.id,
+                    episode.session_id,
+                    episode.scene_id,
+                    episode.actor_id,
+                    episode.summary,
+                    episode.importance,
+                    episode.visibility.value,
+                    json.dumps(episode.tags),
+                    serialize_datetime(created_at),
+                ),
+            )
+            episodes.append(episode)
+        self.connection.commit()
+        return episodes
+
+    def list_memories_for_session(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[MemoryEpisode]:
+        sql = """
+            SELECT
+                id,
+                session_id,
+                scene_id,
+                actor_id,
+                summary,
+                importance,
+                visibility,
+                tags_json,
+                created_at
+            FROM memory_episodes
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+        """
+        params: tuple[object, ...]
+        if limit is None:
+            params = (session_id,)
+        else:
+            sql += " LIMIT ?"
+            params = (session_id, limit)
+        rows = self.connection.execute(sql, params).fetchall()
+        return [
+            MemoryEpisode(
+                id=row["id"],
+                session_id=row["session_id"],
+                scene_id=row["scene_id"],
+                actor_id=row["actor_id"],
+                summary=row["summary"],
+                importance=row["importance"],
+                visibility=Visibility(row["visibility"]),
+                tags=json.loads(row["tags_json"]),
+            )
+            for row in reversed(rows)
+        ]

@@ -1,3 +1,3 @@
-from app.memory.store import RecentDialogueStore
+from app.memory.store import MemoryEpisodeStore, RecentDialogueStore
 
-__all__ = ["RecentDialogueStore"]
+__all__ = ["MemoryEpisodeStore", "RecentDialogueStore"]

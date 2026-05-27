@@ -6,18 +6,20 @@ from typing import Annotated
 
 import typer
 
+from app.agents import MemoryCurator
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.llm.router import ModelTask, choose_route
-from app.memory import RecentDialogueStore
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
     FileDataLoader,
     SessionNotFoundError,
+    SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
     connect_sqlite,
@@ -50,6 +52,7 @@ def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrches
     connection = connect_sqlite(settings.database_path)
     initialize_database(connection)
     turn_repository = SQLiteTurnRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
     return TurnOrchestrator(
         loader=_build_file_loader(),
         provider=provider,
@@ -59,6 +62,8 @@ def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrches
             turn_repository=turn_repository,
             recent_turns=settings.recent_dialogue_turns,
         ),
+        memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
+        memory_curator=MemoryCurator(),
         local_model=settings.local_llm_model,
         cloud_model=settings.cloud_llm_model,
         local_max_tokens=settings.local_llm_max_tokens,

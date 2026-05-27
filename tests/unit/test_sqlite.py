@@ -6,7 +6,7 @@ from pathlib import Path
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
 
-def test_initialize_database_creates_sessions_and_turns_tables(tmp_path: Path) -> None:
+def test_initialize_database_creates_sessions_turns_and_memory_tables(tmp_path: Path) -> None:
     connection = connect_sqlite(tmp_path / "sessions.db")
 
     initialize_database(connection)
@@ -20,6 +20,7 @@ def test_initialize_database_creates_sessions_and_turns_tables(tmp_path: Path) -
 
     assert "sessions" in tables
     assert "turns" in tables
+    assert "memory_episodes" in tables
 
 
 def test_connect_sqlite_enables_row_access_by_name(tmp_path: Path) -> None:

@@ -3,9 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.domain import SessionState
+from app.domain import MemoryCandidate, SessionState, Visibility
 from app.llm.router import ModelProviderName, ModelRoute
-from app.persistence.repositories import SQLiteSessionRepository, SQLiteTurnRepository
+from app.persistence.repositories import (
+    SQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+)
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
 
@@ -100,3 +104,38 @@ def test_session_repository_updates_activity_timestamp(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.created_at == created.created_at
     assert loaded.updated_at == later
+
+
+def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    episodes = memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="The player promised to return before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise", "deadline"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    loaded = memory_repository.list_memories_for_session("session-1")
+
+    assert len(episodes) == 1
+    assert loaded == episodes
+    assert loaded[0].tags == ["promise", "deadline"]

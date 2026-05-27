@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from app.domain import PersonaCard, SceneState, SessionState, TurnInput
+from app.domain import MemoryCandidate, PersonaCard, SceneState, SessionState, TurnInput, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName
-from app.memory import RecentDialogueStore
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     DemoWorldRecord,
+    SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
     connect_sqlite,
@@ -31,6 +33,19 @@ class FakeProvider(LlmProvider):
             usage={"total_tokens": 15},
             finish_reason="stop",
         )
+
+
+class StubMemoryCurator:
+    def __init__(self, *, result: Any = None, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls = 0
+
+    async def curate(self, **_: object) -> Any:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 class FakeLoader:
@@ -67,7 +82,12 @@ class FakeLoader:
         )
 
 
-def _build_orchestrator(tmp_path: Path, provider: FakeProvider) -> TurnOrchestrator:
+def _build_orchestrator(
+    tmp_path: Path,
+    provider: FakeProvider,
+    *,
+    memory_curator: StubMemoryCurator | None = None,
+) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
     session_repository = SQLiteSessionRepository(connection)
@@ -81,6 +101,7 @@ def _build_orchestrator(tmp_path: Path, provider: FakeProvider) -> TurnOrchestra
         )
     )
     turn_repository = SQLiteTurnRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
     return TurnOrchestrator(
         loader=FakeLoader(),
         provider=provider,
@@ -90,6 +111,8 @@ def _build_orchestrator(tmp_path: Path, provider: FakeProvider) -> TurnOrchestra
             turn_repository=turn_repository,
             recent_turns=8,
         ),
+        memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
+        memory_curator=memory_curator,
         local_model="local-model",
         cloud_model="cloud-model",
         local_max_tokens=700,
@@ -142,3 +165,67 @@ async def test_turn_orchestrator_raises_clear_error_for_missing_scene(tmp_path: 
         await orchestrator.run_turn(turn_input=turn_input)
 
     assert "missing-scene" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_sets_memory_written_when_curator_persists_memory(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        memory_curator=StubMemoryCurator(
+            result=type(
+                "CuratorResult",
+                (),
+                {
+                    "write_memory": True,
+                    "memories": [
+                        MemoryCandidate(
+                            summary="The player promised to return before dawn.",
+                            visibility=Visibility.PLAYER,
+                            importance=4,
+                            tags=["promise"],
+                            scene_id="rose-gallery",
+                            actor_id="archivist",
+                        )
+                    ],
+                    "reason": "This should matter later.",
+                },
+            )()
+        ),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="I promise I will return before dawn.",
+        )
+    )
+
+    assert result.memory_written is True
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_warning_when_memory_curation_fails(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        memory_curator=StubMemoryCurator(error=ValueError("bad memory output")),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="I promise I will return before dawn.",
+        )
+    )
+
+    assert result.text == "I have heard enough to know the regent fears open daylight."
+    assert result.memory_written is False
+    assert result.warnings == ["memory curation skipped: bad memory output"]

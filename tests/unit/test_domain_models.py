@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from app.domain import (
     CriticResult,
+    MemoryCandidate,
+    MemoryCuratorResult,
     MemoryEpisode,
     PersonaCard,
     RetrievedChunk,
@@ -171,6 +173,27 @@ def test_memory_episode_rejects_importance_outside_range(importance: int) -> Non
             summary="The player noticed the duke's ring.",
             importance=importance,
             visibility=Visibility.PLAYER,
+        )
+
+
+def test_memory_candidate_requires_visibility_and_constrained_importance() -> None:
+    candidate = MemoryCandidate(
+        summary="The player promised to return before dawn.",
+        visibility=Visibility.PLAYER,
+        importance=4,
+        tags=["promise"],
+    )
+
+    assert candidate.visibility == Visibility.PLAYER
+    assert candidate.importance == 4
+
+
+def test_memory_curator_result_rejects_write_without_memories() -> None:
+    with pytest.raises(ValidationError):
+        MemoryCuratorResult(
+            write_memory=True,
+            memories=[],
+            reason="This matters later.",
         )
 
 
