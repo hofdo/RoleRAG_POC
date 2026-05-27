@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-Minimal Phase 0 and Phase 1 foundation for a personal RoleRAG proof of concept.
+Minimal CLI-first RoleRAG proof of concept with SQLite-backed session persistence.
 
 ## Scope
 
@@ -10,9 +10,11 @@ This repository currently includes:
 - typed settings
 - local/cloud LLM provider abstraction
 - deterministic model routing
-- a small Typer CLI for smoke testing
+- structured domain models and JSON demo data loading
+- a small Typer CLI for local roleplay turns
+- SQLite persistence for sessions and turns
 
-This repository does not yet include RAG, memory, agent workflows, persistence, or business endpoints.
+This repository does not yet include RAG, embeddings, vector storage, memory curation, critic workflows, or business endpoints.
 
 ## Local model runtime
 
@@ -37,6 +39,9 @@ python -m pip install -e ".[dev]"
 ```bash
 python -m app.cli --help
 python -m app.cli config
+python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --active-persona-id archivist --player-name Avery
+python -m app.cli resume --session-id <session-id>
+python -m app.cli turn --session-id <session-id> --message "What have you heard about the regent?"
 python -m app.cli route --task actor_response
 pytest
 ruff check .

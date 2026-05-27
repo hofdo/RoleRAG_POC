@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from app.domain import PersonaCard, SceneState, TurnInput
+from app.domain import PersonaCard, SceneState, SessionState, TurnInput
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName
+from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
-from app.persistence import DemoWorldRecord
+from app.persistence import (
+    DemoWorldRecord,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+    connect_sqlite,
+    initialize_database,
+)
 
 
 class FakeProvider(LlmProvider):
@@ -58,12 +67,29 @@ class FakeLoader:
         )
 
 
-@pytest.mark.asyncio
-async def test_turn_orchestrator_returns_turn_result() -> None:
-    provider = FakeProvider()
-    orchestrator = TurnOrchestrator(
+def _build_orchestrator(tmp_path: Path, provider: FakeProvider) -> TurnOrchestrator:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="demo-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn_repository = SQLiteTurnRepository(connection)
+    return TurnOrchestrator(
         loader=FakeLoader(),
         provider=provider,
+        session_repository=session_repository,
+        turn_repository=turn_repository,
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=turn_repository,
+            recent_turns=8,
+        ),
         local_model="local-model",
         cloud_model="cloud-model",
         local_max_tokens=700,
@@ -72,17 +98,18 @@ async def test_turn_orchestrator_returns_turn_result() -> None:
         cloud_temperature=0.65,
         cloud_mode="ask",
     )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
     turn_input = TurnInput(
         session_id="demo-session",
-        active_persona_id="archivist",
         message="What have you heard about the regent?",
     )
 
-    result = await orchestrator.run_turn(
-        turn_input=turn_input,
-        world_id="demo_world",
-        scene_id="rose-gallery",
-    )
+    result = await orchestrator.run_turn(turn_input=turn_input)
 
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.route.provider == ModelProviderName.LOCAL
@@ -94,30 +121,24 @@ async def test_turn_orchestrator_returns_turn_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_orchestrator_raises_clear_error_for_missing_scene() -> None:
+async def test_turn_orchestrator_raises_clear_error_for_missing_scene(tmp_path: Path) -> None:
     provider = FakeProvider()
-    orchestrator = TurnOrchestrator(
-        loader=FakeLoader(),
-        provider=provider,
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+    orchestrator = _build_orchestrator(tmp_path, provider)
+    orchestrator.session_repository.create_session(
+        SessionState(
+            id="broken-session",
+            world_id="demo_world",
+            active_scene_id="missing-scene",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
     )
     turn_input = TurnInput(
-        session_id="demo-session",
-        active_persona_id="archivist",
+        session_id="broken-session",
         message="What have you heard about the regent?",
     )
 
     with pytest.raises(ValueError) as exc_info:
-        await orchestrator.run_turn(
-            turn_input=turn_input,
-            world_id="demo_world",
-            scene_id="missing-scene",
-        )
+        await orchestrator.run_turn(turn_input=turn_input)
 
     assert "missing-scene" in str(exc_info.value)

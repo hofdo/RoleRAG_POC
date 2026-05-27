@@ -11,8 +11,18 @@ from app.domain import TurnInput, TurnResult
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.llm.router import ModelTask, choose_route
+from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
-from app.persistence import DataFileNotFoundError, DataValidationError, FileDataLoader
+from app.persistence import (
+    DataFileNotFoundError,
+    DataValidationError,
+    FileDataLoader,
+    SessionNotFoundError,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+    connect_sqlite,
+    initialize_database,
+)
 
 app = typer.Typer(help="RoleRAG CLI")
 
@@ -36,17 +46,19 @@ def _build_file_loader() -> FileDataLoader:
     return FileDataLoader()
 
 
-async def _run_turn(
-    *,
-    settings: Settings,
-    provider: LlmProvider,
-    turn_input: TurnInput,
-    world_id: str,
-    scene_id: str,
-) -> TurnResult:
-    orchestrator = TurnOrchestrator(
+def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrchestrator:
+    connection = connect_sqlite(settings.database_path)
+    initialize_database(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    return TurnOrchestrator(
         loader=_build_file_loader(),
         provider=provider,
+        session_repository=SQLiteSessionRepository(connection),
+        turn_repository=turn_repository,
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=turn_repository,
+            recent_turns=settings.recent_dialogue_turns,
+        ),
         local_model=settings.local_llm_model,
         cloud_model=settings.cloud_llm_model,
         local_max_tokens=settings.local_llm_max_tokens,
@@ -55,17 +67,66 @@ async def _run_turn(
         cloud_temperature=settings.cloud_llm_temperature,
         cloud_mode=settings.cloud_mode,
     )
-    return await orchestrator.run_turn(
-        turn_input=turn_input,
-        world_id=world_id,
-        scene_id=scene_id,
-    )
+
+
+async def _run_turn(
+    *,
+    orchestrator: TurnOrchestrator,
+    turn_input: TurnInput,
+) -> TurnResult:
+    return await orchestrator.run_turn(turn_input=turn_input)
 
 
 @app.command()
 def config() -> None:
     settings = get_settings()
     typer.echo(json.dumps(_redact_settings(settings), indent=2, sort_keys=True))
+
+
+@app.command()
+def start_session(
+    world_id: Annotated[str, typer.Option(help="World identifier")] = "demo_world",
+    scene_id: Annotated[str, typer.Option(help="Scene identifier")] = "rose-gallery",
+    active_persona_id: Annotated[
+        str,
+        typer.Option(help="Active demo persona identifier"),
+    ] = "archivist",
+    player_name: Annotated[str, typer.Option(help="Player name")] = "Player",
+    session_id: Annotated[
+        str | None,
+        typer.Option(help="Optional explicit session identifier"),
+    ] = None,
+) -> None:
+    settings = get_settings()
+    provider = _build_local_provider(settings)
+    orchestrator = _build_orchestrator(settings, provider)
+    try:
+        session = orchestrator.create_session(
+            world_id=world_id,
+            scene_id=scene_id,
+            active_persona_id=active_persona_id,
+            player_name=player_name,
+            session_id=session_id,
+        )
+    except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@app.command()
+def resume(
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
+) -> None:
+    settings = get_settings()
+    provider = _build_local_provider(settings)
+    orchestrator = _build_orchestrator(settings, provider)
+    try:
+        session = orchestrator.resume_session(session_id)
+    except SessionNotFoundError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
 @app.command()
@@ -95,32 +156,23 @@ def route(
 @app.command()
 def turn(
     message: Annotated[str, typer.Option(help="Player message for the demo turn")],
-    session_id: Annotated[str, typer.Option(help="Session identifier")] = "demo-session",
-    world_id: Annotated[str, typer.Option(help="World identifier")] = "demo_world",
-    scene_id: Annotated[str, typer.Option(help="Scene identifier")] = "rose-gallery",
-    active_persona_id: Annotated[
-        str,
-        typer.Option(help="Active demo persona identifier"),
-    ] = "archivist",
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
 ) -> None:
     settings = get_settings()
     provider = _build_local_provider(settings)
+    orchestrator = _build_orchestrator(settings, provider)
     turn_input = TurnInput(
         session_id=session_id,
         message=message,
-        active_persona_id=active_persona_id,
     )
     try:
         result = asyncio.run(
             _run_turn(
-                settings=settings,
-                provider=provider,
+                orchestrator=orchestrator,
                 turn_input=turn_input,
-                world_id=world_id,
-                scene_id=scene_id,
             )
         )
-    except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
+    except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
     typer.echo(result.text)

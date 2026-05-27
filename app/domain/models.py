@@ -41,6 +41,7 @@ class SessionState(BaseModel):
     id: str
     world_id: str
     active_scene_id: str
+    active_persona_id: str
     player_name: str
     recent_turn_ids: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
@@ -75,7 +76,19 @@ class RetrievedChunk(BaseModel):
 class TurnInput(BaseModel):
     session_id: str
     message: str
-    active_persona_id: str
+    active_persona_id: str | None = None
+
+
+class StoredTurn(BaseModel):
+    id: int
+    session_id: str
+    turn_index: int
+    scene_id: str
+    persona_id: str
+    user_message: str
+    assistant_message: str
+    route: ModelRoute
+    created_at: datetime
 
 
 class TurnResult(BaseModel):

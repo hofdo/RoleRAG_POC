@@ -12,6 +12,7 @@ from app.domain import (
     RetrievedChunk,
     SceneState,
     SessionState,
+    StoredTurn,
     TurnInput,
     TurnResult,
     Visibility,
@@ -102,6 +103,7 @@ def test_session_state_allows_omitted_timestamps() -> None:
         id="session-1",
         world_id="world-1",
         active_scene_id="scene-1",
+        active_persona_id="archivist",
         player_name="Avery",
     )
 
@@ -117,6 +119,7 @@ def test_session_state_serializes_present_datetimes_cleanly() -> None:
         id="session-1",
         world_id="world-1",
         active_scene_id="scene-1",
+        active_persona_id="archivist",
         player_name="Avery",
         created_at=created_at,
         updated_at=updated_at,
@@ -126,6 +129,7 @@ def test_session_state_serializes_present_datetimes_cleanly() -> None:
         "id": "session-1",
         "world_id": "world-1",
         "active_scene_id": "scene-1",
+        "active_persona_id": "archivist",
         "player_name": "Avery",
         "recent_turn_ids": [],
         "created_at": "2026-05-27T10:30:00Z",
@@ -236,12 +240,13 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
     }
 
 
-def test_turn_input_requires_active_persona_id() -> None:
-    with pytest.raises(ValidationError):
-        TurnInput(
-            session_id="session-1",
-            message="I ask the archivist what she really knows.",
-        )  # type: ignore[call-arg]
+def test_turn_input_allows_session_backed_persona_lookup() -> None:
+    turn_input = TurnInput(
+        session_id="session-1",
+        message="I ask the archivist what she really knows.",
+    )
+
+    assert turn_input.active_persona_id is None
 
 
 def test_turn_result_accepts_nested_model_route() -> None:
@@ -275,3 +280,27 @@ def test_critic_result_defaults_to_empty_issues_and_nullable_repair_instruction(
 
     assert result.issues == []
     assert result.repair_instruction is None
+
+
+def test_stored_turn_accepts_route_and_timestamp() -> None:
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=700,
+        temperature=0.75,
+        reason="default local route",
+    )
+    stored_turn = StoredTurn(
+        id=3,
+        session_id="session-1",
+        turn_index=2,
+        scene_id="scene-1",
+        persona_id="archivist",
+        user_message="Tell me the truth.",
+        assistant_message="Not here.",
+        route=route,
+        created_at=datetime(2026, 5, 27, 12, 0, tzinfo=UTC),
+    )
+
+    assert stored_turn.route.model == "local-model"
+    assert stored_turn.turn_index == 2

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -121,43 +123,81 @@ def test_cli_route_forces_local_in_off_mode() -> None:
     assert '"reason": "cloud mode is off"' in result.stdout
 
 
-def test_cli_turn_runs_with_mocked_provider() -> None:
+def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> None:
     with (
         patch("app.cli._build_local_provider", return_value=FakeProvider()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
     ):
-        result = runner.invoke(
+        start_result = runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "demo-session",
+                "--player-name",
+                "Avery",
+            ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+        turn_result = runner.invoke(
             app,
             [
                 "turn",
                 "--message",
                 "What have you heard about the regent?",
-                "--world-id",
-                "demo_world",
-                "--scene-id",
-                "rose-gallery",
+                "--session-id",
+                "demo-session",
             ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+
+    assert start_result.exit_code == 0
+    assert json.loads(start_result.stdout)["id"] == "demo-session"
+    assert turn_result.exit_code == 0
+    assert "I have heard enough to know the regent fears open daylight." in turn_result.stdout
+
+
+def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
+    with (
+        patch("app.cli._build_local_provider", return_value=FakeProvider()),
+        patch("app.cli._build_file_loader", return_value=FakeLoader()),
+    ):
+        runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "demo-session",
+                "--player-name",
+                "Avery",
+            ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+        result = runner.invoke(
+            app,
+            ["resume", "--session-id", "demo-session"],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
 
     assert result.exit_code == 0
-    assert "I have heard enough to know the regent fears open daylight." in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["id"] == "demo-session"
+    assert payload["active_scene_id"] == "rose-gallery"
 
 
-def test_cli_turn_fails_clearly_for_missing_scene() -> None:
-    with (
-        patch("app.cli._build_local_provider", return_value=FakeProvider()),
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
-    ):
+def test_cli_turn_fails_clearly_for_missing_session(tmp_path: Path) -> None:
+    with patch("app.cli._build_local_provider", return_value=FakeProvider()):
         result = runner.invoke(
             app,
             [
                 "turn",
                 "--message",
                 "What have you heard about the regent?",
-                "--scene-id",
-                "missing-scene",
+                "--session-id",
+                "missing-session",
             ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
 
     assert result.exit_code == 1
-    assert "missing-scene" in result.stdout
+    assert "missing-session" in result.stdout

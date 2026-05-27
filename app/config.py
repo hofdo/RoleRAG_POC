@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "local"
+    database_path: str = "data/rolerag.db"
 
     local_llm_base_url: str = "http://localhost:8080/v1"
     local_llm_api_key: str = "local"
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     cloud_llm_temperature: float = 0.65
 
     max_local_retries: int = Field(default=1, ge=0)
+    recent_dialogue_turns: int = Field(default=8, ge=0)
 
 
 def get_settings() -> Settings:

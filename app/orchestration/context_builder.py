@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.domain import PersonaCard, SceneState, TurnInput
+from collections.abc import Sequence
+
+from app.domain import PersonaCard, SceneState, StoredTurn, TurnInput
 from app.llm.provider import LlmMessage
 
 
@@ -9,6 +11,7 @@ def build_actor_messages(
     persona: PersonaCard,
     scene: SceneState,
     turn_input: TurnInput,
+    recent_turns: Sequence[StoredTurn] = (),
 ) -> list[LlmMessage]:
     prompt_lines = [
         "You are roleplaying as the active character.",
@@ -40,7 +43,11 @@ def build_actor_messages(
 
     prompt_lines.append("Respond in character using only the provided visible context.")
 
-    return [
-        LlmMessage(role="system", content="\n".join(prompt_lines)),
-        LlmMessage(role="user", content=turn_input.message),
-    ]
+    messages = [LlmMessage(role="system", content="\n".join(prompt_lines))]
+
+    for stored_turn in recent_turns:
+        messages.append(LlmMessage(role="user", content=stored_turn.user_message))
+        messages.append(LlmMessage(role="assistant", content=stored_turn.assistant_message))
+
+    messages.append(LlmMessage(role="user", content=turn_input.message))
+    return messages

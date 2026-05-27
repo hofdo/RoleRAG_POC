@@ -5,6 +5,7 @@ from app.domain.models import (
     RetrievedChunk,
     SceneState,
     SessionState,
+    StoredTurn,
     TurnInput,
     TurnResult,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "RetrievedChunk",
     "SceneState",
     "SessionState",
+    "StoredTurn",
     "TurnInput",
     "TurnResult",
     "Visibility",
