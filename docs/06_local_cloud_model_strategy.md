@@ -237,7 +237,6 @@ LOCAL_LLM_TEMPERATURE=0.75
 
 # Cloud model
 CLOUD_MODE=ask
-CLOUD_LLM_ENABLED=false
 CLOUD_LLM_PROVIDER=cloud
 CLOUD_LLM_BASE_URL=https://api.openai.com/v1
 CLOUD_LLM_API_KEY=replace_me
@@ -282,10 +281,9 @@ For the MVP, default to:
 
 ```env
 CLOUD_MODE=ask
-CLOUD_LLM_ENABLED=false
 ```
 
-This prevents accidental cloud usage.
+This keeps cloud routing in confirmation mode and prevents accidental cloud usage.
 
 ---
 

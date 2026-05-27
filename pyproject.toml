@@ -29,7 +29,9 @@ dev = [
 rolerag = "app.cli:main"
 
 [tool.setuptools]
-packages = ["app", "app.llm"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

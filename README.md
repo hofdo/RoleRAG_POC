@@ -27,7 +27,7 @@ You can swap in Ollama or another compatible runtime by changing environment var
 ## Setup
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
@@ -42,3 +42,5 @@ pytest
 ruff check .
 mypy app
 ```
+
+All commands assume the virtualenv is activated.

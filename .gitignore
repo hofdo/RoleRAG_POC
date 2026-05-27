@@ -11,4 +11,12 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-data/
+data/*
+!data/worlds/
+!data/worlds/.gitkeep
+!data/personas/
+!data/personas/.gitkeep
+!data/sessions/
+!data/sessions/.gitkeep
+!data/documents/
+!data/documents/.gitkeep

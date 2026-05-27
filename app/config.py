@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     local_llm_temperature: float = 0.75
 
     cloud_mode: CloudMode = CloudMode.ASK
-    cloud_llm_enabled: bool = False
     cloud_llm_base_url: str = "https://api.openai.com/v1"
     cloud_llm_api_key: str = "replace_me"
     cloud_llm_model: str = "gpt-4.1-mini"
