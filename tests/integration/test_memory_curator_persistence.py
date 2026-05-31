@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from app.agents.memory_curator import MemoryCurator
-from app.domain import PersonaCard, SceneState, SessionState, TurnInput
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.domain import CriticResult, PersonaCard, SceneState, SessionState, TurnInput
+from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
@@ -62,6 +62,29 @@ class FakeLoader:
         )
 
 
+class FakeCritic:
+    async def evaluate(self, **_: object) -> CriticResult:
+        return CriticResult(accepted=True)
+
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        raise AssertionError("repair should not be used in this test")
+
+    def build_cloud_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        issues: list[str],
+    ) -> list[LlmMessage]:
+        raise AssertionError("repair should not be used in this test")
+
+
 @pytest.mark.asyncio
 async def test_turn_orchestrator_persists_memory_episodes_after_successful_turn(
     tmp_path: Path,
@@ -104,6 +127,7 @@ async def test_turn_orchestrator_persists_memory_episodes_after_successful_turn(
     orchestrator = TurnOrchestrator(
         loader=FakeLoader(),
         provider=provider,
+        critic_agent=FakeCritic(),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(turn_repository=turn_repository, recent_turns=8),

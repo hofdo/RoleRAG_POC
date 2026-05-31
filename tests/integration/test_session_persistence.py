@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from app.domain import PersonaCard, SceneState, SessionState, TurnInput
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.domain import CriticResult, PersonaCard, SceneState, SessionState, TurnInput
+from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
@@ -56,6 +56,29 @@ class FakeLoader:
         )
 
 
+class FakeCritic:
+    async def evaluate(self, **_: object) -> CriticResult:
+        return CriticResult(accepted=True)
+
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        raise AssertionError("repair should not be used in this test")
+
+    def build_cloud_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        issues: list[str],
+    ) -> list[LlmMessage]:
+        raise AssertionError("repair should not be used in this test")
+
+
 @pytest.mark.asyncio
 async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
     tmp_path: Path,
@@ -78,6 +101,7 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
     first = TurnOrchestrator(
         loader=FakeLoader(),
         provider=first_provider,
+        critic_agent=FakeCritic(),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(
@@ -99,6 +123,7 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
     second = TurnOrchestrator(
         loader=FakeLoader(),
         provider=second_provider,
+        critic_agent=FakeCritic(),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(

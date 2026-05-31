@@ -18,12 +18,21 @@ class OpenAICompatibleProvider(LlmProvider):
             list[ChatCompletionMessageParam],
             [message.model_dump() for message in request.messages],
         )
-        response = await self.client.chat.completions.create(
-            model=request.model,
-            messages=messages,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+        if request.response_format == "json":
+            response = await self.client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                response_format={"type": "json_object"},
+            )
+        else:
+            response = await self.client.chat.completions.create(
+                model=request.model,
+                messages=messages,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
 
         choice = response.choices[0]
         content = choice.message.content or ""

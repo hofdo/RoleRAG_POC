@@ -5,8 +5,16 @@ from typing import Any
 
 import pytest
 
-from app.domain import MemoryCandidate, PersonaCard, SceneState, SessionState, TurnInput, Visibility
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.domain import (
+    CriticResult,
+    MemoryCandidate,
+    PersonaCard,
+    SceneState,
+    SessionState,
+    TurnInput,
+    Visibility,
+)
+from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
@@ -46,6 +54,32 @@ class StubMemoryCurator:
         if self.error is not None:
             raise self.error
         return self.result
+
+
+class StubCritic:
+    def __init__(self, result: CriticResult | None = None) -> None:
+        self.result = result or CriticResult(accepted=True)
+
+    async def evaluate(self, **_: object) -> CriticResult:
+        return self.result
+
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        raise AssertionError("local repair should not be used in this test")
+
+    def build_cloud_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        issues: list[str],
+    ) -> list[LlmMessage]:
+        raise AssertionError("cloud repair should not be used in this test")
 
 
 class StubActorContextRetriever:
@@ -99,6 +133,7 @@ def _build_orchestrator(
     tmp_path: Path,
     provider: FakeProvider,
     *,
+    critic: StubCritic | None = None,
     memory_curator: StubMemoryCurator | None = None,
     actor_context_retriever: StubActorContextRetriever | None = None,
 ) -> TurnOrchestrator:
@@ -119,6 +154,7 @@ def _build_orchestrator(
     return TurnOrchestrator(
         loader=FakeLoader(),
         provider=provider,
+        critic_agent=critic or StubCritic(),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(

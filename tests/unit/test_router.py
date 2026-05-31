@@ -100,3 +100,23 @@ def test_router_keeps_memory_extraction_local() -> None:
 
     assert route.provider == ModelProviderName.LOCAL
     assert route.reason == "memory extraction stays local"
+
+
+def test_router_keeps_critic_local_with_zero_temperature() -> None:
+    route = choose_route(
+        task=ModelTask.CRITIC,
+        cloud_mode=CloudMode.AUTO,
+        local_model="local-model",
+        cloud_model="cloud-model",
+        local_max_tokens=700,
+        cloud_max_tokens=1000,
+        local_temperature=0.75,
+        cloud_temperature=0.65,
+        failed_local_attempts=2,
+        retrieval_confidence=0.1,
+        scene_complexity=5,
+    )
+
+    assert route.provider == ModelProviderName.LOCAL
+    assert route.temperature == 0.0
+    assert route.reason == "critic stays local"

@@ -48,6 +48,15 @@ def choose_route(
     retrieval_confidence: float | None,
     scene_complexity: int,
 ) -> ModelRoute:
+    if task == ModelTask.CRITIC:
+        return ModelRoute(
+            provider=ModelProviderName.LOCAL,
+            model=local_model,
+            max_tokens=local_max_tokens,
+            temperature=0.0,
+            reason="critic stays local",
+        )
+
     if task == ModelTask.MEMORY_EXTRACTION:
         return ModelRoute(
             provider=ModelProviderName.LOCAL,

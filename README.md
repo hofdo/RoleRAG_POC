@@ -18,6 +18,7 @@ This repository currently includes:
 - vector store abstraction with Qdrant runtime support
 - CLI document ingestion for local lore documents
 - retrieval-aware actor prompts with bounded player-visible context
+- critic-guided response validation with one bounded local repair attempt
 
 This repository does not yet add critic workflows or expose API endpoints.
 

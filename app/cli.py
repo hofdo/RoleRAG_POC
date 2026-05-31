@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from app.agents import MemoryCurator
+from app.agents import CriticAgent, MemoryCurator
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.openai_compatible import OpenAICompatibleProvider
@@ -57,6 +57,20 @@ def _build_local_provider(settings: Settings) -> LlmProvider:
     )
 
 
+def _build_cloud_provider(settings: Settings) -> LlmProvider | None:
+    if settings.cloud_mode == "off" or settings.cloud_llm_api_key == "replace_me":
+        return None
+    return OpenAICompatibleProvider(
+        provider_name="cloud",
+        base_url=settings.cloud_llm_base_url,
+        api_key=settings.cloud_llm_api_key,
+    )
+
+
+def _build_critic_agent() -> CriticAgent:
+    return CriticAgent()
+
+
 def _build_file_loader() -> FileDataLoader:
     return FileDataLoader()
 
@@ -92,6 +106,8 @@ def _build_orchestrator(
     return TurnOrchestrator(
         loader=_build_file_loader(),
         provider=provider,
+        cloud_provider=_build_cloud_provider(settings),
+        critic_agent=_build_critic_agent(),
         session_repository=SQLiteSessionRepository(connection),
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(
@@ -265,6 +281,8 @@ def turn(
     except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
+    for warning in result.warnings:
+        typer.echo(f"Warning: {warning}", err=True)
     typer.echo(result.text)
 
 

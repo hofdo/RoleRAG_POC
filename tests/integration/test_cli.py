@@ -7,7 +7,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from app.cli import app
-from app.domain import PersonaCard, RetrievedChunk, SceneState, Visibility
+from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.rag.models import RagChunk, RagCollection
 
@@ -104,6 +104,17 @@ class FakeActorContextRetriever:
         return self.chunks
 
 
+class FakeCritic:
+    async def evaluate(self, **_: object) -> CriticResult:
+        return CriticResult(accepted=True)
+
+    def build_local_repair_messages(self, **_: object) -> list[object]:
+        raise AssertionError("repair should not be used in this test")
+
+    def build_cloud_repair_messages(self, **_: object) -> list[object]:
+        raise AssertionError("repair should not be used in this test")
+
+
 def test_cli_help_exits_successfully() -> None:
     result = runner.invoke(app, ["--help"])
 
@@ -170,6 +181,7 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
     context_retriever = FakeActorContextRetriever()
     with (
         patch("app.cli._build_local_provider", return_value=FakeProvider()),
+        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
         patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
     ):
@@ -206,6 +218,7 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
     with (
         patch("app.cli._build_local_provider", return_value=FakeProvider()),
+        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
     ):
         runner.invoke(
@@ -232,7 +245,10 @@ def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
 
 
 def test_cli_turn_fails_clearly_for_missing_session(tmp_path: Path) -> None:
-    with patch("app.cli._build_local_provider", return_value=FakeProvider()):
+    with (
+        patch("app.cli._build_local_provider", return_value=FakeProvider()),
+        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
+    ):
         result = runner.invoke(
             app,
             [
@@ -307,6 +323,7 @@ def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> 
     provider = FakeProvider()
     with (
         patch("app.cli._build_local_provider", return_value=provider),
+        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
         patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
     ):
