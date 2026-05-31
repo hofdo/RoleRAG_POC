@@ -5,15 +5,17 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-try:
-    from qdrant_client import QdrantClient  # type: ignore[import-not-found]
-    from qdrant_client.http import models as qdrant_models  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - exercised only when optional dependency is absent
-    QdrantClient = None
-    qdrant_models = None
-
 from app.domain import RetrievedChunk
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
+
+QdrantClientType: Any | None
+qdrant_models: Any | None
+try:
+    from qdrant_client import QdrantClient as QdrantClientType
+    from qdrant_client.http import models as qdrant_models
+except ImportError:  # pragma: no cover - exercised only when optional dependency is absent
+    QdrantClientType = None
+    qdrant_models = None
 
 
 class VectorStore(Protocol):
@@ -111,19 +113,20 @@ class QdrantVectorStore:
 
     @property
     def client(self) -> Any:
-        if QdrantClient is None or qdrant_models is None:
+        if QdrantClientType is None or qdrant_models is None:
             raise ImportError("qdrant-client is required for QdrantVectorStore")
         if self._client is None:
-            self._client = QdrantClient(url=self._url)
+            self._client = QdrantClientType(url=self._url)
         return self._client
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+        models = _require_qdrant_models()
         if not self.client.collection_exists(collection_name=collection.value):
             self.client.create_collection(
                 collection_name=collection.value,
-                vectors_config=qdrant_models.VectorParams(
+                vectors_config=models.VectorParams(
                     size=vector_size,
-                    distance=qdrant_models.Distance.COSINE,
+                    distance=models.Distance.COSINE,
                 ),
             )
 
@@ -134,17 +137,18 @@ class QdrantVectorStore:
         chunks: Sequence[RagChunk],
         vectors: Sequence[Sequence[float]],
     ) -> None:
+        models = _require_qdrant_models()
         if len(chunks) != len(vectors):
             raise ValueError("chunks and vectors must have the same length")
 
         self.client.delete(
             collection_name=collection.value,
-            points_selector=qdrant_models.FilterSelector(
-                filter=qdrant_models.Filter(
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
                     must=[
-                        qdrant_models.FieldCondition(
+                        models.FieldCondition(
                             key="source",
-                            match=qdrant_models.MatchValue(value=source),
+                            match=models.MatchValue(value=source),
                         )
                     ]
                 )
@@ -155,7 +159,7 @@ class QdrantVectorStore:
             return
 
         points = [
-            qdrant_models.PointStruct(
+            models.PointStruct(
                 id=chunk.id,
                 vector=list(vector),
                 payload=_chunk_to_payload(chunk),
@@ -187,51 +191,57 @@ class QdrantVectorStore:
 
 
 def _build_qdrant_filter(filters: RetrievalFilter) -> Any:
-    assert qdrant_models is not None
+    models = _require_qdrant_models()
     must: list[Any] = [
-        qdrant_models.FieldCondition(
+        models.FieldCondition(
             key="visibility",
-            match=qdrant_models.MatchAny(
+            match=models.MatchAny(
                 any=[visibility.value for visibility in filters.allowed_visibilities]
             ),
         )
     ]
     if filters.world_id is not None:
         must.append(
-            qdrant_models.FieldCondition(
+            models.FieldCondition(
                 key="world_id",
-                match=qdrant_models.MatchValue(value=filters.world_id),
+                match=models.MatchValue(value=filters.world_id),
             )
         )
     if filters.scene_id is not None:
         must.append(
-            qdrant_models.FieldCondition(
+            models.FieldCondition(
                 key="scene_id",
-                match=qdrant_models.MatchValue(value=filters.scene_id),
+                match=models.MatchValue(value=filters.scene_id),
             )
         )
     if filters.persona_id is not None:
         must.append(
-            qdrant_models.FieldCondition(
+            models.FieldCondition(
                 key="persona_id",
-                match=qdrant_models.MatchValue(value=filters.persona_id),
+                match=models.MatchValue(value=filters.persona_id),
             )
         )
     if filters.session_id is not None:
         must.append(
-            qdrant_models.FieldCondition(
+            models.FieldCondition(
                 key="session_id",
-                match=qdrant_models.MatchValue(value=filters.session_id),
+                match=models.MatchValue(value=filters.session_id),
             )
         )
     if filters.tags:
         must.append(
-            qdrant_models.FieldCondition(
+            models.FieldCondition(
                 key="tags",
-                match=qdrant_models.MatchAny(any=filters.tags),
+                match=models.MatchAny(any=filters.tags),
             )
         )
-    return qdrant_models.Filter(must=must)
+    return models.Filter(must=must)
+
+
+def _require_qdrant_models() -> Any:
+    if qdrant_models is None:
+        raise ImportError("qdrant-client is required for QdrantVectorStore")
+    return qdrant_models
 
 
 def _chunk_matches_filters(chunk: RagChunk, filters: RetrievalFilter) -> bool:

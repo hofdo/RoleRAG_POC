@@ -98,6 +98,7 @@ class TurnInput(BaseModel):
     session_id: str
     message: str
     active_persona_id: str | None = None
+    user_requested_cloud: bool = False
 
 
 class StoredTurn(BaseModel):

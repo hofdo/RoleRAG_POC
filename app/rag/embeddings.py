@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
+FastEmbedTextEmbedding: Any | None
 try:
-    from fastembed import TextEmbedding  # type: ignore[import-not-found]
+    from fastembed import TextEmbedding as FastEmbedTextEmbedding
 except ImportError:  # pragma: no cover - exercised only when optional dependency is absent
-    TextEmbedding = None
+    FastEmbedTextEmbedding = None
 
 
 class EmbeddingProvider(Protocol):
@@ -21,7 +22,7 @@ class EmbeddingProvider(Protocol):
 class FastEmbedEmbeddingProvider:
     def __init__(self, *, model_name: str) -> None:
         self._model_name = model_name
-        self._model: TextEmbedding | None = None
+        self._model: Any | None = None
         self._dimension: int | None = None
 
     @property
@@ -42,9 +43,9 @@ class FastEmbedEmbeddingProvider:
             self._dimension = len(vectors[0])
         return vectors
 
-    def _get_model(self) -> TextEmbedding:
-        if TextEmbedding is None:
+    def _get_model(self) -> Any:
+        if FastEmbedTextEmbedding is None:
             raise ImportError("fastembed is required for FastEmbedEmbeddingProvider")
         if self._model is None:
-            self._model = TextEmbedding(model_name=self._model_name)
+            self._model = FastEmbedTextEmbedding(model_name=self._model_name)
         return self._model

@@ -19,8 +19,9 @@ This repository currently includes:
 - CLI document ingestion for local lore documents
 - retrieval-aware actor prompts with bounded player-visible context
 - critic-guided response validation with one bounded local repair attempt
+- explicit local/cloud fallback policy with route reasons and ask-mode warnings
 
-This repository does not yet add critic workflows or expose API endpoints.
+This repository does not expose API endpoints yet.
 
 ## Local model runtime
 
@@ -54,7 +55,9 @@ python -m app.cli config
 python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --active-persona-id archivist --player-name Avery
 python -m app.cli resume --session-id <session-id>
 python -m app.cli turn --session-id <session-id> --message "What have you heard about the regent?"
+python -m app.cli turn --session-id <session-id> --message "Give me the highest quality answer." --request-cloud
 python -m app.cli route --task actor_response
+python -m app.cli route --task actor_response --request-cloud
 python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world --tag palace
 pytest
 ruff check .
@@ -66,3 +69,11 @@ All commands assume the virtualenv is activated.
 Actor turns retrieve from session memory, persona memory, and canon lore collections. Retrieval
 fails open: if Qdrant or local embeddings are unavailable, the turn continues without retrieved
 context.
+
+## Cloud Modes
+
+- `CLOUD_MODE=off`: cloud is never called. If cloud would have helped, the turn continues locally when possible and emits a warning.
+- `CLOUD_MODE=ask`: cloud routes are never executed silently. The CLI prints a warning and keeps the turn local when possible; cloud repair is skipped with a controlled failure if confirmation would be required after local attempts are exhausted.
+- `CLOUD_MODE=auto`: cloud may be used for explicit `--request-cloud`, failed local repair, low retrieval confidence, or local-provider fallback.
+
+Critic evaluation and memory extraction stay local. Cloud actor and repair prompts use the same curated player-visible context packet rather than full private state.

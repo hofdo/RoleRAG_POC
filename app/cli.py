@@ -58,7 +58,7 @@ def _build_local_provider(settings: Settings) -> LlmProvider:
 
 
 def _build_cloud_provider(settings: Settings) -> LlmProvider | None:
-    if settings.cloud_mode == "off" or settings.cloud_llm_api_key == "replace_me":
+    if settings.cloud_llm_api_key == "replace_me":
         return None
     return OpenAICompatibleProvider(
         provider_name="cloud",
@@ -195,6 +195,7 @@ def route(
     failed_local_attempts: Annotated[int, typer.Option(min=0)] = 0,
     scene_complexity: Annotated[int, typer.Option(min=1)] = 1,
     retrieval_confidence: Annotated[float | None, typer.Option(min=0.0, max=1.0)] = None,
+    request_cloud: Annotated[bool, typer.Option(help="Simulate an explicit cloud request")] = False,
 ) -> None:
     settings = get_settings()
     chosen_route = choose_route(
@@ -209,6 +210,7 @@ def route(
         failed_local_attempts=failed_local_attempts,
         retrieval_confidence=retrieval_confidence,
         scene_complexity=scene_complexity,
+        user_requested_cloud=request_cloud,
     )
     typer.echo(json.dumps(chosen_route.model_dump(), indent=2, sort_keys=True))
 
@@ -259,6 +261,10 @@ def ingest(
 def turn(
     message: Annotated[str, typer.Option(help="Player message for the demo turn")],
     session_id: Annotated[str, typer.Option(help="Session identifier")],
+    request_cloud: Annotated[
+        bool,
+        typer.Option(help="Request cloud quality for this turn"),
+    ] = False,
 ) -> None:
     settings = get_settings()
     provider = _build_local_provider(settings)
@@ -270,6 +276,7 @@ def turn(
     turn_input = TurnInput(
         session_id=session_id,
         message=message,
+        user_requested_cloud=request_cloud,
     )
     try:
         result = asyncio.run(

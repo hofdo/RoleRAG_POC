@@ -41,7 +41,7 @@ def test_router_never_chooses_cloud_when_cloud_mode_is_off() -> None:
     )
 
     assert route.provider == ModelProviderName.LOCAL
-    assert route.reason == "cloud mode is off"
+    assert route.reason == "cloud mode is off; cloud would have been used: local repair failed"
     assert route.requires_user_confirmation is False
 
 

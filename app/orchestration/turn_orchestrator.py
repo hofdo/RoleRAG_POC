@@ -14,8 +14,9 @@ from app.domain import (
     TurnInput,
     TurnResult,
 )
+from app.domain.visibility import Visibility
 from app.llm.provider import LlmMessage, LlmProvider
-from app.llm.router import CloudMode, ModelRoute, ModelTask, choose_route
+from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
@@ -194,6 +195,7 @@ class TurnOrchestrator:
         recent_turns = self.recent_dialogue_store.load_recent_dialogue(session.id)
         warnings: list[str] = []
         retrieved_chunks: list[RetrievedChunk] = []
+        retrieval_confidence: float | None = None
         if self.actor_context_retriever is not None:
             query = build_retrieval_query(
                 user_message=turn_input.message,
@@ -209,8 +211,10 @@ class TurnOrchestrator:
                     persona_id=persona.id,
                     top_k=self.context_budget.retrieved_chunks,
                 )
+                retrieval_confidence = self._compute_retrieval_confidence(retrieved_chunks)
             except Exception as exc:
                 warnings.append(f"retrieval skipped: {exc}")
+        scene_complexity = self._compute_scene_complexity(scene)
         route = choose_route(
             task=ModelTask.ACTOR_RESPONSE,
             cloud_mode=self.cloud_mode,
@@ -221,8 +225,9 @@ class TurnOrchestrator:
             local_temperature=self.local_temperature,
             cloud_temperature=self.cloud_temperature,
             failed_local_attempts=0,
-            retrieval_confidence=None,
-            scene_complexity=1,
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+            user_requested_cloud=turn_input.user_requested_cloud,
         )
         messages = build_actor_messages(
             persona=persona,
@@ -234,8 +239,26 @@ class TurnOrchestrator:
         )
         final_text: str
         final_route: ModelRoute
+        actor_route = route
+        if route.provider == ModelProviderName.CLOUD and route.requires_user_confirmation:
+            warnings.append(
+                f"cloud actor skipped: confirmation required for {route.model} ({route.reason})"
+            )
+            actor_route = self._build_local_route(
+                reason=f"confirmation required before cloud route: {route.reason}"
+            )
+        elif route.provider == ModelProviderName.LOCAL and route.reason != "default local route":
+            warnings.append(self._warning_for_skipped_cloud(route.reason))
 
-        text = await self._generate_actor_response(route=route, messages=messages)
+        text, actor_route = await self._generate_with_fallback(
+            route=actor_route,
+            messages=messages,
+            task=ModelTask.ACTOR_RESPONSE,
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+            warnings=warnings,
+            allow_confirmation_fallback=False,
+        )
         critic_result = await self._evaluate_draft(
             persona=persona,
             scene=scene,
@@ -246,10 +269,10 @@ class TurnOrchestrator:
         )
         if critic_result is None:
             final_text = text
-            final_route = route
+            final_route = actor_route
         elif critic_result.accepted:
             final_text = text
-            final_route = route
+            final_route = actor_route
         else:
             local_repair_route = choose_route(
                 task=ModelTask.REPAIR,
@@ -261,10 +284,10 @@ class TurnOrchestrator:
                 local_temperature=self.local_temperature,
                 cloud_temperature=self.cloud_temperature,
                 failed_local_attempts=1,
-                retrieval_confidence=None,
-                scene_complexity=1,
+                retrieval_confidence=retrieval_confidence,
+                scene_complexity=scene_complexity,
             )
-            repaired_text = await self._generate_actor_response(
+            repaired_text, repaired_route = await self._generate_with_fallback(
                 route=local_repair_route,
                 messages=self.critic_agent.build_local_repair_messages(
                     actor_messages=messages,
@@ -272,6 +295,11 @@ class TurnOrchestrator:
                     issues=critic_result.issues,
                     repair_instruction=critic_result.repair_instruction,
                 ),
+                task=ModelTask.REPAIR,
+                retrieval_confidence=retrieval_confidence,
+                scene_complexity=scene_complexity,
+                warnings=warnings,
+                allow_confirmation_fallback=False,
             )
             repaired_critic_result = await self._evaluate_draft(
                 persona=persona,
@@ -283,10 +311,10 @@ class TurnOrchestrator:
             )
             if repaired_critic_result is None:
                 final_text = repaired_text
-                final_route = local_repair_route
+                final_route = repaired_route
             elif repaired_critic_result.accepted:
                 final_text = repaired_text
-                final_route = local_repair_route
+                final_route = repaired_route
             else:
                 cloud_repair_route = choose_route(
                     task=ModelTask.REPAIR,
@@ -298,61 +326,59 @@ class TurnOrchestrator:
                     local_temperature=self.local_temperature,
                     cloud_temperature=self.cloud_temperature,
                     failed_local_attempts=2,
-                    retrieval_confidence=None,
-                    scene_complexity=1,
+                    retrieval_confidence=retrieval_confidence,
+                    scene_complexity=scene_complexity,
                 )
-                if cloud_repair_route.provider != route.provider:
-                    if cloud_repair_route.requires_user_confirmation:
-                        warnings.append(
-                            "cloud repair skipped: "
-                            f"confirmation required for {cloud_repair_route.model}"
-                        )
-                        return TurnResult(
-                            text=CONTROLLED_FAILURE_TEXT,
-                            route=cloud_repair_route,
-                            memory_written=False,
-                            warnings=warnings,
-                        )
-                    if self.cloud_provider is None:
-                        warnings.append("cloud repair skipped: cloud provider unavailable")
-                        return TurnResult(
-                            text=CONTROLLED_FAILURE_TEXT,
-                            route=cloud_repair_route,
-                            memory_written=False,
-                            warnings=warnings,
-                        )
-                    cloud_repaired_text = await self._generate_actor_response(
+                if cloud_repair_route.provider == ModelProviderName.LOCAL:
+                    warnings.append(self._warning_for_skipped_cloud(cloud_repair_route.reason))
+                    return TurnResult(
+                        text=CONTROLLED_FAILURE_TEXT,
                         route=cloud_repair_route,
-                        messages=self.critic_agent.build_cloud_repair_messages(
-                            actor_messages=messages,
-                            issues=repaired_critic_result.issues,
-                        ),
-                    )
-                    cloud_critic_result = await self._evaluate_draft(
-                        persona=persona,
-                        scene=scene,
-                        user_message=turn_input.message,
-                        draft=cloud_repaired_text,
-                        retrieved_chunks=retrieved_chunks,
+                        memory_written=False,
                         warnings=warnings,
                     )
-                    if cloud_critic_result is None:
-                        final_text = cloud_repaired_text
-                        final_route = cloud_repair_route
-                    elif cloud_critic_result.accepted:
-                        final_text = cloud_repaired_text
-                        final_route = cloud_repair_route
-                    else:
-                        return TurnResult(
-                            text=CONTROLLED_FAILURE_TEXT,
-                            route=cloud_repair_route,
-                            memory_written=False,
-                            warnings=warnings,
-                        )
+                if cloud_repair_route.requires_user_confirmation:
+                    warnings.append(
+                        "cloud repair skipped: "
+                        f"confirmation required for {cloud_repair_route.model} "
+                        f"({cloud_repair_route.reason})"
+                    )
+                    return TurnResult(
+                        text=CONTROLLED_FAILURE_TEXT,
+                        route=cloud_repair_route,
+                        memory_written=False,
+                        warnings=warnings,
+                    )
+                cloud_repaired_text, cloud_final_route = await self._generate_with_fallback(
+                    route=cloud_repair_route,
+                    messages=self.critic_agent.build_cloud_repair_messages(
+                        actor_messages=messages,
+                        issues=repaired_critic_result.issues,
+                    ),
+                    task=ModelTask.REPAIR,
+                    retrieval_confidence=retrieval_confidence,
+                    scene_complexity=scene_complexity,
+                    warnings=warnings,
+                    allow_confirmation_fallback=False,
+                )
+                cloud_critic_result = await self._evaluate_draft(
+                    persona=persona,
+                    scene=scene,
+                    user_message=turn_input.message,
+                    draft=cloud_repaired_text,
+                    retrieved_chunks=retrieved_chunks,
+                    warnings=warnings,
+                )
+                if cloud_critic_result is None:
+                    final_text = cloud_repaired_text
+                    final_route = cloud_final_route
+                elif cloud_critic_result.accepted:
+                    final_text = cloud_repaired_text
+                    final_route = cloud_final_route
                 else:
                     return TurnResult(
                         text=CONTROLLED_FAILURE_TEXT,
-                        route=local_repair_route,
+                        route=cloud_final_route,
                         memory_written=False,
                         warnings=warnings,
                     )
@@ -382,8 +408,8 @@ class TurnOrchestrator:
                 local_temperature=self.local_temperature,
                 cloud_temperature=self.cloud_temperature,
                 failed_local_attempts=0,
-                retrieval_confidence=None,
-                scene_complexity=1,
+                retrieval_confidence=retrieval_confidence,
+                scene_complexity=scene_complexity,
             )
             try:
                 memory_result = await self.memory_curator.curate(
@@ -421,6 +447,87 @@ class TurnOrchestrator:
         if provider is None:
             raise RuntimeError(f"Missing provider for route: {route.provider.value}")
         return await self.actor_agent.generate(provider=provider, route=route, messages=messages)
+
+    async def _generate_with_fallback(
+        self,
+        *,
+        route: ModelRoute,
+        messages: list[LlmMessage],
+        task: ModelTask,
+        retrieval_confidence: float | None,
+        scene_complexity: int,
+        warnings: list[str],
+        allow_confirmation_fallback: bool,
+    ) -> tuple[str, ModelRoute]:
+        if route.requires_user_confirmation and not allow_confirmation_fallback:
+            raise RuntimeError("confirmation-required route reached provider dispatch")
+        try:
+            return await self._generate_actor_response(route=route, messages=messages), route
+        except Exception as exc:
+            if route.provider != ModelProviderName.LOCAL:
+                raise
+            warnings.append(f"local actor failed: {exc}")
+            fallback_route = choose_route(
+                task=task,
+                cloud_mode=self.cloud_mode,
+                local_model=self.local_model,
+                cloud_model=self.cloud_model,
+                local_max_tokens=self.local_max_tokens,
+                cloud_max_tokens=self.cloud_max_tokens,
+                local_temperature=self.local_temperature,
+                cloud_temperature=self.cloud_temperature,
+                failed_local_attempts=0,
+                retrieval_confidence=retrieval_confidence,
+                scene_complexity=scene_complexity,
+                local_provider_failed=True,
+            )
+            if fallback_route.provider == ModelProviderName.LOCAL:
+                raise
+            if fallback_route.requires_user_confirmation:
+                warnings.append(
+                    f"cloud actor skipped: confirmation required for {fallback_route.model} "
+                    f"({fallback_route.reason})"
+                )
+                raise
+            return (
+                await self._generate_actor_response(route=fallback_route, messages=messages),
+                fallback_route,
+            )
+
+    def _build_local_route(self, *, reason: str) -> ModelRoute:
+        return ModelRoute(
+            provider=ModelProviderName.LOCAL,
+            model=self.local_model,
+            max_tokens=self.local_max_tokens,
+            temperature=self.local_temperature,
+            reason=reason,
+        )
+
+    def _compute_retrieval_confidence(self, chunks: list[RetrievedChunk]) -> float:
+        player_visible_scores = [
+            chunk.score for chunk in chunks if chunk.visibility == Visibility.PLAYER
+        ]
+        if not player_visible_scores:
+            return 0.0
+        return max(player_visible_scores)
+
+    def _compute_scene_complexity(self, scene: SceneState) -> int:
+        complexity = 1
+        if scene.open_conflicts:
+            complexity += 1
+        if scene.active_quests:
+            complexity += 1
+        if len(scene.active_personas) > 1:
+            complexity += min(2, len(scene.active_personas) - 1)
+        return min(complexity, 5)
+
+    def _warning_for_skipped_cloud(self, route_reason: str) -> str:
+        if route_reason.startswith("cloud mode is off; cloud would have been used: "):
+            return (
+                "cloud actor skipped: cloud mode is off ("
+                f"{route_reason.removeprefix('cloud mode is off; cloud would have been used: ')})"
+            )
+        return f"cloud actor skipped: {route_reason}"
 
     async def _evaluate_draft(
         self,

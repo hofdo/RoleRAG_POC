@@ -83,6 +83,45 @@ def test_turn_repository_appends_turn_and_loads_recent_turns_in_order(tmp_path: 
     assert turns[1].route.reason == "default local route"
 
 
+def test_turn_repository_round_trips_route_confirmation_metadata(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    route = ModelRoute(
+        provider=ModelProviderName.CLOUD,
+        model="cloud-model",
+        max_tokens=1000,
+        temperature=0.65,
+        reason="user requested cloud",
+        requires_user_confirmation=True,
+    )
+    turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="Please use the better model.",
+        assistant_message="I will answer carefully.",
+        route=route,
+    )
+
+    turns = turn_repository.list_recent_turns("session-1", limit=1)
+
+    assert turns[0].route.provider == ModelProviderName.CLOUD
+    assert turns[0].route.reason == "user requested cloud"
+    assert turns[0].route.requires_user_confirmation is True
+
+
 def test_session_repository_updates_activity_timestamp(tmp_path: Path) -> None:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
