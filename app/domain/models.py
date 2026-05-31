@@ -83,11 +83,11 @@ class MemoryCuratorResult(BaseModel):
 class RetrievedChunk(BaseModel):
     id: str
     source: str
+    source_type: str
     text: str
     score: float
     visibility: Visibility
     tags: list[str] = Field(default_factory=list)
-    source_type: str | None = None
     world_id: str | None = None
     scene_id: str | None = None
     persona_id: str | None = None

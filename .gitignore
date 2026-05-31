@@ -22,3 +22,4 @@ data/*
 !data/sessions/.gitkeep
 !data/documents/
 !data/documents/.gitkeep
+!data/documents/*.md

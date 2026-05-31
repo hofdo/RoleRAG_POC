@@ -7,8 +7,9 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from app.cli import app
-from app.domain import PersonaCard, SceneState
+from app.domain import PersonaCard, SceneState, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.rag.models import RagChunk, RagCollection
 
 runner = CliRunner()
 
@@ -59,6 +60,34 @@ class FakeLoader:
             location="Winter Palace",
             player_visible_summary="Courtiers drift between mirrors and roses.",
         )
+
+
+class FakeEmbeddingProvider:
+    dimension = 2
+
+    def embed_text(self, text: str) -> list[float]:
+        return [1.0, float(len(text))]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, float(len(text))] for text in texts]
+
+
+class RecordingVectorStore:
+    def __init__(self) -> None:
+        self.ensure_calls: list[tuple[RagCollection, int]] = []
+        self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
+
+    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+        self.ensure_calls.append((collection, vector_size))
+
+    def replace_source(
+        self,
+        collection: RagCollection,
+        source: str,
+        chunks: list[RagChunk],
+        vectors: list[list[float]],
+    ) -> None:
+        self.replace_calls.append((collection, source, chunks, vectors))
 
 
 def test_cli_help_exits_successfully() -> None:
@@ -201,3 +230,45 @@ def test_cli_turn_fails_clearly_for_missing_session(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "missing-session" in result.stdout
+
+
+def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers drift between mirrors and roses.",
+        encoding="utf-8",
+    )
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "ingest",
+                str(document),
+                "--visibility",
+                Visibility.PLAYER.value,
+                "--source-type",
+                "lore",
+                "--world-id",
+                "demo_world",
+                "--tag",
+                "palace",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert '"collection": "canon_lore"' in result.stdout
+    assert '"chunk_count": 1' in result.stdout
+    assert vector_store.ensure_calls == [(RagCollection.CANON_LORE, 2)]
+    assert len(vector_store.replace_calls) == 1
+    _, source, chunks, vectors = vector_store.replace_calls[0]
+    assert source == str(document)
+    assert len(chunks) == 1
+    assert len(vectors) == 1
+    assert chunks[0].visibility == Visibility.PLAYER
+    assert chunks[0].tags == ["palace"]
+    assert chunks[0].world_id == "demo_world"

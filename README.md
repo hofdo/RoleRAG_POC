@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-Minimal CLI-first RoleRAG proof of concept with SQLite-backed session persistence.
+Minimal CLI-first RoleRAG proof of concept with SQLite-backed session persistence and basic local RAG ingestion infrastructure.
 
 ## Scope
 
@@ -13,8 +13,12 @@ This repository currently includes:
 - structured domain models and JSON demo data loading
 - a small Typer CLI for local roleplay turns
 - SQLite persistence for sessions and turns
+- deterministic Markdown/text chunking
+- local embedding abstraction
+- vector store abstraction with Qdrant runtime support
+- CLI document ingestion for local lore documents
 
-This repository does not yet include RAG, embeddings, vector storage, memory curation, critic workflows, or business endpoints.
+This repository does not yet inject retrieved chunks into the actor prompt, add critic workflows, or expose API endpoints.
 
 ## Local model runtime
 
@@ -34,6 +38,12 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
+## Qdrant
+
+```bash
+docker compose up -d qdrant
+```
+
 ## Commands
 
 ```bash
@@ -43,6 +53,7 @@ python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --
 python -m app.cli resume --session-id <session-id>
 python -m app.cli turn --session-id <session-id> --message "What have you heard about the regent?"
 python -m app.cli route --task actor_response
+python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world --tag palace
 pytest
 ruff check .
 mypy app

@@ -203,6 +203,7 @@ def test_retrieved_chunk_rejects_invalid_visibility(visibility: str) -> None:
         RetrievedChunk(
             id="chunk-1",
             source="memory",
+            source_type="lore",
             text="The old treaty was burned.",
             score=0.82,
             visibility=visibility,  # type: ignore[arg-type]
@@ -213,6 +214,7 @@ def test_retrieved_chunk_accepts_optional_metadata_when_absent() -> None:
     chunk = RetrievedChunk(
         id="chunk-1",
         source="memory",
+        source_type="lore",
         text="The old treaty was burned.",
         score=0.82,
         visibility=Visibility.GM,
@@ -221,11 +223,11 @@ def test_retrieved_chunk_accepts_optional_metadata_when_absent() -> None:
     assert chunk.model_dump() == {
         "id": "chunk-1",
         "source": "memory",
+        "source_type": "lore",
         "text": "The old treaty was burned.",
         "score": 0.82,
         "visibility": Visibility.GM,
         "tags": [],
-        "source_type": None,
         "world_id": None,
         "scene_id": None,
         "persona_id": None,
@@ -237,11 +239,11 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
     chunk = RetrievedChunk(
         id="chunk-2",
         source="vector-store",
+        source_type="memory_episode",
         text="Captain Soren never trusted the regent.",
         score=0.97,
         visibility=Visibility.CHARACTER_PRIVATE,
         tags=["trust", "regent"],
-        source_type="memory_episode",
         world_id="world-1",
         scene_id="scene-4",
         persona_id="captain-soren",
@@ -251,11 +253,11 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
     assert chunk.model_dump() == {
         "id": "chunk-2",
         "source": "vector-store",
+        "source_type": "memory_episode",
         "text": "Captain Soren never trusted the regent.",
         "score": 0.97,
         "visibility": Visibility.CHARACTER_PRIVATE,
         "tags": ["trust", "regent"],
-        "source_type": "memory_episode",
         "world_id": "world-1",
         "scene_id": "scene-4",
         "persona_id": "captain-soren",

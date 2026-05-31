@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     cloud_llm_max_tokens: int = 1000
     cloud_llm_temperature: float = 0.65
 
+    qdrant_url: str = "http://localhost:6333"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    rag_default_top_k: int = Field(default=5, ge=1)
+    rag_chunk_size_chars: int = Field(default=1000, ge=1)
+    rag_chunk_overlap_chars: int = Field(default=120, ge=0)
+
     max_local_retries: int = Field(default=1, ge=0)
     recent_dialogue_turns: int = Field(default=8, ge=0)
 

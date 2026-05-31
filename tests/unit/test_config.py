@@ -15,6 +15,11 @@ def test_settings_use_llamacpp_friendly_local_defaults(tmp_path: Path) -> None:
     assert settings.local_llm_api_key == "local"
     assert settings.local_llm_model == "local-model"
     assert settings.cloud_mode == CloudMode.ASK
+    assert settings.qdrant_url == "http://localhost:6333"
+    assert settings.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert settings.rag_default_top_k == 5
+    assert settings.rag_chunk_size_chars == 1000
+    assert settings.rag_chunk_overlap_chars == 120
     assert settings.recent_dialogue_turns == 8
     assert "cloud_llm_enabled" not in settings.model_dump()
 
@@ -49,7 +54,7 @@ def test_settings_reject_invalid_cloud_mode(tmp_path: Path) -> None:
 def test_settings_accept_database_path_and_recent_turn_overrides(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "DATABASE_PATH=/tmp/test.db\nRECENT_DIALOGUE_TURNS=3\n",
+        "DATABASE_PATH=/tmp/test.db\nRECENT_DIALOGUE_TURNS=3\nRAG_CHUNK_SIZE_CHARS=333\n",
         encoding="utf-8",
     )
 
@@ -57,3 +62,4 @@ def test_settings_accept_database_path_and_recent_turn_overrides(tmp_path: Path)
 
     assert settings.database_path == "/tmp/test.db"
     assert settings.recent_dialogue_turns == 3
+    assert settings.rag_chunk_size_chars == 333

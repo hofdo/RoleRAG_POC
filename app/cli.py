@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from app.agents import MemoryCurator
 from app.config import Settings, get_settings
-from app.domain import TurnInput, TurnResult
+from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.llm.router import ModelTask, choose_route
@@ -24,6 +25,16 @@ from app.persistence import (
     SQLiteTurnRepository,
     connect_sqlite,
     initialize_database,
+)
+from app.rag import (
+    ChunkingConfig,
+    EmbeddingProvider,
+    FastEmbedEmbeddingProvider,
+    IngestionRequest,
+    QdrantVectorStore,
+    RagCollection,
+    VectorStore,
+    ingest_document,
 )
 
 app = typer.Typer(help="RoleRAG CLI")
@@ -46,6 +57,14 @@ def _build_local_provider(settings: Settings) -> LlmProvider:
 
 def _build_file_loader() -> FileDataLoader:
     return FileDataLoader()
+
+
+def _build_embedding_provider(settings: Settings) -> EmbeddingProvider:
+    return FastEmbedEmbeddingProvider(model_name=settings.embedding_model)
+
+
+def _build_vector_store(settings: Settings) -> VectorStore:
+    return QdrantVectorStore(url=settings.qdrant_url)
 
 
 def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrchestrator:
@@ -156,6 +175,48 @@ def route(
         scene_complexity=scene_complexity,
     )
     typer.echo(json.dumps(chosen_route.model_dump(), indent=2, sort_keys=True))
+
+
+@app.command()
+def ingest(
+    path: Annotated[Path, typer.Argument(help="Markdown or text document to ingest")],
+    visibility: Annotated[Visibility, typer.Option(help="Required chunk visibility")] ,
+    source_type: Annotated[str, typer.Option(help="Document source type label")] ,
+    collection: Annotated[
+        RagCollection,
+        typer.Option(help="Target vector collection"),
+    ] = RagCollection.CANON_LORE,
+    tag: Annotated[list[str] | None, typer.Option(help="Repeatable chunk tag")] = None,
+    world_id: Annotated[str | None, typer.Option(help="Optional world scope")] = None,
+    scene_id: Annotated[str | None, typer.Option(help="Optional scene scope")] = None,
+    persona_id: Annotated[str | None, typer.Option(help="Optional persona scope")] = None,
+    session_id: Annotated[str | None, typer.Option(help="Optional session scope")] = None,
+) -> None:
+    settings = get_settings()
+    try:
+        result = ingest_document(
+            IngestionRequest(
+                path=path,
+                collection=collection,
+                source_type=source_type,
+                visibility=visibility,
+                tags=tag or [],
+                world_id=world_id,
+                scene_id=scene_id,
+                persona_id=persona_id,
+                session_id=session_id,
+            ),
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+            chunking_config=ChunkingConfig(
+                chunk_size_chars=settings.rag_chunk_size_chars,
+                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+            ),
+        )
+    except (FileNotFoundError, ImportError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
 @app.command()
