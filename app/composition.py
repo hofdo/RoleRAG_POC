@@ -7,7 +7,7 @@ from app.agents import CriticAgent, MemoryCurator
 from app.config import Settings
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
-from app.memory import MemoryEpisodeStore, RecentDialogueStore
+from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     FileDataLoader,
@@ -82,11 +82,16 @@ def build_vector_store(settings: Settings) -> VectorStore:
     return QdrantVectorStore(url=settings.qdrant_url)
 
 
-def build_actor_context_retriever(settings: Settings) -> ActorContextRetriever:
+def build_actor_context_retriever(
+    settings: Settings,
+    *,
+    embedding_provider: EmbeddingProvider | None = None,
+    vector_store: VectorStore | None = None,
+) -> ActorContextRetriever:
     return ActorContextRetriever(
         retriever=Retriever(
-            embedding_provider=build_embedding_provider(settings),
-            vector_store=build_vector_store(settings),
+            embedding_provider=embedding_provider or build_embedding_provider(settings),
+            vector_store=vector_store or build_vector_store(settings),
             default_top_k=settings.rag_default_top_k,
         )
     )
@@ -102,10 +107,13 @@ def build_services(
     session_repository = SQLiteSessionRepository(connection)
     turn_repository = SQLiteTurnRepository(connection)
     memory_repository = SQLiteMemoryRepository(connection)
+    memory_store = MemoryEpisodeStore(memory_repository=memory_repository)
     recent_dialogue_store = RecentDialogueStore(
         turn_repository=turn_repository,
         recent_turns=settings.recent_dialogue_turns,
     )
+    embedding_provider = build_embedding_provider(settings) if enable_retrieval else None
+    vector_store = build_vector_store(settings) if enable_retrieval else None
     orchestrator = TurnOrchestrator(
         loader=build_file_loader(),
         provider=build_local_provider(settings),
@@ -114,10 +122,25 @@ def build_services(
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=recent_dialogue_store,
-        memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
+        memory_store=memory_store,
         memory_curator=build_memory_curator(),
+        memory_indexer=(
+            MemoryIndexer(
+                memory_store=memory_store,
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            )
+            if embedding_provider is not None and vector_store is not None
+            else None
+        ),
         actor_context_retriever=(
-            build_actor_context_retriever(settings) if enable_retrieval else None
+            build_actor_context_retriever(
+                settings,
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            )
+            if embedding_provider is not None and vector_store is not None
+            else None
         ),
         retrieval_top_k=settings.rag_default_top_k,
         max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,

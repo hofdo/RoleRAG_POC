@@ -58,6 +58,7 @@ Commands exposed by [app/cli.py](../app/cli.py):
 - `python -m app.cli resume`
 - `python -m app.cli route`
 - `python -m app.cli ingest`
+- `python -m app.cli reindex-memories`
 - `python -m app.cli turn`
 
 Recommended local flow:
@@ -77,6 +78,12 @@ python -m app.cli ingest data/documents/demo_lore.md \
 python -m app.cli turn \
   --session-id <session-id> \
   --message "What have you heard about the regent?"
+```
+
+If Qdrant was unavailable while durable memories were curated, backfill the derived index:
+
+```bash
+python -m app.cli reindex-memories --session-id <session-id>
 ```
 
 `rolerag` is also installed as a console script and exposes the same commands.
@@ -125,6 +132,7 @@ Current implementation note: `MAX_LOCAL_RETRIES` is part of settings, but the re
 - The LLM never owns authoritative state.
 - Actor generation uses only prepared messages.
 - Retrieval is visibility-filtered before actor prompt construction.
+- SQLite remains authoritative for durable memories; Qdrant indexing is fail-open during turns.
 - Memory extraction stays local.
 - API routes stay thin and do not duplicate orchestration logic.
 - Tests and evals should continue to avoid live providers.

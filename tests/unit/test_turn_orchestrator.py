@@ -95,6 +95,17 @@ class StubActorContextRetriever:
         return self.chunks
 
 
+class StubMemoryIndexer:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[list[Any]] = []
+
+    def index_memories(self, memories: list[Any]) -> None:
+        self.calls.append(memories)
+        if self.error is not None:
+            raise self.error
+
+
 class FakeLoader:
     def load_world(self, world_id: str) -> DemoWorldRecord:
         return DemoWorldRecord(
@@ -135,6 +146,7 @@ def _build_orchestrator(
     *,
     critic: StubCritic | None = None,
     memory_curator: StubMemoryCurator | None = None,
+    memory_indexer: StubMemoryIndexer | None = None,
     actor_context_retriever: StubActorContextRetriever | None = None,
 ) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
@@ -163,6 +175,7 @@ def _build_orchestrator(
         ),
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
         memory_curator=memory_curator,
+        memory_indexer=memory_indexer,
         actor_context_retriever=actor_context_retriever,
         retrieval_top_k=3,
         max_retrieved_chunk_chars=800,
@@ -282,6 +295,47 @@ async def test_turn_orchestrator_returns_warning_when_memory_curation_fails(
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.memory_written is False
     assert result.warnings == ["memory curation skipped: bad memory output"]
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_response_when_memory_indexing_fails(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    memory_indexer = StubMemoryIndexer(error=RuntimeError("qdrant offline"))
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        memory_curator=StubMemoryCurator(
+            result=type(
+                "CuratorResult",
+                (),
+                {
+                    "write_memory": True,
+                    "memories": [
+                        MemoryCandidate(
+                            summary="The player promised to return before dawn.",
+                            visibility=Visibility.PLAYER,
+                            importance=4,
+                        )
+                    ],
+                },
+            )()
+        ),
+        memory_indexer=memory_indexer,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="I promise I will return before dawn.",
+        )
+    )
+
+    assert result.text == "I have heard enough to know the regent fears open daylight."
+    assert result.memory_written is True
+    assert result.warnings == ["memory indexing skipped: qdrant offline"]
+    assert len(memory_indexer.calls) == 1
 
 
 @pytest.mark.asyncio

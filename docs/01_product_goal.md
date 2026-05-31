@@ -118,6 +118,6 @@ The MVP is successful when a future contributor can:
 - no auth or account system
 - no streaming transport
 - no production-grade observability or deployment story
-- no automatic indexing of curated SQLite memories into retrieval collections
+- no advanced ranking or reranking for curated SQLite memories
 
 Those gaps are acceptable for this MVP because the repository is proving architecture and safety boundaries, not product polish.

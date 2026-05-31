@@ -115,16 +115,19 @@ Current behavior:
 - only the application decides whether to persist them
 - persisted memory episodes are stored in SQLite with visibility, importance, and tags
 
-Important current limitation:
+Current indexing behavior:
 
-- persisted SQLite memories are not automatically embedded and written back into Qdrant collections
-- retrieval logic supports `session_memory` and `persona_memory`, but automatic indexing into those collections is future work
+- persisted SQLite memories are embedded and upserted into `session_memory`
+- indexed payloads preserve memory id, session id, scene id, optional actor id, summary, visibility,
+  importance, and tags
+- `python -m app.cli reindex-memories --session-id <session-id>` backfills or repairs the derived index
 
 ## Failure Handling
 
 - If Qdrant or embeddings are unavailable during a turn, retrieval is skipped and the turn continues.
 - If ingestion cannot embed or write chunks, the CLI command fails immediately.
 - If memory curation returns invalid structured output, memory persistence is skipped and the turn still completes.
+- If memory indexing fails after SQLite persistence, a warning is recorded and the turn still completes.
 
 ## Tests Covering This Design
 
@@ -147,7 +150,6 @@ Important current limitation:
 
 Deferred but not implemented in the MVP:
 
-- automatic indexing of durable memories into retrieval collections
 - richer ranking or reranking
 - ingestion of additional source formats
 - production retrieval observability

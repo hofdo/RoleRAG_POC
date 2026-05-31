@@ -92,6 +92,11 @@ graph TD
 
 - performs local structured memory extraction after the final response
 
+### MemoryIndexer
+
+- embeds persisted memory episodes and upserts them into session-scoped retrieval
+- treats SQLite as authoritative and Qdrant as a repairable derived index
+
 ### SQLite persistence
 
 - authoritative store for sessions, turns, and memory episodes
@@ -122,6 +127,7 @@ graph TD
 - critic and memory extraction stay local
 - route handlers stay thin
 - retrieval failure does not block turn completion
+- memory indexing failure does not discard persisted memories or completed turns
 - tests avoid real provider and Qdrant dependencies
 
 ## Reading Order

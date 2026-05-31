@@ -232,6 +232,8 @@ def test_retrieved_chunk_accepts_optional_metadata_when_absent() -> None:
         "scene_id": None,
         "persona_id": None,
         "session_id": None,
+        "actor_id": None,
+        "importance": None,
     }
 
 
@@ -248,6 +250,8 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
         scene_id="scene-4",
         persona_id="captain-soren",
         session_id="session-1",
+        actor_id="captain-soren",
+        importance=4,
     )
 
     assert chunk.model_dump() == {
@@ -262,6 +266,8 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
         "scene_id": "scene-4",
         "persona_id": "captain-soren",
         "session_id": "session-1",
+        "actor_id": "captain-soren",
+        "importance": 4,
     }
 
 

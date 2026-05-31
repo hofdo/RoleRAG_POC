@@ -65,7 +65,8 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 
 - `TurnOrchestrator` is the highest-leverage file. Small changes there can affect routing, persistence, warnings, and repair flow.
 - Retrieval is intentionally fail-open. Do not silently change that without updating tests and docs.
-- Durable SQLite memories are not automatically indexed into Qdrant. Do not assume retrieval sees newly curated memory unless you implement that path explicitly.
+- Durable SQLite memories are indexed into `session_memory` after persistence. If indexing fails,
+  the turn remains valid and `reindex-memories` can repair the derived Qdrant index.
 - `MAX_LOCAL_RETRIES` is present in settings but is not the sole source of retry truth yet.
 
 ## Verification Before Claiming Success
@@ -86,6 +87,7 @@ python -m app.cli --help
 python -m app.cli health
 python -m app.cli config
 python -m app.cli ingest --help
+python -m app.cli reindex-memories --help
 rolerag --help
 ```
 

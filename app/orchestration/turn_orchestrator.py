@@ -7,6 +7,7 @@ from app.agents import ActorAgent
 from app.domain import (
     CriticResult,
     MemoryCuratorResult,
+    MemoryEpisode,
     PersonaCard,
     RetrievedChunk,
     SceneState,
@@ -57,6 +58,10 @@ class ActorContextRetrieving(Protocol):
         persona_id: str,
         top_k: int,
     ) -> list[RetrievedChunk]: ...
+
+
+class MemoryIndexing(Protocol):
+    def index_memories(self, memories: list[MemoryEpisode]) -> object: ...
 
 
 class CriticEvaluatingAgent(Protocol):
@@ -115,6 +120,7 @@ class TurnOrchestrator:
         cloud_provider: LlmProvider | None = None,
         memory_store: MemoryEpisodeStore | None = None,
         memory_curator: MemoryCuratingAgent | None = None,
+        memory_indexer: MemoryIndexing | None = None,
         actor_context_retriever: ActorContextRetrieving | None = None,
         retrieval_top_k: int = 5,
         max_retrieved_chunk_chars: int = 800,
@@ -128,6 +134,7 @@ class TurnOrchestrator:
         self.recent_dialogue_store = recent_dialogue_store
         self.memory_store = memory_store
         self.memory_curator = memory_curator
+        self.memory_indexer = memory_indexer
         self.actor_context_retriever = actor_context_retriever
         self.context_budget = ContextBudget(
             retrieved_chunks=retrieval_top_k,
@@ -427,6 +434,11 @@ class TurnOrchestrator:
                         memories=memory_result.memories,
                     )
                     memory_written = len(persisted_memories) > 0
+                    if self.memory_indexer is not None:
+                        try:
+                            self.memory_indexer.index_memories(persisted_memories)
+                        except Exception as exc:
+                            warnings.append(f"memory indexing skipped: {exc}")
             except Exception as exc:
                 warnings.append(f"memory curation skipped: {exc}")
 

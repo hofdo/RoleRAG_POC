@@ -13,6 +13,7 @@ Implemented in this repository:
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
 - FastAPI endpoints for session creation, turn execution, and session lookup
 - SQLite persistence for sessions, turns, and durable memory episodes
+- automatic indexing of curated durable memories into session-scoped retrieval
 - Qdrant-backed vector storage for ingested lore and retrieval
 - retrieval-aware actor prompt construction with visibility filtering
 - bounded critic and repair flow
@@ -26,7 +27,7 @@ Not implemented:
 - multi-user support
 - streaming API
 - production deployment hardening
-- automatic indexing of persisted SQLite memories into Qdrant
+- richer retrieval ranking and reranking
 
 ## Quickstart
 
@@ -232,6 +233,12 @@ python -m app.cli ingest --help
 python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world
 ```
 
+Backfill or repair the vector index for existing SQLite memories:
+
+```bash
+python -m app.cli reindex-memories --session-id <session-id>
+```
+
 ## API Usage
 
 Start the server:
@@ -287,7 +294,8 @@ Important current behavior:
 - document ingestion currently supports `.md` and `.txt`
 - world, scene, and persona demo data are loaded from JSON files
 - retrieval is fail-open; if Qdrant or embeddings are unavailable during a turn, generation continues without retrieved context
-- persisted SQLite memory episodes are not automatically re-indexed into Qdrant yet
+- curated SQLite memory episodes are indexed into `session_memory` after persistence
+- memory indexing is fail-open during turns; use `reindex-memories` to backfill after an outage
 
 ## Tests, Lint, and Evals
 
@@ -322,7 +330,7 @@ The eval harness covers retrieval quality, visibility boundaries, role consisten
 - no production deployment hardening
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
-- durable SQLite memories are not automatically re-indexed into Qdrant
+- memory vector indexing is derived from SQLite and may require `reindex-memories` after an outage
 - `MAX_LOCAL_RETRIES` is a settings field, but the current repair loop still uses fixed bounded retry behavior in code
 
 ## Safe Next Steps
@@ -330,7 +338,7 @@ The eval harness covers retrieval quality, visibility boundaries, role consisten
 The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_next_steps_after_mvp.md). The short version:
 
 - improve integration coverage
-- add memory indexing and better retrieval ranking
+- improve retrieval ranking
 - add optional reranking
 - add a frontend and streaming only after the current backend boundaries stay intact
 - add auth only if the project becomes multi-user

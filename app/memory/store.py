@@ -27,3 +27,6 @@ class MemoryEpisodeStore:
             session_id=session_id,
             memories=memories,
         )
+
+    def list_memories_for_session(self, session_id: str) -> list[MemoryEpisode]:
+        return self.memory_repository.list_memories_for_session(session_id)

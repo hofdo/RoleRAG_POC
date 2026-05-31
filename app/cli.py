@@ -23,7 +23,7 @@ from app.composition import (
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.router import ModelTask, choose_route
-from app.memory import MemoryEpisodeStore, RecentDialogueStore
+from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     DataFileNotFoundError,
@@ -70,10 +70,13 @@ def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppService
     session_repository = SQLiteSessionRepository(connection)
     turn_repository = SQLiteTurnRepository(connection)
     memory_repository = SQLiteMemoryRepository(connection)
+    memory_store = MemoryEpisodeStore(memory_repository=memory_repository)
     recent_dialogue_store = RecentDialogueStore(
         turn_repository=turn_repository,
         recent_turns=settings.recent_dialogue_turns,
     )
+    embedding_provider = _build_embedding_provider(settings) if enable_retrieval else None
+    vector_store = _build_vector_store(settings) if enable_retrieval else None
     orchestrator = TurnOrchestrator(
         loader=_build_file_loader(),
         provider=_build_local_provider(settings),
@@ -82,10 +85,25 @@ def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppService
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=recent_dialogue_store,
-        memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
+        memory_store=memory_store,
         memory_curator=_build_memory_curator(),
+        memory_indexer=(
+            MemoryIndexer(
+                memory_store=memory_store,
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            )
+            if embedding_provider is not None and vector_store is not None
+            else None
+        ),
         actor_context_retriever=(
-            _build_actor_context_retriever(settings) if enable_retrieval else None
+            _build_actor_context_retriever(
+                settings,
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            )
+            if embedding_provider is not None and vector_store is not None
+            else None
         ),
         retrieval_top_k=settings.rag_default_top_k,
         max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
@@ -241,6 +259,42 @@ def ingest(
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@app.command()
+def reindex_memories(
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
+) -> None:
+    settings = get_settings()
+    connection = connect_sqlite(settings.database_path)
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_store = MemoryEpisodeStore(
+        memory_repository=SQLiteMemoryRepository(connection),
+    )
+    try:
+        if session_repository.get_session(session_id) is None:
+            raise SessionNotFoundError(session_id)
+        result = MemoryIndexer(
+            memory_store=memory_store,
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+        ).reindex_session(session_id)
+    except Exception as exc:
+        connection.close()
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    connection.close()
+    typer.echo(
+        json.dumps(
+            {
+                "indexed_count": result.indexed_count,
+                "session_id": session_id,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 @app.command()

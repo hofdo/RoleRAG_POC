@@ -29,6 +29,13 @@ class VectorStore(Protocol):
         vectors: Sequence[Sequence[float]],
     ) -> None: ...
 
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: Sequence[RagChunk],
+        vectors: Sequence[Sequence[float]],
+    ) -> None: ...
+
     def search(
         self,
         collection: RagCollection,
@@ -73,6 +80,26 @@ class InMemoryVectorStore:
         )
         self._entries[collection] = retained
 
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: Sequence[RagChunk],
+        vectors: Sequence[Sequence[float]],
+    ) -> None:
+        if len(chunks) != len(vectors):
+            raise ValueError("chunks and vectors must have the same length")
+        chunk_ids = {chunk.id for chunk in chunks}
+        retained = [
+            (chunk, vector)
+            for chunk, vector in self._entries[collection]
+            if chunk.id not in chunk_ids
+        ]
+        retained.extend(
+            (chunk, list(vector))
+            for chunk, vector in zip(chunks, vectors, strict=True)
+        )
+        self._entries[collection] = retained
+
     def search(
         self,
         collection: RagCollection,
@@ -101,6 +128,8 @@ class InMemoryVectorStore:
                 scene_id=chunk.scene_id,
                 persona_id=chunk.persona_id,
                 session_id=chunk.session_id,
+                actor_id=chunk.actor_id,
+                importance=chunk.importance,
             )
             for score, chunk in matches[:limit]
         ]
@@ -158,6 +187,27 @@ class QdrantVectorStore:
         if not chunks:
             return
 
+        points = [
+            models.PointStruct(
+                id=chunk.id,
+                vector=list(vector),
+                payload=_chunk_to_payload(chunk),
+            )
+            for chunk, vector in zip(chunks, vectors, strict=True)
+        ]
+        self.client.upsert(collection_name=collection.value, points=points)
+
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: Sequence[RagChunk],
+        vectors: Sequence[Sequence[float]],
+    ) -> None:
+        models = _require_qdrant_models()
+        if len(chunks) != len(vectors):
+            raise ValueError("chunks and vectors must have the same length")
+        if not chunks:
+            return
         points = [
             models.PointStruct(
                 id=chunk.id,
@@ -272,6 +322,8 @@ def _chunk_to_payload(chunk: RagChunk) -> dict[str, Any]:
         "scene_id": chunk.scene_id,
         "persona_id": chunk.persona_id,
         "session_id": chunk.session_id,
+        "actor_id": chunk.actor_id,
+        "importance": chunk.importance,
     }
 
 
@@ -289,6 +341,8 @@ def _payload_to_retrieved_chunk(payload: dict[str, Any] | None, *, score: float)
         scene_id=raw_payload.get("scene_id"),
         persona_id=raw_payload.get("persona_id"),
         session_id=raw_payload.get("session_id"),
+        actor_id=raw_payload.get("actor_id"),
+        importance=raw_payload.get("importance"),
     )
 
 

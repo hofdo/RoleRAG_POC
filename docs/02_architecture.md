@@ -149,7 +149,7 @@ Current limitations:
 
 - ingestion supports `.md` and `.txt` only
 - retrieval failure is non-fatal for turn execution
-- persisted SQLite memory episodes are not automatically re-indexed into Qdrant
+- persisted SQLite memory episodes are indexed into `session_memory` after curation
 
 ## Testing Architecture
 

@@ -42,6 +42,14 @@ class RecordingVectorStore:
             (collection, source, list(chunks), [list(vector) for vector in vectors])
         )
 
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: Sequence[RagChunk],
+        vectors: Sequence[Sequence[float]],
+    ) -> None:
+        raise AssertionError("upsert_chunks should not be called during ingestion")
+
     def search(
         self,
         collection: RagCollection,

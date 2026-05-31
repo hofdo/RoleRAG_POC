@@ -24,6 +24,8 @@ class RagChunk(BaseModel):
     scene_id: str | None = None
     persona_id: str | None = None
     session_id: str | None = None
+    actor_id: str | None = None
+    importance: int | None = Field(default=None, ge=1, le=5)
 
 
 class RetrievalFilter(BaseModel):

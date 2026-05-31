@@ -7,8 +7,18 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from app.cli import app
-from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState, Visibility
+from app.domain import (
+    CriticResult,
+    MemoryCandidate,
+    PersonaCard,
+    RetrievedChunk,
+    SceneState,
+    SessionState,
+    Visibility,
+)
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
+from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag.models import RagChunk, RagCollection
 
 runner = CliRunner()
@@ -80,6 +90,7 @@ class RecordingVectorStore:
     def __init__(self) -> None:
         self.ensure_calls: list[tuple[RagCollection, int]] = []
         self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
+        self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         self.ensure_calls.append((collection, vector_size))
@@ -92,6 +103,14 @@ class RecordingVectorStore:
         vectors: list[list[float]],
     ) -> None:
         self.replace_calls.append((collection, source, chunks, vectors))
+
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: list[RagChunk],
+        vectors: list[list[float]],
+    ) -> None:
+        self.upsert_calls.append((collection, chunks, vectors))
 
 
 class FakeActorContextRetriever:
@@ -398,3 +417,62 @@ def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> 
 
     assert result.exit_code == 0
     assert "The Rose Gallery has mirrored columns." in provider.requests[0].messages[0].content
+
+
+def test_cli_reindex_memories_indexes_existing_sqlite_memories(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    SQLiteSessionRepository(connection).create_session(
+        SessionState(
+            id="demo-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    persisted = SQLiteMemoryRepository(connection).append_memories(
+        session_id="demo-session",
+        memories=[
+            MemoryCandidate(
+                summary="The archive key will be ready before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["archive", "dawn"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    connection.close()
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            ["reindex-memories", "--session-id", "demo-session"],
+            env={"DATABASE_PATH": str(database_path)},
+        )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "indexed_count": 1,
+        "session_id": "demo-session",
+    }
+    assert vector_store.ensure_calls == [(RagCollection.SESSION_MEMORY, 2)]
+    assert vector_store.upsert_calls[0][1][0].id == persisted[0].id
+
+
+def test_cli_reindex_memories_fails_clearly_for_missing_session(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["reindex-memories", "--session-id", "missing-session"],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+
+    assert result.exit_code == 1
+    assert "missing-session" in result.stdout

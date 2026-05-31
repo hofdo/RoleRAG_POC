@@ -36,6 +36,14 @@ class FakeVectorStore:
     ) -> None:
         raise AssertionError("replace_source should not be called during retrieval")
 
+    def upsert_chunks(
+        self,
+        collection: RagCollection,
+        chunks: Sequence[object],
+        vectors: Sequence[Sequence[float]],
+    ) -> None:
+        raise AssertionError("upsert_chunks should not be called during retrieval")
+
     def search(
         self,
         collection: RagCollection,

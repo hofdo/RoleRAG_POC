@@ -122,6 +122,10 @@ Retrieval is deterministic code, not an agent class.
 
 - response generation does not retroactively fail
 - warnings are recorded
+
+After successful memory persistence, the orchestrator asks `MemoryIndexer` to embed and upsert the
+persisted episodes into `session_memory`. SQLite remains authoritative. Indexing failures append a
+warning and do not discard the completed turn or persisted memory.
 - invalid structured output is treated as a skipped downstream step
 
 ## Safety Boundaries

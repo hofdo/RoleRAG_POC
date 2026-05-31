@@ -25,11 +25,7 @@ The repository already has solid unit and eval coverage. The next gap is broader
 - API plus persistence plus retrieval
 - cloud fallback edge cases
 
-### 3. Index durable memories into retrieval collections
-
-The current MVP persists durable memory episodes in SQLite but does not automatically embed and store them into Qdrant. Closing that gap would improve continuity without changing the high-level architecture.
-
-### 4. Improve retrieval ranking
+### 3. Improve retrieval ranking
 
 Safe candidates:
 
