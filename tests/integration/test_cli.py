@@ -7,7 +7,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from app.cli import app
-from app.domain import PersonaCard, SceneState, Visibility
+from app.domain import PersonaCard, RetrievedChunk, SceneState, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.rag.models import RagChunk, RagCollection
 
@@ -15,7 +15,11 @@ runner = CliRunner()
 
 
 class FakeProvider(LlmProvider):
+    def __init__(self) -> None:
+        self.requests: list[LlmRequest] = []
+
     async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
         return LlmResponse(
             text="I have heard enough to know the regent fears open daylight.",
             provider="fake",
@@ -90,6 +94,16 @@ class RecordingVectorStore:
         self.replace_calls.append((collection, source, chunks, vectors))
 
 
+class FakeActorContextRetriever:
+    def __init__(self, chunks: list[RetrievedChunk] | None = None) -> None:
+        self.chunks = chunks or []
+        self.calls: list[dict[str, object]] = []
+
+    def retrieve_for_actor(self, **kwargs: object) -> list[RetrievedChunk]:
+        self.calls.append(kwargs)
+        return self.chunks
+
+
 def test_cli_help_exits_successfully() -> None:
     result = runner.invoke(app, ["--help"])
 
@@ -153,9 +167,11 @@ def test_cli_route_forces_local_in_off_mode() -> None:
 
 
 def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> None:
+    context_retriever = FakeActorContextRetriever()
     with (
         patch("app.cli._build_local_provider", return_value=FakeProvider()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
+        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
     ):
         start_result = runner.invoke(
             app,
@@ -184,6 +200,7 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
     assert json.loads(start_result.stdout)["id"] == "demo-session"
     assert turn_result.exit_code == 0
     assert "I have heard enough to know the regent fears open daylight." in turn_result.stdout
+    assert len(context_retriever.calls) == 1
 
 
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
@@ -272,3 +289,37 @@ def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path
     assert chunks[0].visibility == Visibility.PLAYER
     assert chunks[0].tags == ["palace"]
     assert chunks[0].world_id == "demo_world"
+
+
+def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> None:
+    context_retriever = FakeActorContextRetriever(
+        [
+            RetrievedChunk(
+                id="lore-1",
+                source="demo_lore.md",
+                source_type="lore",
+                text="The Rose Gallery has mirrored columns.",
+                score=0.91,
+                visibility=Visibility.PLAYER,
+            )
+        ]
+    )
+    provider = FakeProvider()
+    with (
+        patch("app.cli._build_local_provider", return_value=provider),
+        patch("app.cli._build_file_loader", return_value=FakeLoader()),
+        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
+    ):
+        runner.invoke(
+            app,
+            ["start-session", "--session-id", "demo-session"],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+        result = runner.invoke(
+            app,
+            ["turn", "--session-id", "demo-session", "--message", "What do I notice?"],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+
+    assert result.exit_code == 0
+    assert "The Rose Gallery has mirrored columns." in provider.requests[0].messages[0].content

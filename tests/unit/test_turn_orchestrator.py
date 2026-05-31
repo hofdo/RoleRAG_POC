@@ -48,6 +48,19 @@ class StubMemoryCurator:
         return self.result
 
 
+class StubActorContextRetriever:
+    def __init__(self, *, chunks: list[Any] | None = None, error: Exception | None = None) -> None:
+        self.chunks = chunks or []
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def retrieve_for_actor(self, **kwargs: object) -> list[Any]:
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.chunks
+
+
 class FakeLoader:
     def load_world(self, world_id: str) -> DemoWorldRecord:
         return DemoWorldRecord(
@@ -87,6 +100,7 @@ def _build_orchestrator(
     provider: FakeProvider,
     *,
     memory_curator: StubMemoryCurator | None = None,
+    actor_context_retriever: StubActorContextRetriever | None = None,
 ) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
@@ -113,6 +127,9 @@ def _build_orchestrator(
         ),
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
         memory_curator=memory_curator,
+        actor_context_retriever=actor_context_retriever,
+        retrieval_top_k=3,
+        max_retrieved_chunk_chars=800,
         local_model="local-model",
         cloud_model="cloud-model",
         local_max_tokens=700,
@@ -229,3 +246,84 @@ async def test_turn_orchestrator_returns_warning_when_memory_curation_fails(
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.memory_written is False
     assert result.warnings == ["memory curation skipped: bad memory output"]
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_includes_only_public_retrieved_context(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    retriever = StubActorContextRetriever(
+        chunks=[
+            type(
+                "Chunk",
+                (),
+                {
+                    "id": "public",
+                    "source": "lore.md",
+                    "source_type": "lore",
+                    "text": "Mirrors line the gallery.",
+                    "score": 0.9,
+                    "visibility": Visibility.PLAYER,
+                    "tags": ["palace"],
+                    "world_id": "demo_world",
+                    "scene_id": None,
+                    "persona_id": None,
+                    "session_id": None,
+                    "model_copy": lambda self, **_: self,
+                },
+            )(),
+            type(
+                "Chunk",
+                (),
+                {
+                    "id": "gm",
+                    "source": "lore.md",
+                    "source_type": "lore",
+                    "text": "The spy waits nearby.",
+                    "score": 0.99,
+                    "visibility": Visibility.GM,
+                    "tags": [],
+                    "world_id": "demo_world",
+                    "scene_id": None,
+                    "persona_id": None,
+                    "session_id": None,
+                    "model_copy": lambda self, **_: self,
+                },
+            )(),
+        ]
+    )
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        actor_context_retriever=retriever,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What do I notice?")
+    )
+
+    prompt = provider.requests[0].messages[0].content
+    assert "Mirrors line the gallery." in prompt
+    assert "spy waits nearby" not in prompt
+    assert result.warnings == []
+    assert retriever.calls[0]["world_id"] == "demo_world"
+    assert retriever.calls[0]["session_id"] == "demo-session"
+    assert retriever.calls[0]["persona_id"] == "archivist"
+    assert retriever.calls[0]["top_k"] == 3
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_continues_when_retrieval_fails(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        actor_context_retriever=StubActorContextRetriever(error=RuntimeError("qdrant offline")),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What do I notice?")
+    )
+
+    assert result.text == "I have heard enough to know the regent fears open daylight."
+    assert result.warnings == ["retrieval skipped: qdrant offline"]
+    assert "Retrieved Context:\nNone." in provider.requests[0].messages[0].content

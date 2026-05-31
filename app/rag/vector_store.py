@@ -106,9 +106,16 @@ class InMemoryVectorStore:
 
 class QdrantVectorStore:
     def __init__(self, *, url: str) -> None:
+        self._url = url
+        self._client: Any | None = None
+
+    @property
+    def client(self) -> Any:
         if QdrantClient is None or qdrant_models is None:
             raise ImportError("qdrant-client is required for QdrantVectorStore")
-        self.client = QdrantClient(url=url)
+        if self._client is None:
+            self._client = QdrantClient(url=self._url)
+        return self._client
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         if not self.client.collection_exists(collection_name=collection.value):
@@ -164,6 +171,8 @@ class QdrantVectorStore:
         filters: RetrievalFilter,
         limit: int,
     ) -> list[RetrievedChunk]:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return []
         results = self.client.search(
             collection_name=collection.value,
             query_vector=list(vector),

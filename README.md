@@ -17,8 +17,9 @@ This repository currently includes:
 - local embedding abstraction
 - vector store abstraction with Qdrant runtime support
 - CLI document ingestion for local lore documents
+- retrieval-aware actor prompts with bounded player-visible context
 
-This repository does not yet inject retrieved chunks into the actor prompt, add critic workflows, or expose API endpoints.
+This repository does not yet add critic workflows or expose API endpoints.
 
 ## Local model runtime
 
@@ -60,3 +61,7 @@ mypy app
 ```
 
 All commands assume the virtualenv is activated.
+
+Actor turns retrieve from session memory, persona memory, and canon lore collections. Retrieval
+fails open: if Qdrant or local embeddings are unavailable, the turn continues without retrieved
+context.

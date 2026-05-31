@@ -7,6 +7,7 @@ from app.agents import ActorAgent
 from app.domain import (
     MemoryCuratorResult,
     PersonaCard,
+    RetrievedChunk,
     SceneState,
     SessionState,
     TurnInput,
@@ -15,9 +16,11 @@ from app.domain import (
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode, ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
+from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
 from app.persistence import DemoWorldRecord, SessionNotFoundError
 from app.persistence.repositories import SessionRepository, TurnRepository
+from app.rag.retriever import build_retrieval_query
 
 
 class TurnDataLoader(Protocol):
@@ -42,6 +45,18 @@ class MemoryCuratingAgent(Protocol):
     ) -> MemoryCuratorResult: ...
 
 
+class ActorContextRetrieving(Protocol):
+    def retrieve_for_actor(
+        self,
+        *,
+        query: str,
+        world_id: str,
+        session_id: str,
+        persona_id: str,
+        top_k: int,
+    ) -> list[RetrievedChunk]: ...
+
+
 class TurnOrchestrator:
     def __init__(
         self,
@@ -60,6 +75,9 @@ class TurnOrchestrator:
         cloud_mode: CloudMode | str,
         memory_store: MemoryEpisodeStore | None = None,
         memory_curator: MemoryCuratingAgent | None = None,
+        actor_context_retriever: ActorContextRetrieving | None = None,
+        retrieval_top_k: int = 5,
+        max_retrieved_chunk_chars: int = 800,
     ) -> None:
         self.loader = loader
         self.provider = provider
@@ -68,6 +86,11 @@ class TurnOrchestrator:
         self.recent_dialogue_store = recent_dialogue_store
         self.memory_store = memory_store
         self.memory_curator = memory_curator
+        self.actor_context_retriever = actor_context_retriever
+        self.context_budget = ContextBudget(
+            retrieved_chunks=retrieval_top_k,
+            max_retrieved_chunk_chars=max_retrieved_chunk_chars,
+        )
         self.actor_agent = ActorAgent()
         self.local_model = local_model
         self.cloud_model = cloud_model
@@ -127,6 +150,26 @@ class TurnOrchestrator:
 
         persona = self.loader.load_persona(persona_id)
         scene = self.loader.load_scene(session.active_scene_id)
+        recent_turns = self.recent_dialogue_store.load_recent_dialogue(session.id)
+        warnings: list[str] = []
+        retrieved_chunks: list[RetrievedChunk] = []
+        if self.actor_context_retriever is not None:
+            query = build_retrieval_query(
+                user_message=turn_input.message,
+                scene=scene,
+                persona=persona,
+                recent_turns=recent_turns,
+            )
+            try:
+                retrieved_chunks = self.actor_context_retriever.retrieve_for_actor(
+                    query=query,
+                    world_id=session.world_id,
+                    session_id=session.id,
+                    persona_id=persona.id,
+                    top_k=self.context_budget.retrieved_chunks,
+                )
+            except Exception as exc:
+                warnings.append(f"retrieval skipped: {exc}")
         route = choose_route(
             task=ModelTask.ACTOR_RESPONSE,
             cloud_mode=self.cloud_mode,
@@ -140,12 +183,13 @@ class TurnOrchestrator:
             retrieval_confidence=None,
             scene_complexity=1,
         )
-        recent_turns = self.recent_dialogue_store.load_recent_dialogue(session.id)
         messages = build_actor_messages(
             persona=persona,
             scene=scene,
             turn_input=turn_input,
             recent_turns=recent_turns,
+            retrieved_chunks=retrieved_chunks,
+            context_budget=self.context_budget,
         )
         text = await self.actor_agent.generate(
             provider=self.provider,
@@ -165,7 +209,6 @@ class TurnOrchestrator:
             updated_at=persisted_turn.created_at,
         )
 
-        warnings: list[str] = []
         memory_written = False
         if self.memory_curator is not None and self.memory_store is not None:
             memory_route = choose_route(

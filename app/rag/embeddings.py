@@ -20,9 +20,8 @@ class EmbeddingProvider(Protocol):
 
 class FastEmbedEmbeddingProvider:
     def __init__(self, *, model_name: str) -> None:
-        if TextEmbedding is None:
-            raise ImportError("fastembed is required for FastEmbedEmbeddingProvider")
-        self._model = TextEmbedding(model_name=model_name)
+        self._model_name = model_name
+        self._model: TextEmbedding | None = None
         self._dimension: int | None = None
 
     @property
@@ -38,7 +37,14 @@ class FastEmbedEmbeddingProvider:
         if not texts:
             return []
 
-        vectors = [list(vector) for vector in self._model.embed(list(texts))]
+        vectors = [list(vector) for vector in self._get_model().embed(list(texts))]
         if self._dimension is None and vectors:
             self._dimension = len(vectors[0])
         return vectors
+
+    def _get_model(self) -> TextEmbedding:
+        if TextEmbedding is None:
+            raise ImportError("fastembed is required for FastEmbedEmbeddingProvider")
+        if self._model is None:
+            self._model = TextEmbedding(model_name=self._model_name)
+        return self._model

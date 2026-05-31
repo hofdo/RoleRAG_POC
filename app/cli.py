@@ -27,12 +27,14 @@ from app.persistence import (
     initialize_database,
 )
 from app.rag import (
+    ActorContextRetriever,
     ChunkingConfig,
     EmbeddingProvider,
     FastEmbedEmbeddingProvider,
     IngestionRequest,
     QdrantVectorStore,
     RagCollection,
+    Retriever,
     VectorStore,
     ingest_document,
 )
@@ -67,7 +69,22 @@ def _build_vector_store(settings: Settings) -> VectorStore:
     return QdrantVectorStore(url=settings.qdrant_url)
 
 
-def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrchestrator:
+def _build_actor_context_retriever(settings: Settings) -> ActorContextRetriever:
+    return ActorContextRetriever(
+        retriever=Retriever(
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+            default_top_k=settings.rag_default_top_k,
+        )
+    )
+
+
+def _build_orchestrator(
+    settings: Settings,
+    provider: LlmProvider,
+    *,
+    actor_context_retriever: ActorContextRetriever | None = None,
+) -> TurnOrchestrator:
     connection = connect_sqlite(settings.database_path)
     initialize_database(connection)
     turn_repository = SQLiteTurnRepository(connection)
@@ -83,6 +100,9 @@ def _build_orchestrator(settings: Settings, provider: LlmProvider) -> TurnOrches
         ),
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
         memory_curator=MemoryCurator(),
+        actor_context_retriever=actor_context_retriever,
+        retrieval_top_k=settings.rag_default_top_k,
+        max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
         local_model=settings.local_llm_model,
         cloud_model=settings.cloud_llm_model,
         local_max_tokens=settings.local_llm_max_tokens,
@@ -226,7 +246,11 @@ def turn(
 ) -> None:
     settings = get_settings()
     provider = _build_local_provider(settings)
-    orchestrator = _build_orchestrator(settings, provider)
+    orchestrator = _build_orchestrator(
+        settings,
+        provider,
+        actor_context_retriever=_build_actor_context_retriever(settings),
+    )
     turn_input = TurnInput(
         session_id=session_id,
         message=message,

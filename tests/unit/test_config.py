@@ -20,6 +20,7 @@ def test_settings_use_llamacpp_friendly_local_defaults(tmp_path: Path) -> None:
     assert settings.rag_default_top_k == 5
     assert settings.rag_chunk_size_chars == 1000
     assert settings.rag_chunk_overlap_chars == 120
+    assert settings.rag_max_retrieved_chunk_chars == 800
     assert settings.recent_dialogue_turns == 8
     assert "cloud_llm_enabled" not in settings.model_dump()
 
