@@ -20,6 +20,7 @@ This repository currently includes:
 - retrieval-aware actor prompts with bounded player-visible context
 - critic-guided response validation with one bounded local repair attempt
 - explicit local/cloud fallback policy with route reasons and ask-mode warnings
+- a deterministic pytest-based evaluation harness for retrieval, secrecy, memory, role consistency, and cloud routing regressions
 
 This repository does not expose API endpoints yet.
 
@@ -65,6 +66,26 @@ mypy app
 ```
 
 All commands assume the virtualenv is activated.
+
+## Eval Harness
+
+Phase 11 adds deterministic regression coverage without real LLM or Qdrant calls.
+
+Run the focused eval suite:
+
+```bash
+.venv/bin/pytest tests/evals -q
+```
+
+Run the standalone regression summary:
+
+```bash
+.venv/bin/python -m app.evals.regression_runner
+```
+
+The eval harness uses fixed in-code fixtures, fake providers, a deterministic embedding stub, and
+the in-memory vector store. It is intended to catch engine regressions in retrieval, visibility,
+role consistency, memory curation behavior, and cloud routing policy.
 
 Actor turns retrieve from session memory, persona memory, and canon lore collections. Retrieval
 fails open: if Qdrant or local embeddings are unavailable, the turn continues without retrieved
