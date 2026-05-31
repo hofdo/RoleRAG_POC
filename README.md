@@ -26,7 +26,6 @@ Not implemented:
 - multi-user support
 - streaming API
 - production deployment hardening
-- visible CI in this repository
 - automatic indexing of persisted SQLite memories into Qdrant
 
 ## Quickstart
@@ -46,9 +45,11 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 docker compose up -d qdrant
 python -m app.cli config
+python -m app.cli health
 ```
 
-`python -m app.cli config` is the basic local configuration check for a fresh clone.
+`python -m app.cli health` is the dependency-free local configuration check for a fresh clone. It
+does not probe SQLite, Qdrant, or model providers.
 
 ### Start a Session
 
@@ -116,11 +117,11 @@ LOCAL_LLM_API_KEY=ollama
 LOCAL_LLM_MODEL=qwen3:8b
 ```
 
-The app does not contain provider-specific gameplay logic. It relies on the configured endpoint speaking the OpenAI-compatible chat-completions shape used by [app/llm/openai_compatible.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/openai_compatible.py).
+The app does not contain provider-specific gameplay logic. It relies on the configured endpoint speaking the OpenAI-compatible chat-completions shape used by [app/llm/openai_compatible.py](app/llm/openai_compatible.py).
 
 ## Environment and Routing
 
-The settings model lives in [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py). `.env.example` mirrors the actual fields used by `Settings`.
+The settings model lives in [app/config.py](app/config.py). `.env.example` mirrors the actual fields used by `Settings`.
 
 Key values:
 
@@ -161,20 +162,20 @@ Critic evaluation and memory extraction stay local in all modes.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/cli.py) exposes `config`, `start-session`, `resume`, `route`, `ingest`, and `turn`.
-- `FastAPI API`: [app/main.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/main.py) and [app/api/routes.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/api/routes.py) expose the same orchestrator through HTTP.
-- `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
-- `ActorAgent`: [app/agents/actor_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/actor_agent.py) performs text generation only.
-- `CriticAgent`: [app/agents/critic_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/critic_agent.py) evaluates drafts and builds repair prompts.
-- `MemoryCurator`: [app/agents/memory_curator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/memory_curator.py) extracts structured durable-memory candidates.
-- `RAG`: [app/rag/](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag) handles chunking, embeddings, ingestion, retrieval, and vector-store access.
-- `SQLite persistence`: [app/persistence/](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence) stores sessions, turns, and memory episodes.
-- `Composition`: [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py) wires settings, providers, repositories, and retrieval.
+- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `start-session`, `resume`, `route`, `ingest`, and `turn`.
+- `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
+- `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
+- `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
+- `CriticAgent`: [app/agents/critic_agent.py](app/agents/critic_agent.py) evaluates drafts and builds repair prompts.
+- `MemoryCurator`: [app/agents/memory_curator.py](app/agents/memory_curator.py) extracts structured durable-memory candidates.
+- `RAG`: [app/rag/](app/rag) handles chunking, embeddings, ingestion, retrieval, and vector-store access.
+- `SQLite persistence`: [app/persistence/](app/persistence) stores sessions, turns, and memory episodes.
+- `Composition`: [app/composition.py](app/composition.py) wires settings, providers, repositories, and retrieval.
 
 More detail:
 
-- [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md)
-- [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md)
+- [docs/08_agent_handoff.md](docs/08_agent_handoff.md)
+- [docs/09_current_architecture_map.md](docs/09_current_architecture_map.md)
 
 ## Safety Boundaries
 
@@ -199,6 +200,12 @@ Inspect resolved settings:
 
 ```bash
 python -m app.cli config
+```
+
+Run the dependency-free health check:
+
+```bash
+python -m app.cli health
 ```
 
 Inspect routing decisions:
@@ -313,7 +320,6 @@ The eval harness covers retrieval quality, visibility boundaries, role consisten
 - no authentication or multi-user isolation
 - no streaming API
 - no production deployment hardening
-- no visible CI in the repository
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
 - durable SQLite memories are not automatically re-indexed into Qdrant
@@ -321,9 +327,8 @@ The eval harness covers retrieval quality, visibility boundaries, role consisten
 
 ## Safe Next Steps
 
-The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/10_next_steps_after_mvp.md). The short version:
+The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_next_steps_after_mvp.md). The short version:
 
-- add CI for lint, typing, tests, and evals
 - improve integration coverage
 - add memory indexing and better retrieval ranking
 - add optional reranking
@@ -332,10 +337,10 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 
 ## Additional Documentation
 
-- [docs/01_product_goal.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/01_product_goal.md)
-- [docs/02_architecture.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/02_architecture.md)
-- [docs/03_implementation_guide.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/03_implementation_guide.md)
-- [docs/04_agent_workflows.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/04_agent_workflows.md)
-- [docs/05_rag_memory_design.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/05_rag_memory_design.md)
-- [docs/06_local_cloud_model_strategy.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/06_local_cloud_model_strategy.md)
-- [docs/07_mvp_phases.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/07_mvp_phases.md)
+- [docs/01_product_goal.md](docs/01_product_goal.md)
+- [docs/02_architecture.md](docs/02_architecture.md)
+- [docs/03_implementation_guide.md](docs/03_implementation_guide.md)
+- [docs/04_agent_workflows.md](docs/04_agent_workflows.md)
+- [docs/05_rag_memory_design.md](docs/05_rag_memory_design.md)
+- [docs/06_local_cloud_model_strategy.md](docs/06_local_cloud_model_strategy.md)
+- [docs/07_mvp_phases.md](docs/07_mvp_phases.md)

@@ -15,6 +15,7 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 docker compose up -d qdrant
 python -m app.cli config
+python -m app.cli health
 ```
 
 ### Local model
@@ -49,9 +50,10 @@ Without Qdrant or embeddings, turn execution continues without retrieved context
 
 ## CLI Operations
 
-Commands exposed by [app/cli.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/cli.py):
+Commands exposed by [app/cli.py](../app/cli.py):
 
 - `python -m app.cli config`
+- `python -m app.cli health`
 - `python -m app.cli start-session`
 - `python -m app.cli resume`
 - `python -m app.cli route`
@@ -79,6 +81,9 @@ python -m app.cli turn \
 
 `rolerag` is also installed as a console script and exposes the same commands.
 
+`health` reports app metadata and redacted settings without probing SQLite, Qdrant, or model
+providers.
+
 ## API Operations
 
 Start the API:
@@ -93,11 +98,11 @@ Implemented endpoints:
 - `POST /sessions/{session_id}/turns`
 - `GET /sessions/{session_id}`
 
-The API and CLI both call the same service wiring in [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py).
+The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
 
 ## Config Notes
 
-The active settings fields are defined in [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py). They currently include:
+The active settings fields are defined in [app/config.py](../app/config.py). They currently include:
 
 - `APP_ENV`
 - `DATABASE_PATH`
@@ -158,7 +163,7 @@ Safe extension means staying inside the current ownership boundaries:
 
 ## Related Documents
 
-- [docs/04_agent_workflows.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/04_agent_workflows.md)
-- [docs/05_rag_memory_design.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/05_rag_memory_design.md)
-- [docs/06_local_cloud_model_strategy.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/06_local_cloud_model_strategy.md)
-- [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md)
+- [docs/04_agent_workflows.md](04_agent_workflows.md)
+- [docs/05_rag_memory_design.md](05_rag_memory_design.md)
+- [docs/06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md)
+- [docs/08_agent_handoff.md](08_agent_handoff.md)

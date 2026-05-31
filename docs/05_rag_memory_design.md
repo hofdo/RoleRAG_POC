@@ -40,7 +40,7 @@ Qdrant is an index, not the authoritative state store.
 
 ## Ingestion
 
-Implemented in [app/rag/ingestion.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/ingestion.py).
+Implemented in [app/rag/ingestion.py](../app/rag/ingestion.py).
 
 Current behavior:
 
@@ -56,7 +56,7 @@ Current limitation:
 
 ## Retrieval
 
-Implemented in [app/rag/retriever.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/retriever.py).
+Implemented in [app/rag/retriever.py](../app/rag/retriever.py).
 
 Actor retrieval combines:
 
@@ -88,7 +88,7 @@ The critic may inspect hidden fields for leak detection. The actor does not.
 
 ## Context Budgeting
 
-Implemented in [app/orchestration/context_budget.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_budget.py).
+Implemented in [app/orchestration/context_budget.py](../app/orchestration/context_budget.py).
 
 Current settings:
 
@@ -105,9 +105,9 @@ The budget layer:
 
 Implemented through:
 
-- [app/agents/memory_curator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/memory_curator.py)
-- [app/memory/store.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/memory/store.py)
-- [app/persistence/repositories.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/repositories.py)
+- [app/agents/memory_curator.py](../app/agents/memory_curator.py)
+- [app/memory/store.py](../app/memory/store.py)
+- [app/persistence/repositories.py](../app/persistence/repositories.py)
 
 Current behavior:
 
@@ -152,4 +152,4 @@ Deferred but not implemented in the MVP:
 - ingestion of additional source formats
 - production retrieval observability
 
-Those items are tracked in [docs/10_next_steps_after_mvp.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/10_next_steps_after_mvp.md).
+Those items are tracked in [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).

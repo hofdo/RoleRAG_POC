@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from app import __version__
 from app.composition import (
     AppServices,
     build_actor_context_retriever,
@@ -107,6 +108,23 @@ def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppService
 def config() -> None:
     settings = get_settings()
     typer.echo(json.dumps(_redact_settings(settings), indent=2, sort_keys=True))
+
+
+@app.command()
+def health() -> None:
+    settings = get_settings()
+    typer.echo(
+        json.dumps(
+            {
+                "name": "rolerag-poc",
+                "status": "ok",
+                "version": __version__,
+                "settings": _redact_settings(settings),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 @app.command()

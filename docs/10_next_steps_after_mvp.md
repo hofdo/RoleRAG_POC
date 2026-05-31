@@ -6,16 +6,16 @@ This document lists the safest next development steps after the current MVP. It 
 
 ## Highest-Value Next Steps
 
-### 1. Add CI
+### 1. Extend CI as needed
 
-Automate:
+The repository CI already runs:
 
 - `ruff check .`
 - `mypy .`
 - `pytest`
-- optionally `python -m app.evals.regression_runner`
+- `python -m app.evals.regression_runner`
 
-This is the fastest way to preserve current behavior.
+Extend the matrix only when another supported Python version or platform needs coverage.
 
 ### 2. Improve integration coverage
 

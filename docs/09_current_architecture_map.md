@@ -126,10 +126,10 @@ graph TD
 
 ## Reading Order
 
-1. [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py)
-2. [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py)
-3. [app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py)
-4. [app/orchestration/context_builder.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_builder.py)
-5. [app/llm/router.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/router.py)
-6. [app/rag/retriever.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/retriever.py)
-7. [app/persistence/repositories.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/repositories.py)
+1. [app/config.py](../app/config.py)
+2. [app/composition.py](../app/composition.py)
+3. [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py)
+4. [app/orchestration/context_builder.py](../app/orchestration/context_builder.py)
+5. [app/llm/router.py](../app/llm/router.py)
+6. [app/rag/retriever.py](../app/rag/retriever.py)
+7. [app/persistence/repositories.py](../app/persistence/repositories.py)

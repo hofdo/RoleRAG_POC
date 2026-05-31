@@ -69,10 +69,10 @@ Phase 13 completes:
 
 ## Start-Here Documents After Phase 13
 
-- [README.md](/Users/dominique/IdeaProjects/RoleRAG_POC/README.md)
-- [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md)
-- [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md)
-- [docs/10_next_steps_after_mvp.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/10_next_steps_after_mvp.md)
+- [README.md](../README.md)
+- [docs/08_agent_handoff.md](08_agent_handoff.md)
+- [docs/09_current_architecture_map.md](09_current_architecture_map.md)
+- [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md)
 
 ## Explicit Non-Goals Still In Force
 

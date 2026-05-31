@@ -8,11 +8,11 @@ This guide is the fastest safe onboarding path for a future coding agent or deve
 
 Read in this order:
 
-1. [README.md](/Users/dominique/IdeaProjects/RoleRAG_POC/README.md)
-2. [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md)
-3. [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py)
-4. [app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py)
-5. [tests/](/Users/dominique/IdeaProjects/RoleRAG_POC/tests)
+1. [README.md](../README.md)
+2. [docs/09_current_architecture_map.md](09_current_architecture_map.md)
+3. [app/composition.py](../app/composition.py)
+4. [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py)
+5. [tests/](../tests)
 
 ## Mental Model
 
@@ -38,28 +38,28 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 
 ### CLI or API surface
 
-- CLI commands: [app/cli.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/cli.py)
-- API schemas and routes: [app/api/](/Users/dominique/IdeaProjects/RoleRAG_POC/app/api)
+- CLI commands: [app/cli.py](../app/cli.py)
+- API schemas and routes: [app/api/](../app/api)
 
 ### Turn lifecycle
 
-- orchestration: [app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py)
-- actor prompt assembly: [app/orchestration/context_builder.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_builder.py)
-- context limits: [app/orchestration/context_budget.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_budget.py)
+- orchestration: [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py)
+- actor prompt assembly: [app/orchestration/context_builder.py](../app/orchestration/context_builder.py)
+- context limits: [app/orchestration/context_budget.py](../app/orchestration/context_budget.py)
 
 ### Routing and provider behavior
 
-- settings: [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py)
-- router: [app/llm/router.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/router.py)
-- provider implementation: [app/llm/openai_compatible.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/openai_compatible.py)
+- settings: [app/config.py](../app/config.py)
+- router: [app/llm/router.py](../app/llm/router.py)
+- provider implementation: [app/llm/openai_compatible.py](../app/llm/openai_compatible.py)
 
 ### Retrieval and memory
 
-- ingestion: [app/rag/ingestion.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/ingestion.py)
-- retrieval: [app/rag/retriever.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/retriever.py)
-- vector store: [app/rag/vector_store.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/vector_store.py)
-- memory extraction: [app/agents/memory_curator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/memory_curator.py)
-- persistence: [app/persistence/repositories.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/repositories.py)
+- ingestion: [app/rag/ingestion.py](../app/rag/ingestion.py)
+- retrieval: [app/rag/retriever.py](../app/rag/retriever.py)
+- vector store: [app/rag/vector_store.py](../app/rag/vector_store.py)
+- memory extraction: [app/agents/memory_curator.py](../app/agents/memory_curator.py)
+- persistence: [app/persistence/repositories.py](../app/persistence/repositories.py)
 
 ## Known Danger Zones
 
@@ -83,6 +83,7 @@ If you change command docs or settings docs, also verify:
 
 ```bash
 python -m app.cli --help
+python -m app.cli health
 python -m app.cli config
 python -m app.cli ingest --help
 rolerag --help
@@ -90,7 +91,7 @@ rolerag --help
 
 ## Safe Next Work
 
-The next reasonable implementation areas are documented in [docs/10_next_steps_after_mvp.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/10_next_steps_after_mvp.md).
+The next reasonable implementation areas are documented in [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).
 
 Stay conservative:
 

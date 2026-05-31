@@ -1,6 +1,6 @@
 # Role-Playing Multi-Agent RAG Plan for Local and Cloud LLMs
 
-> Status: historical research reference. For implemented MVP behavior, setup, and contributor guidance, use [README.md](/Users/dominique/IdeaProjects/RoleRAG_POC/README.md), [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md), and [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md).
+> Status: historical research reference. For implemented MVP behavior, setup, and contributor guidance, use [README.md](../README.md), [docs/08_agent_handoff.md](08_agent_handoff.md), and [docs/09_current_architecture_map.md](09_current_architecture_map.md).
 
 ## Executive summary
 

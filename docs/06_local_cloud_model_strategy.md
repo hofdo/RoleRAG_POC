@@ -10,15 +10,15 @@ There is one roleplaying engine and one routing layer. Provider selection change
 
 ## Provider Layer
 
-The common request/response boundary lives in [app/llm/provider.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/provider.py).
+The common request/response boundary lives in [app/llm/provider.py](../app/llm/provider.py).
 
-The concrete implementation in the repository is [app/llm/openai_compatible.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/openai_compatible.py).
+The concrete implementation in the repository is [app/llm/openai_compatible.py](../app/llm/openai_compatible.py).
 
 Both local and cloud model access go through that same provider shape.
 
 ## Settings
 
-The current settings are defined in [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py):
+The current settings are defined in [app/config.py](../app/config.py):
 
 ```env
 LOCAL_LLM_BASE_URL=http://localhost:8080/v1
@@ -35,11 +35,11 @@ CLOUD_LLM_MAX_TOKENS=1000
 CLOUD_LLM_TEMPERATURE=0.65
 ```
 
-If `CLOUD_LLM_API_KEY=replace_me`, [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py) does not build a cloud provider.
+If `CLOUD_LLM_API_KEY=replace_me`, [app/composition.py](../app/composition.py) does not build a cloud provider.
 
 ## Implemented Routing
 
-Routing is implemented in [app/llm/router.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/router.py).
+Routing is implemented in [app/llm/router.py](../app/llm/router.py).
 
 Implemented model tasks:
 

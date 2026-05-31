@@ -40,7 +40,7 @@ This flow is finite. No component recursively calls the orchestrator.
 
 ## ActorAgent
 
-Implemented in [app/agents/actor_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/actor_agent.py).
+Implemented in [app/agents/actor_agent.py](../app/agents/actor_agent.py).
 
 Responsibilities:
 
@@ -56,7 +56,7 @@ Non-responsibilities:
 
 ## CriticAgent
 
-Implemented in [app/agents/critic_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/critic_agent.py).
+Implemented in [app/agents/critic_agent.py](../app/agents/critic_agent.py).
 
 Responsibilities:
 
@@ -71,7 +71,7 @@ Current routing behavior:
 
 ## MemoryCurator
 
-Implemented in [app/agents/memory_curator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/memory_curator.py).
+Implemented in [app/agents/memory_curator.py](../app/agents/memory_curator.py).
 
 Responsibilities:
 
@@ -86,7 +86,7 @@ Current routing behavior:
 
 ## Orchestrator Ownership
 
-[app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py) owns:
+[app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py) owns:
 
 - ordering
 - route selection inputs
@@ -101,9 +101,9 @@ The orchestrator is the only place allowed to coordinate the full lifecycle.
 
 Retrieval is deterministic code, not an agent class.
 
-- [app/rag/retriever.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag/retriever.py) builds a retrieval query from visible context and recent turns.
+- [app/rag/retriever.py](../app/rag/retriever.py) builds a retrieval query from visible context and recent turns.
 - `ActorContextRetriever` queries `session_memory`, `persona_memory`, and `canon_lore`.
-- [app/orchestration/context_budget.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_budget.py) filters to `player`-visible chunks and truncates them before prompt insertion.
+- [app/orchestration/context_budget.py](../app/orchestration/context_budget.py) filters to `player`-visible chunks and truncates them before prompt insertion.
 
 ## Failure Handling
 

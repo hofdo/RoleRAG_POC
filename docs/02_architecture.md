@@ -30,43 +30,43 @@ CLI / FastAPI
 
 ### Entry points
 
-- [app/cli.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/cli.py): Typer commands for configuration, sessions, routing, ingestion, and turns.
-- [app/main.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/main.py): FastAPI application bootstrap.
-- [app/api/routes.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/api/routes.py): thin HTTP adapters over shared services.
+- [app/cli.py](../app/cli.py): Typer commands for configuration, sessions, routing, ingestion, and turns.
+- [app/main.py](../app/main.py): FastAPI application bootstrap.
+- [app/api/routes.py](../app/api/routes.py): thin HTTP adapters over shared services.
 
 ### Wiring and settings
 
-- [app/config.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/config.py): `Settings` model loaded from `.env`.
-- [app/composition.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/composition.py): provider, repository, retriever, and orchestrator construction.
+- [app/config.py](../app/config.py): `Settings` model loaded from `.env`.
+- [app/composition.py](../app/composition.py): provider, repository, retriever, and orchestrator construction.
 
 ### Domain and orchestration
 
-- [app/domain/models.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/domain/models.py): typed state, turn, memory, and retrieval models.
-- [app/domain/visibility.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/domain/visibility.py): `player`, `gm`, and `character_private`.
-- [app/orchestration/turn_orchestrator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/turn_orchestrator.py): the core application service.
-- [app/orchestration/context_builder.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_builder.py): actor prompt assembly.
-- [app/orchestration/context_budget.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/orchestration/context_budget.py): retrieved-context budget enforcement.
+- [app/domain/models.py](../app/domain/models.py): typed state, turn, memory, and retrieval models.
+- [app/domain/visibility.py](../app/domain/visibility.py): `player`, `gm`, and `character_private`.
+- [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py): the core application service.
+- [app/orchestration/context_builder.py](../app/orchestration/context_builder.py): actor prompt assembly.
+- [app/orchestration/context_budget.py](../app/orchestration/context_budget.py): retrieved-context budget enforcement.
 
 ### Agents and provider layer
 
-- [app/agents/actor_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/actor_agent.py): generation dispatch only.
-- [app/agents/critic_agent.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/critic_agent.py): structured critique and repair-message construction.
-- [app/agents/memory_curator.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/agents/memory_curator.py): structured memory extraction.
-- [app/llm/provider.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/provider.py): common request/response models and provider protocol.
-- [app/llm/openai_compatible.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/openai_compatible.py): OpenAI-compatible provider implementation.
-- [app/llm/router.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/router.py): deterministic route selection.
+- [app/agents/actor_agent.py](../app/agents/actor_agent.py): generation dispatch only.
+- [app/agents/critic_agent.py](../app/agents/critic_agent.py): structured critique and repair-message construction.
+- [app/agents/memory_curator.py](../app/agents/memory_curator.py): structured memory extraction.
+- [app/llm/provider.py](../app/llm/provider.py): common request/response models and provider protocol.
+- [app/llm/openai_compatible.py](../app/llm/openai_compatible.py): OpenAI-compatible provider implementation.
+- [app/llm/router.py](../app/llm/router.py): deterministic route selection.
 
 ### Persistence and retrieval
 
-- [app/persistence/file_loader.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/file_loader.py): JSON world, scene, and persona loading.
-- [app/persistence/sqlite.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/sqlite.py): SQLite connection and schema initialization.
-- [app/persistence/repositories.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/persistence/repositories.py): session, turn, and memory repositories.
-- [app/memory/store.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/memory/store.py): recent-dialogue and memory-episode store adapters.
-- [app/rag/](/Users/dominique/IdeaProjects/RoleRAG_POC/app/rag): chunking, embeddings, ingestion, retriever, and vector-store abstractions.
+- [app/persistence/file_loader.py](../app/persistence/file_loader.py): JSON world, scene, and persona loading.
+- [app/persistence/sqlite.py](../app/persistence/sqlite.py): SQLite connection and schema initialization.
+- [app/persistence/repositories.py](../app/persistence/repositories.py): session, turn, and memory repositories.
+- [app/memory/store.py](../app/memory/store.py): recent-dialogue and memory-episode store adapters.
+- [app/rag/](../app/rag): chunking, embeddings, ingestion, retriever, and vector-store abstractions.
 
 ### Evals
 
-- [app/evals/](/Users/dominique/IdeaProjects/RoleRAG_POC/app/evals): deterministic fixture-based regression checks.
+- [app/evals/](../app/evals): deterministic fixture-based regression checks.
 
 ## Ownership Boundaries
 
@@ -129,7 +129,7 @@ Actor prompts include only `player`-visible retrieved chunks. Hidden fields may 
 
 ## Cloud Routing
 
-The router in [app/llm/router.py](/Users/dominique/IdeaProjects/RoleRAG_POC/app/llm/router.py) is deterministic.
+The router in [app/llm/router.py](../app/llm/router.py) is deterministic.
 
 - `off`: cloud is never used
 - `ask`: routes may indicate cloud, but the runtime avoids silent cloud calls
@@ -169,4 +169,4 @@ Any future change should preserve these invariants:
 - retrieval stays optional at runtime failure points
 - tests remain runnable without real providers
 
-See [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md) for a module map and [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md) for contributor guidance.
+See [docs/09_current_architecture_map.md](09_current_architecture_map.md) for a module map and [docs/08_agent_handoff.md](08_agent_handoff.md) for contributor guidance.
