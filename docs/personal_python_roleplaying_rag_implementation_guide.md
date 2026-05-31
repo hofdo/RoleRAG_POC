@@ -1,4 +1,6 @@
 # Personal Python Roleplaying RAG System
+
+> Status: historical design reference. It contains earlier implementation planning and no longer defines the repository's exact current behavior. For the implemented MVP, use [README.md](/Users/dominique/IdeaProjects/RoleRAG_POC/README.md), [docs/03_implementation_guide.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/03_implementation_guide.md), and [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md).
 ## A Practical Implementation Guide for One User, One Local 8B Model, and One Cloud Fallback Model
 
 **Scope:** personal roleplaying engine  

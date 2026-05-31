@@ -1,5 +1,7 @@
 # Role-Playing Multi-Agent RAG Plan for Local and Cloud LLMs
 
+> Status: historical research reference. For implemented MVP behavior, setup, and contributor guidance, use [README.md](/Users/dominique/IdeaProjects/RoleRAG_POC/README.md), [docs/08_agent_handoff.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/08_agent_handoff.md), and [docs/09_current_architecture_map.md](/Users/dominique/IdeaProjects/RoleRAG_POC/docs/09_current_architecture_map.md).
+
 ## Executive summary
 
 The paper at arXiv:2601.10122v1 is valuable as a **field map** for role-playing language agents, but it is **not** a system paper in the usual engineering sense. Its strongest contribution is a taxonomy: role-playing systems have moved from rule/template methods, to style imitation, and then to personality-, memory-, and behaviour-driven agents. The paper also usefully organises the field around five practical concerns: personality modelling, memory mechanisms, behaviour and decision control, role-specific data construction, and evaluation. However, it does not itself provide a novel end-to-end architecture, a reproducible experimental package, or an implementation blueprint. citeturn2view0turn4view0turn5view0
