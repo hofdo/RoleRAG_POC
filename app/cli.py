@@ -7,18 +7,26 @@ from typing import Annotated
 
 import typer
 
-from app.agents import CriticAgent, MemoryCurator
+from app.composition import (
+    AppServices,
+    build_actor_context_retriever,
+    build_cloud_provider,
+    build_critic_agent,
+    build_embedding_provider,
+    build_file_loader,
+    build_local_provider,
+    build_memory_curator,
+    build_vector_store,
+    redact_settings,
+)
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult, Visibility
-from app.llm.openai_compatible import OpenAICompatibleProvider
-from app.llm.provider import LlmProvider
 from app.llm.router import ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
-    FileDataLoader,
     SessionNotFoundError,
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
@@ -27,96 +35,57 @@ from app.persistence import (
     initialize_database,
 )
 from app.rag import (
-    ActorContextRetriever,
     ChunkingConfig,
-    EmbeddingProvider,
-    FastEmbedEmbeddingProvider,
     IngestionRequest,
-    QdrantVectorStore,
     RagCollection,
-    Retriever,
-    VectorStore,
     ingest_document,
 )
 
 app = typer.Typer(help="RoleRAG CLI")
 
 
-def _redact_settings(settings: Settings) -> dict[str, object]:
-    values = settings.model_dump()
-    values["local_llm_api_key"] = "***"
-    values["cloud_llm_api_key"] = "***"
-    return values
-
-
-def _build_local_provider(settings: Settings) -> LlmProvider:
-    return OpenAICompatibleProvider(
-        provider_name="local",
-        base_url=settings.local_llm_base_url,
-        api_key=settings.local_llm_api_key,
-    )
-
-
-def _build_cloud_provider(settings: Settings) -> LlmProvider | None:
-    if settings.cloud_llm_api_key == "replace_me":
-        return None
-    return OpenAICompatibleProvider(
-        provider_name="cloud",
-        base_url=settings.cloud_llm_base_url,
-        api_key=settings.cloud_llm_api_key,
-    )
-
-
-def _build_critic_agent() -> CriticAgent:
-    return CriticAgent()
-
-
-def _build_file_loader() -> FileDataLoader:
-    return FileDataLoader()
-
-
-def _build_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    return FastEmbedEmbeddingProvider(model_name=settings.embedding_model)
-
-
-def _build_vector_store(settings: Settings) -> VectorStore:
-    return QdrantVectorStore(url=settings.qdrant_url)
-
-
-def _build_actor_context_retriever(settings: Settings) -> ActorContextRetriever:
-    return ActorContextRetriever(
-        retriever=Retriever(
-            embedding_provider=_build_embedding_provider(settings),
-            vector_store=_build_vector_store(settings),
-            default_top_k=settings.rag_default_top_k,
-        )
-    )
-
-
-def _build_orchestrator(
-    settings: Settings,
-    provider: LlmProvider,
+async def _run_turn(
     *,
-    actor_context_retriever: ActorContextRetriever | None = None,
-) -> TurnOrchestrator:
+    services: AppServices,
+    turn_input: TurnInput,
+) -> TurnResult:
+    return await services.orchestrator.run_turn(turn_input=turn_input)
+
+
+_redact_settings = redact_settings
+_build_local_provider = build_local_provider
+_build_cloud_provider = build_cloud_provider
+_build_critic_agent = build_critic_agent
+_build_file_loader = build_file_loader
+_build_memory_curator = build_memory_curator
+_build_embedding_provider = build_embedding_provider
+_build_vector_store = build_vector_store
+_build_actor_context_retriever = build_actor_context_retriever
+
+
+def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppServices:
     connection = connect_sqlite(settings.database_path)
     initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
     turn_repository = SQLiteTurnRepository(connection)
     memory_repository = SQLiteMemoryRepository(connection)
-    return TurnOrchestrator(
+    recent_dialogue_store = RecentDialogueStore(
+        turn_repository=turn_repository,
+        recent_turns=settings.recent_dialogue_turns,
+    )
+    orchestrator = TurnOrchestrator(
         loader=_build_file_loader(),
-        provider=provider,
+        provider=_build_local_provider(settings),
         cloud_provider=_build_cloud_provider(settings),
         critic_agent=_build_critic_agent(),
-        session_repository=SQLiteSessionRepository(connection),
+        session_repository=session_repository,
         turn_repository=turn_repository,
-        recent_dialogue_store=RecentDialogueStore(
-            turn_repository=turn_repository,
-            recent_turns=settings.recent_dialogue_turns,
-        ),
+        recent_dialogue_store=recent_dialogue_store,
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
-        memory_curator=MemoryCurator(),
-        actor_context_retriever=actor_context_retriever,
+        memory_curator=_build_memory_curator(),
+        actor_context_retriever=(
+            _build_actor_context_retriever(settings) if enable_retrieval else None
+        ),
         retrieval_top_k=settings.rag_default_top_k,
         max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
         local_model=settings.local_llm_model,
@@ -127,14 +96,11 @@ def _build_orchestrator(
         cloud_temperature=settings.cloud_llm_temperature,
         cloud_mode=settings.cloud_mode,
     )
-
-
-async def _run_turn(
-    *,
-    orchestrator: TurnOrchestrator,
-    turn_input: TurnInput,
-) -> TurnResult:
-    return await orchestrator.run_turn(turn_input=turn_input)
+    return AppServices(
+        connection=connection,
+        orchestrator=orchestrator,
+        recent_dialogue_store=recent_dialogue_store,
+    )
 
 
 @app.command()
@@ -158,10 +124,9 @@ def start_session(
     ] = None,
 ) -> None:
     settings = get_settings()
-    provider = _build_local_provider(settings)
-    orchestrator = _build_orchestrator(settings, provider)
+    services = _build_services(settings, enable_retrieval=False)
     try:
-        session = orchestrator.create_session(
+        session = services.orchestrator.create_session(
             world_id=world_id,
             scene_id=scene_id,
             active_persona_id=active_persona_id,
@@ -169,8 +134,10 @@ def start_session(
             session_id=session_id,
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
+        services.close()
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
+    services.close()
     typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
@@ -179,13 +146,14 @@ def resume(
     session_id: Annotated[str, typer.Option(help="Session identifier")],
 ) -> None:
     settings = get_settings()
-    provider = _build_local_provider(settings)
-    orchestrator = _build_orchestrator(settings, provider)
+    services = _build_services(settings, enable_retrieval=False)
     try:
-        session = orchestrator.resume_session(session_id)
+        session = services.orchestrator.resume_session(session_id)
     except SessionNotFoundError as exc:
+        services.close()
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
+    services.close()
     typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
@@ -267,12 +235,7 @@ def turn(
     ] = False,
 ) -> None:
     settings = get_settings()
-    provider = _build_local_provider(settings)
-    orchestrator = _build_orchestrator(
-        settings,
-        provider,
-        actor_context_retriever=_build_actor_context_retriever(settings),
-    )
+    services = _build_services(settings, enable_retrieval=True)
     turn_input = TurnInput(
         session_id=session_id,
         message=message,
@@ -281,13 +244,15 @@ def turn(
     try:
         result = asyncio.run(
             _run_turn(
-                orchestrator=orchestrator,
+                services=services,
                 turn_input=turn_input,
             )
         )
     except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
+        services.close()
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
+    services.close()
     for warning in result.warnings:
         typer.echo(f"Warning: {warning}", err=True)
     typer.echo(result.text)

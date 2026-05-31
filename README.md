@@ -20,9 +20,8 @@ This repository currently includes:
 - retrieval-aware actor prompts with bounded player-visible context
 - critic-guided response validation with one bounded local repair attempt
 - explicit local/cloud fallback policy with route reasons and ask-mode warnings
+- a minimal FastAPI API for sessions and turns
 - a deterministic pytest-based evaluation harness for retrieval, secrecy, memory, role consistency, and cloud routing regressions
-
-This repository does not expose API endpoints yet.
 
 ## Local model runtime
 
@@ -60,12 +59,43 @@ python -m app.cli turn --session-id <session-id> --message "Give me the highest 
 python -m app.cli route --task actor_response
 python -m app.cli route --task actor_response --request-cloud
 python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world --tag palace
+uvicorn app.main:app --reload
 pytest
 ruff check .
 mypy app
 ```
 
 All commands assume the virtualenv is activated.
+
+## API
+
+Start the API:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Create a session:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"world_id":"demo_world","scene_id":"rose-gallery","player_name":"Player","active_persona_id":"archivist"}'
+```
+
+Run a turn:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/<session-id>/turns \
+  -H "Content-Type: application/json" \
+  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist","request_cloud":false}'
+```
+
+Read session state:
+
+```bash
+curl http://127.0.0.1:8000/sessions/<session-id>
+```
 
 ## Eval Harness
 
