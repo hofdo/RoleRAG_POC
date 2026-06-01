@@ -1,0 +1,12 @@
+{
+  "documents": [
+    {
+      "path": "demo_lore.md",
+      "visibility": "player",
+      "source_type": "lore",
+      "tags": ["rose-gallery", "winter-palace", "court-intrigue"],
+      "world_id": "demo_world",
+      "scene_id": "rose-gallery"
+    }
+  ]
+}

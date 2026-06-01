@@ -10,13 +10,14 @@ from app.cli import app
 runner = CliRunner()
 
 
-def test_validate_content_cli_returns_zero_for_demo_warnings() -> None:
+def test_validate_content_cli_returns_zero_for_demo_content() -> None:
     result = runner.invoke(app, ["validate-content"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["status"] == "warn"
+    assert payload["status"] == "pass"
     assert payload["errors"] == []
+    assert payload["warnings"] == []
 
 
 def test_validate_content_cli_returns_non_zero_on_errors(tmp_path: Path) -> None:

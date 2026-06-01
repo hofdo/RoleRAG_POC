@@ -70,8 +70,8 @@ def test_demo_content_validates_without_errors() -> None:
     report = validate_content(content_root=Path("data"))
 
     assert report.errors == []
-    assert report.status == ContentValidationStatus.WARN
-    assert any(issue.code == "lore_manifest_missing" for issue in report.warnings)
+    assert report.warnings == []
+    assert report.status == ContentValidationStatus.PASS
 
 
 def test_missing_persona_reference_is_reported_as_error(tmp_path: Path) -> None:
