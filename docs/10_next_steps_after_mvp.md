@@ -19,7 +19,8 @@ Extend the matrix only when another supported Python version or platform needs c
 
 ### 2. Improve integration coverage
 
-The repository already has solid unit and eval coverage. The next gap is broader integration coverage around:
+The repository now has deterministic runtime verification through `doctor` and `smoke-run`.
+The next gap is broader integration coverage around:
 
 - CLI plus retrieval wiring
 - API plus persistence plus retrieval

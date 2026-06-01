@@ -21,6 +21,13 @@ from app.composition import (
     redact_settings,
 )
 from app.config import Settings, get_settings
+from app.diagnostics import (
+    DiagnosticStatus,
+    RuntimeDiagnosticsReport,
+    SmokeRunSummary,
+    build_runtime_diagnostics,
+    run_smoke,
+)
 from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.router import ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
@@ -145,6 +152,65 @@ def health() -> None:
             sort_keys=True,
         )
     )
+
+
+def run_doctor(
+    *,
+    settings: Settings,
+    check_qdrant: bool = False,
+    check_local_provider: bool = False,
+) -> RuntimeDiagnosticsReport:
+    return build_runtime_diagnostics(
+        settings,
+        check_qdrant=check_qdrant,
+        check_local_provider=check_local_provider,
+    )
+
+
+def _echo_json(payload: object) -> None:
+    if hasattr(payload, "model_dump"):
+        content = payload.model_dump(mode="json")
+    else:
+        content = payload
+    typer.echo(json.dumps(content, indent=2, sort_keys=True))
+
+
+def _status_exit_code(status: DiagnosticStatus) -> int:
+    return 1 if status == DiagnosticStatus.FAIL else 0
+
+
+@app.command()
+def doctor(
+    check_qdrant: Annotated[
+        bool,
+        typer.Option(help="Verify Qdrant reachability"),
+    ] = False,
+    check_local_provider: Annotated[
+        bool,
+        typer.Option(help="Verify local provider reachability"),
+    ] = False,
+) -> None:
+    settings = get_settings()
+    report = run_doctor(
+        settings=settings,
+        check_qdrant=check_qdrant,
+        check_local_provider=check_local_provider,
+    )
+    _echo_json(report)
+    raise typer.Exit(code=_status_exit_code(report.status))
+
+
+@app.command("smoke-run")
+def smoke_run(
+    real_runtime: Annotated[
+        bool,
+        typer.Option(help="Also run optional live Qdrant and local-provider checks"),
+    ] = False,
+) -> None:
+    settings = get_settings()
+    summary: SmokeRunSummary = run_smoke(settings=settings, real_runtime=real_runtime)
+    _echo_json(summary)
+    raise typer.Exit(code=_status_exit_code(summary.status))
 
 
 @app.command()

@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.config import Settings
+from app.diagnostics.runtime_checks import (
+    DiagnosticStatus,
+    build_runtime_diagnostics,
+    is_usable_cloud_key,
+)
+from app.llm.router import CloudMode
+
+
+def test_is_usable_cloud_api_key_rejects_placeholders() -> None:
+    assert is_usable_cloud_key("replace_me") is False
+    assert is_usable_cloud_key("  your_api_key_here  ") is False
+    assert is_usable_cloud_key("") is False
+    assert is_usable_cloud_key("real-secret") is True
+
+
+def test_runtime_diagnostics_passes_config_and_skips_network_checks_by_default(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.OFF,
+    )
+
+    report = build_runtime_diagnostics(settings)
+
+    checks = {check.name: check for check in report.checks}
+    assert report.status == DiagnosticStatus.PASS
+    assert checks["settings"].status == DiagnosticStatus.PASS
+    assert checks["sqlite"].status == DiagnosticStatus.PASS
+    assert checks["demo_data"].status == DiagnosticStatus.PASS
+    assert checks["qdrant"].status == DiagnosticStatus.SKIPPED
+    assert checks["local_provider"].status == DiagnosticStatus.SKIPPED
+
+
+def test_runtime_diagnostics_warns_when_cloud_mode_ask_has_placeholder_key(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.ASK,
+        cloud_llm_api_key="replace_me",
+    )
+
+    report = build_runtime_diagnostics(settings)
+
+    cloud_check = next(check for check in report.checks if check.name == "cloud_config")
+    assert cloud_check.status == DiagnosticStatus.WARN
+    assert "placeholder" in cloud_check.message.lower()
+    assert "replace_me" not in cloud_check.message
+
+
+def test_runtime_diagnostics_fails_when_cloud_mode_auto_has_placeholder_key(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.AUTO,
+        cloud_llm_api_key="replace_me",
+    )
+
+    report = build_runtime_diagnostics(settings)
+
+    cloud_check = next(check for check in report.checks if check.name == "cloud_config")
+    assert report.status == DiagnosticStatus.FAIL
+    assert cloud_check.status == DiagnosticStatus.FAIL
+
+
+def test_runtime_diagnostics_never_leaks_api_keys(tmp_path: Path) -> None:
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        local_llm_api_key="super-secret-local",
+        cloud_llm_api_key="super-secret-cloud",
+    )
+
+    report = build_runtime_diagnostics(settings)
+    payload = report.model_dump(mode="json")
+    serialized = str(payload)
+
+    assert "super-secret-local" not in serialized
+    assert "super-secret-cloud" not in serialized

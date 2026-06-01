@@ -18,6 +18,8 @@ Implemented in this repository:
 - retrieval-aware actor prompt construction with visibility filtering
 - deterministic retrieval reranking across `session_memory`, `persona_memory`, and `canon_lore`
 - retrieval diagnostics for selected chunks through a CLI debug command
+- runtime diagnostics through `doctor`
+- deterministic end-to-end runtime smoke verification through `smoke-run`
 - bounded critic and repair flow
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
@@ -48,10 +50,18 @@ cp .env.example .env
 docker compose up -d qdrant
 python -m app.cli config
 python -m app.cli health
+python -m app.cli doctor
+python -m app.cli smoke-run
 ```
 
 `python -m app.cli health` is the dependency-free local configuration check for a fresh clone. It
 does not probe SQLite, Qdrant, or model providers.
+
+`python -m app.cli doctor` performs operational checks for settings, temporary SQLite
+initialization, demo data loading, and optional Qdrant or local-provider reachability.
+
+`python -m app.cli smoke-run` executes a deterministic end-to-end MVP verification using a
+temporary SQLite database, in-memory retrieval, and fake provider responses.
 
 ### Start a Session
 
@@ -164,7 +174,7 @@ Critic evaluation and memory extraction stay local in all modes.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
+- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
@@ -173,6 +183,7 @@ Critic evaluation and memory extraction stay local in all modes.
 - `RAG`: [app/rag/](app/rag) handles chunking, embeddings, ingestion, retrieval, and vector-store access.
 - `SQLite persistence`: [app/persistence/](app/persistence) stores sessions, turns, and memory episodes.
 - `Composition`: [app/composition.py](app/composition.py) wires settings, providers, repositories, and retrieval.
+- `Diagnostics`: [app/diagnostics/](app/diagnostics) provides runtime environment checks and the deterministic smoke runner.
 
 More detail:
 
@@ -208,6 +219,26 @@ Run the dependency-free health check:
 
 ```bash
 python -m app.cli health
+```
+
+Run runtime diagnostics:
+
+```bash
+python -m app.cli doctor
+python -m app.cli doctor --check-qdrant
+python -m app.cli doctor --check-local-provider
+```
+
+Run the deterministic end-to-end smoke path:
+
+```bash
+python -m app.cli smoke-run
+```
+
+Run optional live dependency checks without real generation:
+
+```bash
+python -m app.cli smoke-run --real-runtime
 ```
 
 Inspect routing decisions:
@@ -246,6 +277,56 @@ Inspect ranked retrieval for a query without calling an LLM:
 python -m app.cli retrieve-debug \
   --session-id <session-id> \
   --query "What did I promise the archivist?"
+```
+
+## Runtime Verification
+
+Safe local diagnostics:
+
+```bash
+python -m app.cli health
+python -m app.cli doctor
+python -m app.cli smoke-run
+```
+
+Optional live dependency checks:
+
+```bash
+docker compose up -d qdrant
+python -m app.cli doctor --check-qdrant --check-local-provider
+python -m app.cli smoke-run --real-runtime
+```
+
+Operational rules:
+
+- `health` is config-only and never probes SQLite, Qdrant, or providers.
+- `doctor` never mutates the configured runtime database. It verifies SQLite using a temporary file.
+- `smoke-run` uses a temporary SQLite database, deterministic embeddings, in-memory retrieval, and fake provider responses by default.
+- `--real-runtime` adds shallow Qdrant and local-provider reachability checks only. It does not call cloud APIs, real completions, or write to Qdrant.
+- cloud placeholder keys such as `replace_me` are treated as unusable and reported clearly.
+
+Failure interpretation:
+
+- `status=pass`: the checked path completed successfully.
+- `status=warn`: the local MVP can still operate in safe mode, but an optional dependency or cloud intent is incomplete.
+- `status=fail`: an expected local runtime requirement is missing or misconfigured.
+- `status=skipped`: the check was intentionally not run.
+
+Typical remediations:
+
+```bash
+docker compose up -d qdrant
+python -m app.cli config
+python -m app.cli doctor --check-local-provider
+```
+
+If you want to exercise a real local model after the safe smoke passes, use the existing manual flow:
+
+```bash
+python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world
+python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --active-persona-id archivist --player-name Avery
+python -m app.cli turn --session-id <session-id> --message "What have you heard about the regent?"
+python -m app.cli retrieve-debug --session-id <session-id> --query "What did I promise the archivist?"
 ```
 
 ## API Usage

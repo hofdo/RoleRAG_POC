@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.agents import CriticAgent, MemoryCurator
-from app.config import Settings
+from app.config import Settings, is_usable_cloud_api_key
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
@@ -53,7 +53,7 @@ def build_local_provider(settings: Settings) -> LlmProvider:
 
 
 def build_cloud_provider(settings: Settings) -> LlmProvider | None:
-    if settings.cloud_llm_api_key == "replace_me":
+    if not is_usable_cloud_api_key(settings.cloud_llm_api_key):
         return None
     return OpenAICompatibleProvider(
         provider_name="cloud",

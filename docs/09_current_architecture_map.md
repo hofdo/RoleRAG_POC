@@ -60,6 +60,7 @@ graph TD
 | `app/persistence/` | JSON loading plus SQLite schema and repositories |
 | `app/memory/` | recent-dialogue and durable-memory adapters |
 | `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
+| `app/diagnostics/` | runtime environment checks and deterministic end-to-end smoke verification |
 | `app/evals/` | deterministic regression fixtures and report runner |
 
 ## Runtime Components
@@ -68,6 +69,7 @@ graph TD
 
 - primary local development interface
 - shares the same service composition path as the API
+- also exposes operator-facing runtime verification through `doctor` and `smoke-run`
 
 ### FastAPI API
 

@@ -5,6 +5,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.llm.router import CloudMode
 
+_PLACEHOLDER_CLOUD_KEYS = {
+    "",
+    "replace_me",
+    "changeme",
+    "your_api_key_here",
+    "your-api-key-here",
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -38,3 +46,7 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def is_usable_cloud_api_key(value: str) -> bool:
+    return value.strip().lower() not in _PLACEHOLDER_CLOUD_KEYS

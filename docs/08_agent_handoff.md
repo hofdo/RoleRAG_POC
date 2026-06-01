@@ -60,6 +60,7 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 - vector store: [app/rag/vector_store.py](../app/rag/vector_store.py)
 - memory extraction: [app/agents/memory_curator.py](../app/agents/memory_curator.py)
 - persistence: [app/persistence/repositories.py](../app/persistence/repositories.py)
+- diagnostics and smoke runner: [app/diagnostics/](../app/diagnostics)
 
 ## Known Danger Zones
 
@@ -87,12 +88,28 @@ If you change command docs or settings docs, also verify:
 ```bash
 python -m app.cli --help
 python -m app.cli health
+python -m app.cli doctor
+python -m app.cli smoke-run
 python -m app.cli config
 python -m app.cli ingest --help
 python -m app.cli reindex-memories --help
 python -m app.cli retrieve-debug --help
 rolerag --help
 ```
+
+For optional live dependency checks:
+
+```bash
+python -m app.cli doctor --check-qdrant --check-local-provider
+python -m app.cli smoke-run --real-runtime
+```
+
+Interpretation:
+
+- `health` is config-only.
+- `doctor` verifies temporary SQLite initialization, demo data loading, and optional external reachability checks.
+- `smoke-run` exercises the real orchestrator, persistence, memory indexing, and retrieval path with fake provider responses and in-memory retrieval.
+- live checks stay shallow and read-only; they do not run real completions or mutate Qdrant.
 
 ## Safe Next Work
 
