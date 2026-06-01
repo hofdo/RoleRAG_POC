@@ -39,6 +39,8 @@ from app.rag import (
     ChunkingConfig,
     IngestionRequest,
     RagCollection,
+    RetrievalResult,
+    build_retrieval_query,
     ingest_document,
 )
 
@@ -291,6 +293,55 @@ def reindex_memories(
                 "indexed_count": result.indexed_count,
                 "session_id": session_id,
             },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+@app.command("retrieve-debug")
+def retrieve_debug(
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
+    query: Annotated[str, typer.Option(help="User query to inspect retrieval for")],
+) -> None:
+    settings = get_settings()
+    services = _build_services(settings, enable_retrieval=False)
+    try:
+        session = services.orchestrator.resume_session(session_id)
+        persona = services.orchestrator.loader.load_persona(session.active_persona_id)
+        scene = services.orchestrator.loader.load_scene(session.active_scene_id)
+        retrieval_query = build_retrieval_query(
+            user_message=query,
+            scene=scene,
+            persona=persona,
+            recent_turns=services.recent_dialogue_store.load_recent_dialogue(session.id),
+        )
+        retrieval_result: RetrievalResult = _build_actor_context_retriever(
+            settings,
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+        ).retrieve_for_actor_with_diagnostics(
+            query=retrieval_query,
+            world_id=session.world_id,
+            session_id=session.id,
+            persona_id=persona.id,
+            scene_id=scene.id,
+            top_k=settings.rag_default_top_k,
+        )
+    except (
+        DataFileNotFoundError,
+        DataValidationError,
+        ImportError,
+        SessionNotFoundError,
+        ValueError,
+    ) as exc:
+        services.close()
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    services.close()
+    typer.echo(
+        json.dumps(
+            retrieval_result.diagnostics.model_dump(mode="json"),
             indent=2,
             sort_keys=True,
         )

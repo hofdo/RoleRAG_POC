@@ -16,6 +16,10 @@ def evaluate_retrieval_quality(fixture: EvalFixture, *, top_k: int = 3) -> Retri
     retrieved_ids = [chunk.id for chunk in chunks]
     relevant_index = _index_of(retrieved_ids, fixture.relevant_memory_chunk_id)
     irrelevant_index = _index_of(retrieved_ids, fixture.irrelevant_memory_chunk_id)
+    world_chunks = fixture.retrieve_actor_chunks_for_query(
+        query=fixture.build_world_knowledge_query(),
+        top_k=top_k,
+    )
     checks = {
         "public_lore_in_top_k": fixture.public_lore_chunk_id in retrieved_ids,
         "relevant_memory_in_top_k": fixture.relevant_memory_chunk_id in retrieved_ids,
@@ -24,6 +28,8 @@ def evaluate_retrieval_quality(fixture: EvalFixture, *, top_k: int = 3) -> Retri
             and irrelevant_index is not None
             and relevant_index < irrelevant_index
         ),
+        "canon_lore_can_win_for_world_query": bool(world_chunks)
+        and world_chunks[0].id == fixture.public_lore_chunk_id,
         "gm_only_excluded": fixture.gm_only_chunk_id not in retrieved_ids,
         "character_private_excluded": fixture.character_private_chunk_id not in retrieved_ids,
     }

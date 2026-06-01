@@ -188,7 +188,7 @@ def test_actor_context_retriever_aggregates_collections_by_score_and_scope() -> 
     assert retriever.calls[0][2] == RetrievalFilter.player_visible(session_id="session-1")
     assert retriever.calls[1][2] == RetrievalFilter.player_visible(persona_id="archivist")
     assert retriever.calls[2][2] == RetrievalFilter.player_visible(world_id="demo_world")
-    assert all(call[3] == 2 for call in retriever.calls)
+    assert all(call[3] == 4 for call in retriever.calls)
 
 
 def test_build_retrieval_query_uses_visible_context_and_latest_two_turns() -> None:

@@ -105,6 +105,12 @@ graph TD
 
 - runtime index for retrievable chunks
 
+### Retrieval ranking and diagnostics
+
+- deterministic reranking happens in `app/rag` after vector-store search results are returned
+- source weighting distinguishes `session_memory`, `persona_memory`, and `canon_lore`
+- metadata-only diagnostics stay in the CLI path and are not part of player-facing API responses
+
 ### Local/cloud abstraction
 
 - all model calls go through the same provider/request/response shape

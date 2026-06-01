@@ -67,6 +67,8 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 - Retrieval is intentionally fail-open. Do not silently change that without updating tests and docs.
 - Durable SQLite memories are indexed into `session_memory` after persistence. If indexing fails,
   the turn remains valid and `reindex-memories` can repair the derived Qdrant index.
+- Retrieval ranking is intentionally deterministic and transparent. Keep boost policy in `app/rag`,
+  preserve the original vector score, and avoid player-facing hidden-text diagnostics.
 - `MAX_LOCAL_RETRIES` is present in settings but is not the sole source of retry truth yet.
 
 ## Verification Before Claiming Success
@@ -88,6 +90,7 @@ python -m app.cli health
 python -m app.cli config
 python -m app.cli ingest --help
 python -m app.cli reindex-memories --help
+python -m app.cli retrieve-debug --help
 rolerag --help
 ```
 

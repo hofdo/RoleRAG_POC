@@ -16,6 +16,8 @@ Implemented in this repository:
 - automatic indexing of curated durable memories into session-scoped retrieval
 - Qdrant-backed vector storage for ingested lore and retrieval
 - retrieval-aware actor prompt construction with visibility filtering
+- deterministic retrieval reranking across `session_memory`, `persona_memory`, and `canon_lore`
+- retrieval diagnostics for selected chunks through a CLI debug command
 - bounded critic and repair flow
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
@@ -27,7 +29,6 @@ Not implemented:
 - multi-user support
 - streaming API
 - production deployment hardening
-- richer retrieval ranking and reranking
 
 ## Quickstart
 
@@ -163,7 +164,7 @@ Critic evaluation and memory extraction stay local in all modes.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `start-session`, `resume`, `route`, `ingest`, and `turn`.
+- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
@@ -239,6 +240,14 @@ Backfill or repair the vector index for existing SQLite memories:
 python -m app.cli reindex-memories --session-id <session-id>
 ```
 
+Inspect ranked retrieval for a query without calling an LLM:
+
+```bash
+python -m app.cli retrieve-debug \
+  --session-id <session-id> \
+  --query "What did I promise the archivist?"
+```
+
 ## API Usage
 
 Start the server:
@@ -294,8 +303,11 @@ Important current behavior:
 - document ingestion currently supports `.md` and `.txt`
 - world, scene, and persona demo data are loaded from JSON files
 - retrieval is fail-open; if Qdrant or embeddings are unavailable during a turn, generation continues without retrieved context
+- actor retrieval gathers candidates from `session_memory`, `persona_memory`, and `canon_lore`, then applies a deterministic reranking pass
+- reranking preserves vector score and adds transparent boosts for collection, matching session/scene/persona metadata, and memory importance
 - curated SQLite memory episodes are indexed into `session_memory` after persistence
 - memory indexing is fail-open during turns; use `reindex-memories` to backfill after an outage
+- `retrieve-debug` prints metadata-only diagnostics for selected chunks and does not expose hidden text
 
 ## Tests, Lint, and Evals
 
@@ -338,8 +350,8 @@ The eval harness covers retrieval quality, visibility boundaries, role consisten
 The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_next_steps_after_mvp.md). The short version:
 
 - improve integration coverage
-- improve retrieval ranking
-- add optional reranking
+- tune retrieval heuristics from eval evidence
+- expand retrieval observability if another surface needs it
 - add a frontend and streaming only after the current backend boundaries stay intact
 - add auth only if the project becomes multi-user
 

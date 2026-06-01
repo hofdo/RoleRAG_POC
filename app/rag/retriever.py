@@ -4,8 +4,10 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from app.domain import PersonaCard, RetrievedChunk, SceneState, StoredTurn
+from app.rag.diagnostics import RetrievalResult
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.models import RagCollection, RetrievalFilter
+from app.rag.ranking import RetrievalRankingContext, candidate_limit, rerank_chunks
 from app.rag.vector_store import VectorStore
 
 
@@ -62,27 +64,55 @@ class ActorContextRetriever:
         world_id: str,
         session_id: str,
         persona_id: str,
+        scene_id: str | None = None,
         top_k: int,
     ) -> list[RetrievedChunk]:
+        return self.retrieve_for_actor_with_diagnostics(
+            query=query,
+            world_id=world_id,
+            session_id=session_id,
+            persona_id=persona_id,
+            scene_id=scene_id,
+            top_k=top_k,
+        ).chunks
+
+    def retrieve_for_actor_with_diagnostics(
+        self,
+        *,
+        query: str,
+        world_id: str,
+        session_id: str,
+        persona_id: str,
+        scene_id: str | None = None,
+        top_k: int,
+    ) -> RetrievalResult:
+        per_collection_limit = candidate_limit(top_k)
         searches = [
             (RagCollection.SESSION_MEMORY, RetrievalFilter.player_visible(session_id=session_id)),
             (RagCollection.PERSONA_MEMORY, RetrievalFilter.player_visible(persona_id=persona_id)),
             (RagCollection.CANON_LORE, RetrievalFilter.player_visible(world_id=world_id)),
         ]
         candidates = [
-            chunk
+            (collection, chunk)
             for collection, filters in searches
             for chunk in self.retriever.retrieve(
                 query=query,
                 collection=collection,
                 filters=filters,
-                top_k=top_k,
+                top_k=per_collection_limit,
             )
         ]
-        deduplicated: dict[str, RetrievedChunk] = {}
-        for chunk in sorted(candidates, key=lambda item: item.score, reverse=True):
-            deduplicated.setdefault(chunk.id, chunk)
-        return list(deduplicated.values())[:top_k]
+        chunks, diagnostics = rerank_chunks(
+            context=RetrievalRankingContext(
+                query=query,
+                session_id=session_id,
+                persona_id=persona_id,
+                scene_id=scene_id,
+            ),
+            candidates=candidates,
+            top_k=top_k,
+        )
+        return RetrievalResult(chunks=chunks, diagnostics=diagnostics)
 
 
 def build_retrieval_query(

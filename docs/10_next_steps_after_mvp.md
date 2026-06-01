@@ -25,13 +25,14 @@ The repository already has solid unit and eval coverage. The next gap is broader
 - API plus persistence plus retrieval
 - cloud fallback edge cases
 
-### 3. Improve retrieval ranking
+### 3. Tune retrieval quality from evidence
 
 Safe candidates:
 
 - better query construction heuristics
 - stronger ranking signals from metadata and recency
-- optional reranking as a bounded post-retrieval step
+- broader eval coverage for retrieval regressions
+- richer operator diagnostics if another debug surface is justified
 
 ## Product-Level Follow-Ons
 

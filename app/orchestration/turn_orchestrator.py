@@ -56,6 +56,7 @@ class ActorContextRetrieving(Protocol):
         world_id: str,
         session_id: str,
         persona_id: str,
+        scene_id: str | None = None,
         top_k: int,
     ) -> list[RetrievedChunk]: ...
 
@@ -216,6 +217,7 @@ class TurnOrchestrator:
                     world_id=session.world_id,
                     session_id=session.id,
                     persona_id=persona.id,
+                    scene_id=session.active_scene_id,
                     top_k=self.context_budget.retrieved_chunks,
                 )
                 retrieval_confidence = self._compute_retrieval_confidence(retrieved_chunks)

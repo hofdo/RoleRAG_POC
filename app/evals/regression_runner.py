@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
 from app.evals.fixtures import EvalFixture, build_eval_fixture
+from app.evals.memory_recall import evaluate_memory_recall
 from app.evals.retrieval_quality import evaluate_retrieval_quality
 from app.evals.role_consistency import evaluate_role_consistency
 from app.llm.router import CloudMode, ModelProviderName, ModelTask, choose_route
@@ -27,6 +28,7 @@ def run_regressions() -> RegressionReport:
     fixture = build_eval_fixture()
     results = [
         _retrieval_result(fixture),
+        _memory_recall_result(fixture),
         _visibility_result(fixture),
         _role_consistency_result(fixture),
         asyncio.run(_memory_result(fixture)),
@@ -59,6 +61,11 @@ def _visibility_result(fixture: EvalFixture) -> CategoryResult:
         ),
     }
     return CategoryResult(name="visibility", passed=all(checks.values()), checks=checks)
+
+
+def _memory_recall_result(fixture: EvalFixture) -> CategoryResult:
+    result = evaluate_memory_recall(fixture)
+    return CategoryResult(name="memory_recall", passed=result.passed, checks=result.checks)
 
 
 def _role_consistency_result(fixture: EvalFixture) -> CategoryResult:

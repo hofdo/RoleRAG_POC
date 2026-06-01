@@ -19,6 +19,7 @@ from app.domain import (
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
+from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics, RetrievalResult
 from app.rag.models import RagChunk, RagCollection
 
 runner = CliRunner()
@@ -121,6 +122,30 @@ class FakeActorContextRetriever:
     def retrieve_for_actor(self, **kwargs: object) -> list[RetrievedChunk]:
         self.calls.append(kwargs)
         return self.chunks
+
+    def retrieve_for_actor_with_diagnostics(self, **kwargs: object) -> RetrievalResult:
+        self.calls.append(kwargs)
+        return RetrievalResult(
+            chunks=self.chunks,
+            diagnostics=RetrievalDiagnostics(
+                query=str(kwargs["query"]),
+                selected=[
+                    ChunkRetrievalDiagnostic(
+                        id=chunk.id,
+                        source=chunk.source,
+                        source_type=chunk.source_type,
+                        collection=RagCollection.SESSION_MEMORY,
+                        visibility=chunk.visibility,
+                        tags=chunk.tags,
+                        original_score=chunk.score,
+                        adjusted_score=chunk.score + 0.125,
+                        applied_boosts={"collection": 0.08, "importance": 0.045},
+                        selected_rank=index,
+                    )
+                    for index, chunk in enumerate(self.chunks, start=1)
+                ],
+            ),
+        )
 
 
 class FakeCritic:
@@ -417,6 +442,51 @@ def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> 
 
     assert result.exit_code == 0
     assert "The Rose Gallery has mirrored columns." in provider.requests[0].messages[0].content
+
+
+def test_cli_retrieve_debug_uses_fake_retriever_and_omits_chunk_text(tmp_path: Path) -> None:
+    context_retriever = FakeActorContextRetriever(
+        [
+            RetrievedChunk(
+                id="memory-1",
+                source="memory_episode:memory-1",
+                source_type="session_memory",
+                text="The player promised to return before dawn.",
+                score=0.61,
+                visibility=Visibility.PLAYER,
+                tags=["promise", "dawn"],
+                session_id="demo-session",
+                importance=4,
+            )
+        ]
+    )
+    with (
+        patch("app.cli._build_file_loader", return_value=FakeLoader()),
+        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
+    ):
+        runner.invoke(
+            app,
+            ["start-session", "--session-id", "demo-session"],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+        result = runner.invoke(
+            app,
+            [
+                "retrieve-debug",
+                "--session-id",
+                "demo-session",
+                "--query",
+                "What did I promise the archivist?",
+            ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"].endswith("What did I promise the archivist?")
+    assert payload["selected"][0]["id"] == "memory-1"
+    assert payload["selected"][0]["adjusted_score"] > payload["selected"][0]["original_score"]
+    assert "text" not in result.stdout
 
 
 def test_cli_reindex_memories_indexes_existing_sqlite_memories(tmp_path: Path) -> None:

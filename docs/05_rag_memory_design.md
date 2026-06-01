@@ -74,6 +74,14 @@ The retrieval query is built from:
 
 Private persona fields and GM scene summaries are excluded from the retrieval query.
 
+Current ranking behavior:
+
+- retrieve a bounded candidate pool from each collection
+- preserve the original vector score on every returned chunk
+- apply deterministic post-retrieval boosts for collection, matching session metadata, matching scene metadata, matching persona metadata, and memory importance
+- keep ranking policy in application code rather than inside Qdrant
+- expose metadata-only diagnostics for selected chunks through the CLI
+
 ## Visibility Rules
 
 The only implemented visibility values are:
@@ -134,7 +142,10 @@ Current indexing behavior:
 - `tests/unit/test_chunking.py`
 - `tests/unit/test_ingestion.py`
 - `tests/unit/test_retriever.py`
+- `tests/unit/test_retrieval_ranking.py`
+- `tests/unit/test_retrieval_diagnostics.py`
 - `tests/unit/test_retrieval_context_builder.py`
+- `tests/evals/test_memory_recall_regressions.py`
 - `tests/evals/test_retrieval_quality.py`
 - `tests/evals/test_visibility_regressions.py`
 - `tests/evals/test_memory_regressions.py`
@@ -148,10 +159,10 @@ Current indexing behavior:
 
 ## Deferred Work
 
-Deferred but not implemented in the MVP:
+Deferred but not implemented:
 
-- richer ranking or reranking
+- timestamp-aware recency decay for indexed memories
 - ingestion of additional source formats
-- production retrieval observability
+- broader production retrieval observability beyond CLI inspection
 
 Those items are tracked in [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).

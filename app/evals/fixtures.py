@@ -157,6 +157,22 @@ class EvalFixture:
             world_id=self.world.id,
             session_id=self.session.id,
             persona_id=self.primary_persona.id,
+            scene_id=self.scene.id,
+            top_k=top_k,
+        )
+
+    def retrieve_actor_chunks_for_query(
+        self,
+        *,
+        query: str,
+        top_k: int = 3,
+    ) -> list[RetrievedChunk]:
+        return self.create_actor_context_retriever().retrieve_for_actor(
+            query=query,
+            world_id=self.world.id,
+            session_id=self.session.id,
+            persona_id=self.primary_persona.id,
+            scene_id=self.scene.id,
             top_k=top_k,
         )
 
@@ -179,6 +195,15 @@ class EvalFixture:
             scene=self.scene,
             persona=self.primary_persona,
             recent_turns=(),
+        )
+
+    def build_world_knowledge_query(self) -> str:
+        return "\n".join(
+            [
+                "Scene: Rose Gallery",
+                "Location: Winter Palace",
+                "Question: What is publicly known about the mirrored columns and west door?",
+            ]
         )
 
     def build_memory_provider(self, *, kind: str) -> SequencedFakeProvider:
