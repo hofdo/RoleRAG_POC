@@ -50,6 +50,12 @@ Current behavior:
 - ensures the target collection exists
 - replaces all chunks for the same source path in the chosen collection
 
+Authoring note:
+
+- Phase 18 adds optional `documents/manifest.json` files for standalone scenario-pack validation
+- manifest metadata is authoring-time validation data, not an automatic ingestion source
+- lore documents are still ingested explicitly through `python -m app.cli ingest`
+
 Current limitation:
 
 - world, scene, and persona data are loaded from JSON files but are not ingested automatically into Qdrant

@@ -62,6 +62,12 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 - persistence: [app/persistence/repositories.py](../app/persistence/repositories.py)
 - diagnostics and smoke runner: [app/diagnostics/](../app/diagnostics)
 
+### Content authoring and validation
+
+- validation and templates: [app/content/](../app/content)
+- JSON loading for runtime use: [app/persistence/file_loader.py](../app/persistence/file_loader.py)
+- demo data roots: [data/](../data)
+
 ## Known Danger Zones
 
 - `TurnOrchestrator` is the highest-leverage file. Small changes there can affect routing, persistence, warnings, and repair flow.
@@ -90,6 +96,7 @@ python -m app.cli --help
 python -m app.cli health
 python -m app.cli doctor
 python -m app.cli smoke-run
+python -m app.cli validate-content
 python -m app.cli config
 python -m app.cli ingest --help
 python -m app.cli reindex-memories --help
@@ -109,7 +116,15 @@ Interpretation:
 - `health` is config-only.
 - `doctor` verifies temporary SQLite initialization, demo data loading, and optional external reachability checks.
 - `smoke-run` exercises the real orchestrator, persistence, memory indexing, and retrieval path with fake provider responses and in-memory retrieval.
+- `validate-content` is a read-only authoring check for worlds, scenes, personas, and optional lore manifests.
 - live checks stay shallow and read-only; they do not run real completions or mutate Qdrant.
+
+Authoring rules:
+
+- keep content validation deterministic and conservative
+- reuse existing Pydantic domain models rather than duplicating schema logic
+- do not leak GM-private or character-private text in validation output
+- treat standalone scenario packs as authoring roots; Phase 18 does not change runtime content selection
 
 ## Safe Next Work
 

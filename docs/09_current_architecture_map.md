@@ -61,6 +61,7 @@ graph TD
 | `app/memory/` | recent-dialogue and durable-memory adapters |
 | `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
 | `app/diagnostics/` | runtime environment checks and deterministic end-to-end smoke verification |
+| `app/content/` | standalone scenario-pack validation and template generation |
 | `app/evals/` | deterministic regression fixtures and report runner |
 
 ## Runtime Components
@@ -70,6 +71,7 @@ graph TD
 - primary local development interface
 - shares the same service composition path as the API
 - also exposes operator-facing runtime verification through `doctor` and `smoke-run`
+- also exposes authoring workflows through `validate-content` and `create-scenario-template`
 
 ### FastAPI API
 
@@ -122,6 +124,7 @@ graph TD
 | Data | Owner |
 |---|---|
 | world, scene, persona demo definitions | JSON files under `data/` |
+| standalone scenario-pack authoring roots | generated JSON and markdown under user-chosen content roots |
 | sessions | SQLite |
 | turns | SQLite |
 | durable memory episodes | SQLite |
@@ -137,6 +140,7 @@ graph TD
 - retrieval failure does not block turn completion
 - memory indexing failure does not discard persisted memories or completed turns
 - tests avoid real provider and Qdrant dependencies
+- content validation does not use an LLM, embeddings, or cloud services
 
 ## Reading Order
 

@@ -21,8 +21,13 @@ from app.composition import (
     redact_settings,
 )
 from app.config import Settings, get_settings
+from app.content import (
+    ContentValidationReport,
+    ScenarioTemplateResult,
+    create_scenario_template,
+    validate_content,
+)
 from app.diagnostics import (
-    DiagnosticStatus,
     RuntimeDiagnosticsReport,
     SmokeRunSummary,
     build_runtime_diagnostics,
@@ -175,8 +180,9 @@ def _echo_json(payload: object) -> None:
     typer.echo(json.dumps(content, indent=2, sort_keys=True))
 
 
-def _status_exit_code(status: DiagnosticStatus) -> int:
-    return 1 if status == DiagnosticStatus.FAIL else 0
+def _status_exit_code(status: object) -> int:
+    value = getattr(status, "value", status)
+    return 1 if value == "fail" else 0
 
 
 @app.command()
@@ -211,6 +217,56 @@ def smoke_run(
     summary: SmokeRunSummary = run_smoke(settings=settings, real_runtime=real_runtime)
     _echo_json(summary)
     raise typer.Exit(code=_status_exit_code(summary.status))
+
+
+def run_content_validation(
+    *,
+    content_root: Path,
+    world_id: str | None = None,
+) -> ContentValidationReport:
+    return validate_content(content_root=content_root, world_id=world_id)
+
+
+@app.command("validate-content")
+def validate_content_command(
+    content_root: Annotated[
+        Path,
+        typer.Option(
+            help="Content root containing worlds, scenes, personas, and optional documents"
+        ),
+    ] = Path("data"),
+    world_id: Annotated[
+        str | None,
+        typer.Option(help="Optional world id to focus world-graph checks on"),
+    ] = None,
+) -> None:
+    report = run_content_validation(content_root=content_root, world_id=world_id)
+    _echo_json(report)
+    raise typer.Exit(code=_status_exit_code(report.status))
+
+
+@app.command("create-scenario-template")
+def create_scenario_template_command(
+    output: Annotated[
+        Path,
+        typer.Option(help="Output directory for the standalone scenario pack"),
+    ],
+    name: Annotated[str | None, typer.Option(help="Optional scenario display name")] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(help="Overwrite generated files if the output exists"),
+    ] = False,
+) -> None:
+    try:
+        result: ScenarioTemplateResult = create_scenario_template(
+            output=output,
+            name=name,
+            overwrite=overwrite,
+        )
+    except (FileExistsError, ValueError, OSError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    _echo_json(result)
 
 
 @app.command()

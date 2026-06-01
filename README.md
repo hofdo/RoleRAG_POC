@@ -20,6 +20,8 @@ Implemented in this repository:
 - retrieval diagnostics for selected chunks through a CLI debug command
 - runtime diagnostics through `doctor`
 - deterministic end-to-end runtime smoke verification through `smoke-run`
+- deterministic content validation through `validate-content`
+- standalone scenario pack scaffolding through `create-scenario-template`
 - bounded critic and repair flow
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
@@ -62,6 +64,12 @@ initialization, demo data loading, and optional Qdrant or local-provider reachab
 
 `python -m app.cli smoke-run` executes a deterministic end-to-end MVP verification using a
 temporary SQLite database, in-memory retrieval, and fake provider responses.
+
+`python -m app.cli validate-content` validates authored worlds, scenes, personas, and optional
+lore metadata without calling an LLM or touching runtime state.
+
+`python -m app.cli create-scenario-template --output <path>` generates a minimal standalone
+scenario pack root with valid starter files and an optional lore manifest.
 
 ### Start a Session
 
@@ -174,7 +182,7 @@ Critic evaluation and memory extraction stay local in all modes.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
+- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
@@ -239,6 +247,21 @@ Run optional live dependency checks without real generation:
 
 ```bash
 python -m app.cli smoke-run --real-runtime
+```
+
+Validate authored content:
+
+```bash
+python -m app.cli validate-content
+python -m app.cli validate-content --world-id demo_world
+python -m app.cli validate-content --content-root data/scenarios/iron-archduke
+```
+
+Generate a minimal standalone scenario pack:
+
+```bash
+python -m app.cli create-scenario-template --output data/scenarios/iron-archduke
+python -m app.cli create-scenario-template --name "Iron Archduke" --output data/scenarios/iron-archduke
 ```
 
 Inspect routing decisions:
@@ -328,6 +351,64 @@ python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --
 python -m app.cli turn --session-id <session-id> --message "What have you heard about the regent?"
 python -m app.cli retrieve-debug --session-id <session-id> --query "What did I promise the archivist?"
 ```
+
+## Scenario Authoring
+
+Validate the repository demo content or a standalone authored pack:
+
+```bash
+python -m app.cli validate-content
+python -m app.cli validate-content --world-id demo_world
+python -m app.cli validate-content --content-root data/scenarios/iron-archduke
+```
+
+Validation output is structured JSON with:
+
+- `status`: `pass`, `warn`, or `fail`
+- `errors`: blocking structural or reference problems
+- `warnings`: conservative secrecy or metadata concerns
+- `checked_files`: files that were inspected
+
+Validation behavior:
+
+- reuses the existing Pydantic world, scene, and persona models
+- checks world-to-scene and world-to-persona references
+- checks scene `active_personas` references
+- warns when persona secrets or forbidden knowledge appear verbatim in `public_description`
+- warns when a scene GM summary is duplicated into the player-visible summary
+- validates optional lore metadata in `documents/manifest.json`
+- warns when lore documents exist without a manifest or are omitted from the manifest
+
+Exit semantics:
+
+- `status=pass` or `status=warn`: exit `0`
+- `status=fail`: exit `1`
+
+Create a minimal standalone authoring pack:
+
+```bash
+python -m app.cli create-scenario-template \
+  --name "Iron Archduke" \
+  --output data/scenarios/iron-archduke
+```
+
+Generated layout:
+
+```text
+data/scenarios/iron-archduke/
+  README.md
+  worlds/iron-archduke.json
+  scenes/iron-archduke_opening.json
+  personas/iron-archduke-narrator.json
+  documents/lore.md
+  documents/manifest.json
+```
+
+Template rules:
+
+- generation is deterministic and local-only
+- existing output directories are not overwritten unless `--overwrite` is supplied
+- generated packs are standalone authoring roots; Phase 18 does not change runtime content loading
 
 ## API Usage
 
