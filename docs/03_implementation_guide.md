@@ -133,6 +133,10 @@ Current implementation note: `MAX_LOCAL_RETRIES` is part of settings, but the re
 - Actor generation uses only prepared messages.
 - Retrieval is visibility-filtered before actor prompt construction.
 - SQLite remains authoritative for durable memories; Qdrant indexing is fail-open during turns.
+- Actor prompts include at most `RECENT_DIALOGUE_TURNS` prior persisted turns.
+- Individual recent-dialogue messages are not character-truncated during actor prompt construction.
+- Older continuity returns through retrieved durable memory when relevant; use
+  `reindex-memories` to repair the derived index from authoritative SQLite episodes.
 - Memory extraction stays local.
 - API routes stay thin and do not duplicate orchestration logic.
 - Tests and evals should continue to avoid live providers.
@@ -157,7 +161,11 @@ python -m app.evals.regression_runner
 Current known warnings that do not block the suite:
 
 - FastAPI TestClient emits a Starlette/httpx deprecation warning in tests.
-- `python -m app.evals.regression_runner` emits a `runpy` warning because `app.evals.__init__` imports the runner symbols before module execution.
+
+The deterministic 16-turn `memory_continuity` category uses SQLite, fake providers, keyword
+embeddings, and `InMemoryVectorStore`. It verifies bounded prompt growth, durable-memory recall,
+visibility isolation, and SQLite-backed reindex recovery. It does not prove live LLM behavior,
+semantic embedding quality, or Qdrant quality.
 
 ## Extension Guidance
 

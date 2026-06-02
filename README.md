@@ -484,6 +484,9 @@ Important current behavior:
 - curated SQLite memory episodes are indexed into `session_memory` after persistence
 - memory indexing is fail-open during turns; use `reindex-memories` to backfill after an outage
 - `retrieve-debug` prints metadata-only diagnostics for selected chunks and does not expose hidden text
+- actor prompts include only the configured bounded recent-dialogue window; older continuity comes
+  back through retrieved durable memory when relevant
+- individual recent-dialogue messages are not character-truncated when inserted into actor prompts
 
 ## Tests, Lint, and Evals
 
@@ -507,7 +510,13 @@ Run the standalone deterministic regression summary:
 python -m app.evals.regression_runner
 ```
 
-The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation behavior, and cloud-routing policy. It uses deterministic keyword embeddings and in-memory retrieval. It is regression coverage for engine behavior, not a semantic-vector or prose-quality benchmark.
+The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation
+behavior, long-session durable-memory continuity, and cloud-routing policy. The 16-turn
+`memory_continuity` regression verifies that actor history remains window-bounded, hidden memories
+stay out of actor prompts, and SQLite-backed memory survives a fresh derived-index rebuild with
+scope isolation. It uses fake providers, deterministic keyword embeddings, SQLite, and
+`InMemoryVectorStore`. It is engine regression coverage, not proof of live LLM behavior, semantic
+embedding quality, Qdrant quality, or generated prose quality.
 
 ## Current Limitations
 

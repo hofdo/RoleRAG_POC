@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from app.evals.regression_runner import run_regressions
 
 
@@ -14,6 +17,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "visibility",
         "role_consistency",
         "memory",
+        "memory_continuity",
         "cloud_routing",
     }
     assert all(result.passed for result in report.results)
@@ -29,3 +33,16 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "character_private_excluded",
         "relevant_memory_ranked_above_irrelevant",
     }
+
+
+def test_regression_runner_module_prints_memory_continuity_without_runpy_warning() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "app.evals.regression_runner"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "PASS memory_continuity:" in completed.stdout
+    assert "RuntimeWarning" not in completed.stderr
+    assert "found in sys.modules" not in completed.stderr

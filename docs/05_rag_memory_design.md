@@ -126,6 +126,11 @@ The budget layer:
 - de-duplicates by chunk id
 - truncates oversized chunk text
 
+Recent dialogue is bounded separately by `RECENT_DIALOGUE_TURNS`. The orchestrator loads only that
+many prior persisted turns into each actor prompt. Individual dialogue messages are not
+character-truncated during prompt construction. Once an older exchange leaves the recent window,
+continuity depends on relevant durable memory being retrieved.
+
 ## Durable Memory
 
 Implemented through:
@@ -147,6 +152,10 @@ Current indexing behavior:
   importance, and tags
 - `python -m app.cli reindex-memories --session-id <session-id>` backfills or repairs the derived index
 
+SQLite is authoritative for durable memory episodes. The vector store is derived and replaceable:
+reindexing a session reads the persisted SQLite episodes and repairs retrieval state after an index
+loss or outage.
+
 ## Failure Handling
 
 - If Qdrant or embeddings are unavailable during a turn, retrieval is skipped and the turn continues.
@@ -163,9 +172,11 @@ pytest tests/evals -q
 python -m app.evals.regression_runner
 ```
 
-These checks use keyword embeddings and `InMemoryVectorStore`. They prove recall, scope isolation,
-visibility filtering, and ranking stability without live Qdrant or real model providers. They are not
-benchmarks for semantic vector quality or generated prose quality.
+These checks use fake providers, keyword embeddings, SQLite, and `InMemoryVectorStore`. The
+16-turn `memory_continuity` regression also proves that recent dialogue stays bounded, an old
+player-visible promise is recalled after it leaves actor history, hidden memories stay out of actor
+prompts, and a fresh scoped reindex recovers SQLite-backed memory. These checks do not prove live
+LLM behavior, semantic embedding quality, Qdrant quality, or generated prose quality.
 
 ## Tests Covering This Design
 
@@ -179,6 +190,7 @@ benchmarks for semantic vector quality or generated prose quality.
 - `tests/evals/test_retrieval_quality.py`
 - `tests/evals/test_visibility_regressions.py`
 - `tests/evals/test_memory_regressions.py`
+- `tests/evals/test_memory_continuity.py`
 
 ## Boundaries to Preserve
 
