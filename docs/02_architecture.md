@@ -11,7 +11,7 @@ The application owns state, routing, retrieval, visibility, persistence, and ret
 ## High-Level Flow
 
 ```text
-CLI / FastAPI
+CLI / local play UI / FastAPI
   -> composition
   -> TurnOrchestrator
       -> load session, world, scene, persona
@@ -33,6 +33,7 @@ CLI / FastAPI
 - [app/cli.py](../app/cli.py): Typer commands for configuration, sessions, routing, ingestion, and turns.
 - [app/main.py](../app/main.py): FastAPI application bootstrap.
 - [app/api/routes.py](../app/api/routes.py): thin HTTP adapters over shared services.
+- [app/web/](../app/web): packaged framework-free local UI and same-origin API client.
 
 ### Wiring and settings
 
@@ -83,12 +84,16 @@ CLI / FastAPI
 
 ## Runtime Boundaries
 
-### CLI and API
+### CLI, API, and local UI
 
 - accept user input
 - build shared services
 - delegate to the orchestrator
 - do not build prompts or access the vector store directly
+
+The browser UI calls the API rather than shared services directly. It sends documented request
+fields only, renders API content as text, and does not own scenario-pack, persistence, retrieval,
+validation, routing, or memory logic.
 
 ### TurnOrchestrator
 
@@ -157,6 +162,7 @@ The repository relies on three test layers:
 
 - unit tests for models, router, persistence, prompt assembly, and retrieval helpers
 - integration tests for CLI, API, persistence, repair flow, and memory curation
+- Node tests for browser request shaping, buffered SSE parsing, transcript state, and thin-client boundaries
 - eval tests and a standalone regression runner for retrieval, visibility, memory, role consistency, and cloud-routing regressions
 
 ## Extension Rule

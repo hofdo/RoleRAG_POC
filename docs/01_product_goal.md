@@ -4,7 +4,7 @@
 
 This document describes the current MVP goal for `RoleRAG_POC` as it exists in the repository today.
 
-The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, local-first LLM execution, optional cloud fallback, SQLite persistence, and retrieval over ingested lore.
+The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, local-first LLM execution, optional cloud fallback, SQLite persistence, retrieval over ingested lore, and a minimal local play UI.
 
 The product goal is not to build a general autonomous-agent framework. The goal is to keep a small, inspectable engine that can run locally and be extended safely.
 
@@ -26,7 +26,7 @@ user message
   -> curate durable memory locally
 ```
 
-This is the MVP. It is backend-first, personal-use, and intentionally narrow.
+This is the MVP. It remains backend-owned, personal-use, and intentionally narrow.
 
 ## Target User
 
@@ -76,6 +76,7 @@ The project does not target hosted end users, teams, or production tenants.
 
 - Typer CLI for session creation, resume, route inspection, lore ingestion, and turns
 - FastAPI API for session creation, turn execution, and session lookup
+- framework-free local play UI over the same-origin API
 - deterministic local/cloud router
 - actor generation, critic validation, and local memory curation
 - Qdrant-backed runtime retrieval
@@ -83,13 +84,11 @@ The project does not target hosted end users, teams, or production tenants.
 
 ## What the MVP Does Not Include
 
-- frontend
 - authentication
 - multi-user support
-- streaming responses
+- provider token streaming
 - production deployment hardening
 - autonomous agent planning loops
-- automatic durable-memory indexing back into Qdrant
 
 ## Safety Boundaries
 
@@ -114,9 +113,9 @@ The MVP is successful when a future contributor can:
 
 ## Current Gaps That Are Explicitly Accepted
 
-- no end-user interface
+- no production end-user interface
 - no auth or account system
-- no streaming transport
+- no provider token streaming
 - no production-grade observability or deployment story
 - no advanced ranking or reranking for curated SQLite memories
 

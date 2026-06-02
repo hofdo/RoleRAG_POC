@@ -76,3 +76,23 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "buffered" in contract
     assert "provider token streaming" in contract
     assert "concatenated" in contract
+
+
+def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
+    readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+    architecture = (REPOSITORY_ROOT / "docs" / "02_architecture.md").read_text(encoding="utf-8")
+    current_map = (REPOSITORY_ROOT / "docs" / "09_current_architecture_map.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "uvicorn app.main:app --reload" in readme
+    assert "http://127.0.0.1:8000/play" in readme
+    assert "JSON" in readme
+    assert "buffered SSE" in readme
+    assert "CONTENT_ROOT" in readme
+    assert "thin client" in readme
+    assert "no authentication or multi-user isolation" in readme
+    assert "no provider token streaming" in readme
+    assert "no production deployment hardening" in readme
+    assert "app/web/" in architecture
+    assert "GET /play" in current_map

@@ -62,3 +62,22 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
             ]["content"]["application/json"]["schema"]["$ref"]
             == "#/components/schemas/ErrorResponse"
         )
+
+
+def test_play_page_and_assets_are_served_outside_openapi() -> None:
+    client = TestClient(app)
+
+    page = client.get("/play")
+    css = client.get("/play/assets/styles.css")
+    api_client = client.get("/play/assets/api-client.mjs")
+    play_model = client.get("/play/assets/play-model.mjs")
+    play_ui = client.get("/play/assets/play-ui.mjs")
+    schema = client.get("/openapi.json").json()
+
+    assert page.status_code == 200
+    assert '<script type="module" src="/play/assets/play-ui.mjs"></script>' in page.text
+    assert css.status_code == 200
+    assert api_client.status_code == 200
+    assert play_model.status_code == 200
+    assert play_ui.status_code == 200
+    assert "/play" not in schema["paths"]

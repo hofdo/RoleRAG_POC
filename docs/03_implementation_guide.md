@@ -101,6 +101,7 @@ uvicorn app.main:app --reload
 
 Implemented endpoints:
 
+- `GET /play`
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
@@ -111,6 +112,12 @@ The public HTTP contract and exposure boundaries are documented in
 [docs/12_api_contract.md](12_api_contract.md).
 The SSE route is transport-only and buffered: it emits player-visible text after the shared
 orchestration pipeline completes, not provider tokens or pre-validation drafts.
+
+Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local framework-free UI.
+It sends turns as JSON by default and exposes buffered SSE through an optional developer toggle.
+The UI is a thin same-origin client: scenario packs remain a process-level backend choice through
+`CONTENT_ROOT`, and orchestration, retrieval, validation, routing, persistence, and memory stay in
+the backend.
 
 ## Config Notes
 
@@ -155,6 +162,7 @@ Primary repository checks:
 ruff check .
 mypy .
 pytest
+node --test tests/frontend/*.test.mjs
 ```
 
 Eval-specific commands:

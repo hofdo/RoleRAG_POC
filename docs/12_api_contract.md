@@ -7,12 +7,14 @@ execution while delegating engine behavior to shared composition and orchestrati
 
 Available endpoints:
 
+- `GET /play` for the local HTML play surface, excluded from OpenAPI
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
 
-API routes do not own retrieval, persistence, routing, prompt construction, or visibility logic.
+API routes and the local browser UI do not own retrieval, persistence, routing, prompt
+construction, or visibility logic.
 SQLite remains authoritative state. Qdrant remains a derived retrieval index.
 
 ## Session Creation
@@ -150,6 +152,6 @@ diagnostics.
 
 ## Known Limitations
 
-The API does not provide a frontend, authentication, multi-user isolation, provider token
-streaming, pre-validation token emission, per-request scenario selection, hidden-context
-diagnostics, or raw retrieval/debug payloads.
+The local play UI does not provide existing-session resume, authentication, or multi-user
+isolation. The API does not provide provider token streaming, pre-validation token emission,
+per-request scenario selection, hidden-context diagnostics, or raw retrieval/debug payloads.

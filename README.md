@@ -1,6 +1,8 @@
 # RoleRAG_POC
 
-Personal-use RoleRAG MVP built around a CLI-first roleplay loop, a small FastAPI API, SQLite persistence, Qdrant-backed retrieval, and deterministic local/cloud routing.
+Personal-use RoleRAG MVP built around a CLI-first roleplay loop, a minimal local play UI, a
+small FastAPI API, SQLite persistence, Qdrant-backed retrieval, and deterministic local/cloud
+routing.
 
 ## Current State
 
@@ -12,6 +14,7 @@ Implemented in this repository:
 - structured JSON world, scene, and persona loading
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
 - FastAPI endpoints for session creation, turn execution, buffered SSE turn streaming, and session lookup
+- framework-free local play UI served by FastAPI at `GET /play`
 - SQLite persistence for sessions, turns, and durable memory episodes
 - automatic indexing of curated durable memories into session-scoped retrieval
 - Qdrant-backed vector storage for ingested lore and retrieval
@@ -28,7 +31,6 @@ Implemented in this repository:
 
 Not implemented:
 
-- frontend
 - authentication
 - multi-user support
 - provider token streaming
@@ -112,6 +114,10 @@ python -m app.cli ingest data/documents/demo_lore.md \
 ```bash
 uvicorn app.main:app --reload
 ```
+
+Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local play UI. The UI starts
+new sessions with editable demo defaults, sends turns over JSON by default, and exposes buffered
+SSE as an opt-in developer toggle.
 
 ## Local Model Setup
 
@@ -432,6 +438,7 @@ uvicorn app.main:app --reload
 
 Implemented endpoints:
 
+- `GET /play`
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
@@ -463,6 +470,19 @@ curl -N -X POST http://127.0.0.1:8000/sessions/<session-id>/turns/stream \
 
 The SSE route emits validated text only after the existing orchestration pipeline completes. It
 does not stream provider tokens or expose drafts before critic validation.
+
+### Local Play UI
+
+Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) after starting FastAPI. The
+framework-free browser surface is a thin client over the same-origin API:
+
+- session creation uses editable `demo_world`, `rose-gallery`, and `archivist` defaults
+- turn execution uses JSON by default
+- the developer panel can opt into buffered SSE and displays safe route, memory, and warning data
+- scenario packs remain a process-level backend choice through `CONTENT_ROOT`
+
+The browser does not own orchestration, retrieval, validation, routing, persistence, memory,
+scenario-pack selection, or hidden context. It does not resume existing sessions.
 
 Read session state:
 
@@ -508,6 +528,7 @@ Run all checks:
 ruff check .
 mypy .
 pytest
+node --test tests/frontend/*.test.mjs
 ```
 
 Run only eval tests:
@@ -533,10 +554,10 @@ embedding quality, Qdrant quality, or generated prose quality.
 ## Current Limitations
 
 - personal-use MVP only
-- no frontend
 - no authentication or multi-user isolation
 - buffered SSE only; no provider token streaming or pre-validation token emission
 - no production deployment hardening
+- no existing-session resume in the play UI
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
 - memory vector indexing is derived from SQLite and may require `reindex-memories` after an outage
@@ -549,7 +570,7 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - improve integration coverage
 - tune retrieval heuristics from eval evidence
 - expand retrieval observability if another surface needs it
-- add a frontend only after the current backend boundaries stay intact
+- add existing-session resume only when the local play workflow needs it
 - consider validated fragmentation only if it preserves the current exposure boundary
 - add auth only if the project becomes multi-user
 

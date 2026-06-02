@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RoleRAG Play</title>
+    <link rel="stylesheet" href="/play/assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="page-header">
+        <p class="eyebrow">Local developer play surface</p>
+        <h1>RoleRAG Play</h1>
+        <p class="subtitle">A thin same-origin client for the validated backend turn pipeline.</p>
+      </header>
+
+      <p id="error-message" class="error-message" role="alert" hidden></p>
+
+      <section id="setup-panel" class="card">
+        <div class="section-heading">
+          <p class="eyebrow">Step 1</p>
+          <h2>Start a session</h2>
+        </div>
+        <form id="session-form" class="form-grid">
+          <label>
+            World ID
+            <input id="world-id" name="world-id" value="demo_world" required>
+          </label>
+          <label>
+            Scene ID
+            <input id="scene-id" name="scene-id" value="rose-gallery" required>
+          </label>
+          <label>
+            Persona ID
+            <input id="persona-id" name="persona-id" value="archivist" required>
+          </label>
+          <label>
+            Player name
+            <input id="player-name" name="player-name" autocomplete="name" required>
+          </label>
+          <button type="submit">Create session</button>
+        </form>
+      </section>
+
+      <section id="play-panel" hidden>
+        <div class="session-bar card">
+          <div>
+            <p class="eyebrow">Active session</p>
+            <p id="session-summary" class="session-summary"></p>
+          </div>
+          <button id="new-session" type="button" class="secondary">New Session</button>
+        </div>
+
+        <section class="card transcript-card" aria-label="Transcript">
+          <div class="section-heading">
+            <p class="eyebrow">Transcript</p>
+            <h2>Rose Gallery</h2>
+          </div>
+          <ol id="transcript" class="transcript" aria-live="polite"></ol>
+        </section>
+
+        <section class="card">
+          <form id="turn-form">
+            <label>
+              Your message
+              <textarea id="turn-message" rows="4" required></textarea>
+            </label>
+            <div class="composer-actions">
+              <div class="toggle-stack">
+                <label class="toggle">
+                  <input id="request-cloud" type="checkbox">
+                  Request cloud route
+                </label>
+                <label class="toggle">
+                  <input id="use-stream" type="checkbox">
+                  Buffered SSE debug transport
+                </label>
+              </div>
+              <button id="send-turn" type="submit">Send</button>
+            </div>
+          </form>
+        </section>
+
+        <details class="card developer-panel">
+          <summary>Developer panel</summary>
+          <dl id="debug-state" class="debug-grid"></dl>
+        </details>
+      </section>
+    </main>
+    <script type="module" src="/play/assets/play-ui.mjs"></script>
+  </body>
+</html>

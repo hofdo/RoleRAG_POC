@@ -33,9 +33,13 @@ dev = [
 rolerag = "app.cli:main"
 
 [tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.web" = ["index.html", "assets/*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

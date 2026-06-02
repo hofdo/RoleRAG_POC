@@ -2,7 +2,7 @@
 
 ## Overview
 
-`RoleRAG_POC` is a backend-first roleplaying engine with thin entry points, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.
+`RoleRAG_POC` is a backend-owned roleplaying engine with thin entry points, a minimal local play UI, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.
 
 ## Dependency Map
 
@@ -10,6 +10,7 @@
 graph TD
     CLI["CLI<br/>app/cli.py"]
     API["FastAPI<br/>app/main.py + app/api"]
+    WEB["Local Play UI<br/>app/web"]
     COMP["Composition<br/>app/composition.py"]
     ORCH["TurnOrchestrator<br/>app/orchestration/turn_orchestrator.py"]
     CTX["Context Builder<br/>app/orchestration/context_builder.py"]
@@ -26,6 +27,7 @@ graph TD
 
     CLI --> COMP
     API --> COMP
+    WEB --> API
     COMP --> ORCH
     COMP --> ROUTER
     COMP --> PERSIST
@@ -52,6 +54,7 @@ graph TD
 |---|---|
 | `app/cli.py` | local operational interface for config, sessions, routes, ingestion, and turns |
 | `app/main.py` + `app/api/` | HTTP interface with thin route handlers |
+| `app/web/` | packaged framework-free local UI and same-origin API client |
 | `app/composition.py` | central wiring for providers, repositories, retriever, and orchestrator |
 | `app/domain/` | typed data models and visibility values |
 | `app/orchestration/` | turn lifecycle, prompt assembly, and context budgeting |
@@ -75,10 +78,18 @@ graph TD
 
 ### FastAPI API
 
-- exposes `POST /sessions`, `POST /sessions/{session_id}/turns`,
+- exposes `GET /play`, `POST /sessions`, `POST /sessions/{session_id}/turns`,
   `POST /sessions/{session_id}/turns/stream`, and `GET /sessions/{session_id}`
 - does not duplicate orchestration logic
 - buffers SSE frames until the shared turn pipeline completes
+
+### Local play UI
+
+- starts new sessions through the existing API with editable demo defaults
+- uses JSON turns by default and buffered SSE only as an opt-in developer transport
+- renders safe session, transcript, route, memory, and warning data
+- does not own orchestration, scenario-pack selection, retrieval, validation, routing,
+  persistence, or memory behavior
 
 ### TurnOrchestrator
 
