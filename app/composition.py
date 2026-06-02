@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.agents import CriticAgent, MemoryCurator
 from app.config import Settings, is_usable_cloud_api_key
@@ -38,7 +39,7 @@ class AppServices:
 
 
 def redact_settings(settings: Settings) -> dict[str, object]:
-    values = settings.model_dump()
+    values = settings.model_dump(mode="json")
     values["local_llm_api_key"] = "***"
     values["cloud_llm_api_key"] = "***"
     return values
@@ -62,8 +63,8 @@ def build_cloud_provider(settings: Settings) -> LlmProvider | None:
     )
 
 
-def build_file_loader() -> FileDataLoader:
-    return FileDataLoader()
+def build_file_loader(content_root: Path | str = "data") -> FileDataLoader:
+    return FileDataLoader(base_path=content_root)
 
 
 def build_critic_agent() -> CriticAgent:
@@ -101,7 +102,9 @@ def build_services(
     settings: Settings,
     *,
     enable_retrieval: bool,
+    content_root: Path | str | None = None,
 ) -> AppServices:
+    resolved_content_root = content_root or settings.content_root
     connection = connect_sqlite(settings.database_path)
     initialize_database(connection)
     session_repository = SQLiteSessionRepository(connection)
@@ -115,7 +118,9 @@ def build_services(
     embedding_provider = build_embedding_provider(settings) if enable_retrieval else None
     vector_store = build_vector_store(settings) if enable_retrieval else None
     orchestrator = TurnOrchestrator(
-        loader=build_file_loader(),
+        loader=build_file_loader(resolved_content_root),
+        loader_factory=build_file_loader,
+        content_root=str(resolved_content_root),
         provider=build_local_provider(settings),
         cloud_provider=build_cloud_provider(settings),
         critic_agent=build_critic_agent(),

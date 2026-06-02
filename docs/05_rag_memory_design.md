@@ -52,9 +52,11 @@ Current behavior:
 
 Authoring note:
 
-- Phase 18 adds optional `documents/manifest.json` files for standalone scenario-pack validation
-- manifest metadata is authoring-time validation data, not an automatic ingestion source
-- lore documents are still ingested explicitly through `python -m app.cli ingest`
+- standalone scenario packs can include `documents/manifest.json` metadata
+- manifest metadata is used by validation and by explicit scenario-lore ingestion
+- lore documents are ingested explicitly through `python -m app.cli ingest` or
+  `python -m app.cli ingest-scenario-lore --content-root <pack>`
+- scenario startup does not automatically mutate Qdrant
 
 Current limitation:
 

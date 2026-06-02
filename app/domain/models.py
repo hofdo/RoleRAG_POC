@@ -43,6 +43,7 @@ class SessionState(BaseModel):
     active_scene_id: str
     active_persona_id: str
     player_name: str
+    content_root: str = "data"
     recent_turn_ids: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None

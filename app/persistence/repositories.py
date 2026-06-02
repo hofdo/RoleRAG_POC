@@ -79,9 +79,10 @@ class SQLiteSessionRepository:
                 active_scene_id,
                 active_persona_id,
                 player_name,
+                content_root,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created.id,
@@ -89,6 +90,7 @@ class SQLiteSessionRepository:
                 created.active_scene_id,
                 created.active_persona_id,
                 created.player_name,
+                created.content_root,
                 serialize_datetime(created_at),
                 serialize_datetime(updated_at),
             ),
@@ -105,6 +107,7 @@ class SQLiteSessionRepository:
                 active_scene_id,
                 active_persona_id,
                 player_name,
+                content_root,
                 created_at,
                 updated_at
             FROM sessions
@@ -120,6 +123,7 @@ class SQLiteSessionRepository:
             active_scene_id=row["active_scene_id"],
             active_persona_id=row["active_persona_id"],
             player_name=row["player_name"],
+            content_root=row["content_root"],
             created_at=parse_datetime(row["created_at"]),
             updated_at=parse_datetime(row["updated_at"]),
         )

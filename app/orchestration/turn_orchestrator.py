@@ -34,6 +34,10 @@ class TurnDataLoader(Protocol):
     def load_scene(self, scene_id: str) -> SceneState: ...
 
 
+class TurnDataLoaderFactory(Protocol):
+    def __call__(self, content_root: str) -> TurnDataLoader: ...
+
+
 class MemoryCuratingAgent(Protocol):
     async def curate(
         self,
@@ -106,6 +110,8 @@ class TurnOrchestrator:
         self,
         *,
         loader: TurnDataLoader,
+        loader_factory: TurnDataLoaderFactory | None = None,
+        content_root: str = "data",
         provider: LlmProvider,
         critic_agent: CriticEvaluatingAgent,
         session_repository: SessionRepository,
@@ -127,6 +133,8 @@ class TurnOrchestrator:
         max_retrieved_chunk_chars: int = 800,
     ) -> None:
         self.loader = loader
+        self.loader_factory = loader_factory
+        self.content_root = content_root
         self.provider = provider
         self.cloud_provider = cloud_provider
         self.critic_agent = critic_agent
@@ -158,16 +166,19 @@ class TurnOrchestrator:
         active_persona_id: str,
         player_name: str,
         session_id: str | None = None,
+        content_root: str | None = None,
     ) -> SessionState:
-        world = self.loader.load_world(world_id)
+        resolved_content_root = content_root or self.content_root
+        loader = self._loader_for_content_root(resolved_content_root)
+        world = loader.load_world(world_id)
         if active_persona_id not in world.persona_ids:
             raise ValueError(
                 f"Unknown persona for world {world_id}: {active_persona_id}"
             )
         if scene_id not in world.scene_ids:
             raise ValueError(f"Unknown scene for world {world_id}: {scene_id}")
-        self.loader.load_persona(active_persona_id)
-        self.loader.load_scene(scene_id)
+        loader.load_persona(active_persona_id)
+        loader.load_scene(scene_id)
         return self.session_repository.create_session(
             SessionState(
                 id=session_id or str(uuid4()),
@@ -175,6 +186,7 @@ class TurnOrchestrator:
                 active_scene_id=scene_id,
                 active_persona_id=active_persona_id,
                 player_name=player_name,
+                content_root=resolved_content_root,
             )
         )
 
@@ -190,7 +202,8 @@ class TurnOrchestrator:
         if turn_input.active_persona_id is not None and turn_input.active_persona_id != persona_id:
             raise ValueError("Turn persona override does not match the stored session persona")
 
-        world = self.loader.load_world(session.world_id)
+        loader = self._loader_for_content_root(session.content_root)
+        world = loader.load_world(session.world_id)
         if persona_id not in world.persona_ids:
             raise ValueError(f"Unknown persona for world {session.world_id}: {persona_id}")
         if session.active_scene_id not in world.scene_ids:
@@ -198,8 +211,8 @@ class TurnOrchestrator:
                 f"Unknown scene for world {session.world_id}: {session.active_scene_id}"
             )
 
-        persona = self.loader.load_persona(persona_id)
-        scene = self.loader.load_scene(session.active_scene_id)
+        persona = loader.load_persona(persona_id)
+        scene = loader.load_scene(session.active_scene_id)
         recent_turns = self.recent_dialogue_store.load_recent_dialogue(session.id)
         warnings: list[str] = []
         retrieved_chunks: list[RetrievedChunk] = []
@@ -450,6 +463,14 @@ class TurnOrchestrator:
             memory_written=memory_written,
             warnings=warnings,
         )
+
+    def loader_for_session(self, session: SessionState) -> TurnDataLoader:
+        return self._loader_for_content_root(session.content_root)
+
+    def _loader_for_content_root(self, content_root: str) -> TurnDataLoader:
+        if self.loader_factory is None:
+            return self.loader
+        return self.loader_factory(content_root)
 
     async def _generate_actor_response(
         self,

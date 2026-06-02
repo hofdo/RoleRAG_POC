@@ -27,6 +27,7 @@ from app.content import (
     create_scenario_template,
     validate_content,
 )
+from app.content.validator import ContentValidationStatus, LoreManifest
 from app.diagnostics import (
     RuntimeDiagnosticsReport,
     SmokeRunSummary,
@@ -78,7 +79,13 @@ _build_vector_store = build_vector_store
 _build_actor_context_retriever = build_actor_context_retriever
 
 
-def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppServices:
+def _build_services(
+    settings: Settings,
+    *,
+    enable_retrieval: bool,
+    content_root: Path | str | None = None,
+) -> AppServices:
+    resolved_content_root = content_root or settings.content_root
     connection = connect_sqlite(settings.database_path)
     initialize_database(connection)
     session_repository = SQLiteSessionRepository(connection)
@@ -92,7 +99,9 @@ def _build_services(settings: Settings, *, enable_retrieval: bool) -> AppService
     embedding_provider = _build_embedding_provider(settings) if enable_retrieval else None
     vector_store = _build_vector_store(settings) if enable_retrieval else None
     orchestrator = TurnOrchestrator(
-        loader=_build_file_loader(),
+        loader=_build_file_loader(resolved_content_root),
+        loader_factory=_build_file_loader,
+        content_root=str(resolved_content_root),
         provider=_build_local_provider(settings),
         cloud_provider=_build_cloud_provider(settings),
         critic_agent=_build_critic_agent(),
@@ -230,17 +239,21 @@ def run_content_validation(
 @app.command("validate-content")
 def validate_content_command(
     content_root: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             help="Content root containing worlds, scenes, personas, and optional documents"
         ),
-    ] = Path("data"),
+    ] = None,
     world_id: Annotated[
         str | None,
         typer.Option(help="Optional world id to focus world-graph checks on"),
     ] = None,
 ) -> None:
-    report = run_content_validation(content_root=content_root, world_id=world_id)
+    settings = get_settings()
+    report = run_content_validation(
+        content_root=content_root or settings.content_root,
+        world_id=world_id,
+    )
     _echo_json(report)
     raise typer.Exit(code=_status_exit_code(report.status))
 
@@ -282,9 +295,18 @@ def start_session(
         str | None,
         typer.Option(help="Optional explicit session identifier"),
     ] = None,
+    content_root: Annotated[
+        Path | None,
+        typer.Option(help="Content root containing scenario files"),
+    ] = None,
 ) -> None:
     settings = get_settings()
-    services = _build_services(settings, enable_retrieval=False)
+    resolved_content_root = content_root or settings.content_root
+    services = _build_services(
+        settings,
+        enable_retrieval=False,
+        content_root=resolved_content_root,
+    )
     try:
         session = services.orchestrator.create_session(
             world_id=world_id,
@@ -292,6 +314,7 @@ def start_session(
             active_persona_id=active_persona_id,
             player_name=player_name,
             session_id=session_id,
+            content_root=str(resolved_content_root),
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
         services.close()
@@ -385,6 +408,64 @@ def ingest(
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
+@app.command("ingest-scenario-lore")
+def ingest_scenario_lore(
+    content_root: Annotated[
+        Path,
+        typer.Option(help="Scenario pack content root containing documents/manifest.json"),
+    ],
+) -> None:
+    settings = get_settings()
+    try:
+        validation_report = validate_content(content_root=content_root)
+        if validation_report.status == ContentValidationStatus.FAIL:
+            raise ValueError("content validation failed")
+        manifest_path = content_root / "documents" / "manifest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"missing lore manifest: {manifest_path}")
+        manifest = LoreManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+        embedding_provider = _build_embedding_provider(settings)
+        vector_store = _build_vector_store(settings)
+        results = [
+            ingest_document(
+                IngestionRequest(
+                    path=content_root / "documents" / document.path,
+                    collection=RagCollection.CANON_LORE,
+                    source_type=document.source_type,
+                    visibility=document.visibility,
+                    tags=document.tags,
+                    world_id=document.world_id,
+                    scene_id=document.scene_id,
+                    persona_id=document.persona_id,
+                ),
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+                chunking_config=ChunkingConfig(
+                    chunk_size_chars=settings.rag_chunk_size_chars,
+                    chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+                ),
+            )
+            for document in manifest.documents
+        ]
+    except (FileNotFoundError, ImportError, ValueError) as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        json.dumps(
+            {
+                "content_root": str(content_root),
+                "documents": [
+                    result.model_dump(mode="json")
+                    for result in results
+                ],
+                "total_chunk_count": sum(result.chunk_count for result in results),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
 @app.command()
 def reindex_memories(
     session_id: Annotated[str, typer.Option(help="Session identifier")],
@@ -430,8 +511,9 @@ def retrieve_debug(
     services = _build_services(settings, enable_retrieval=False)
     try:
         session = services.orchestrator.resume_session(session_id)
-        persona = services.orchestrator.loader.load_persona(session.active_persona_id)
-        scene = services.orchestrator.loader.load_scene(session.active_scene_id)
+        loader = services.orchestrator.loader_for_session(session)
+        persona = loader.load_persona(session.active_persona_id)
+        scene = loader.load_scene(session.active_scene_id)
         retrieval_query = build_retrieval_query(
             user_message=query,
             scene=scene,

@@ -112,6 +112,7 @@ def test_session_state_allows_omitted_timestamps() -> None:
     assert session.created_at is None
     assert session.updated_at is None
     assert session.recent_turn_ids == []
+    assert session.content_root == "data"
 
 
 def test_session_state_serializes_present_datetimes_cleanly() -> None:
@@ -133,6 +134,7 @@ def test_session_state_serializes_present_datetimes_cleanly() -> None:
         "active_scene_id": "scene-1",
         "active_persona_id": "archivist",
         "player_name": "Avery",
+        "content_root": "data",
         "recent_turn_ids": [],
         "created_at": "2026-05-27T10:30:00Z",
         "updated_at": "2026-05-27T11:45:00Z",

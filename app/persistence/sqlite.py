@@ -23,6 +23,7 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             active_scene_id TEXT NOT NULL,
             active_persona_id TEXT NOT NULL,
             player_name TEXT NOT NULL,
+            content_root TEXT NOT NULL DEFAULT 'data',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -64,7 +65,28 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         ON memory_episodes(session_id, created_at DESC);
         """
     )
+    _ensure_column(
+        connection,
+        table="sessions",
+        column="content_root",
+        ddl="ALTER TABLE sessions ADD COLUMN content_root TEXT NOT NULL DEFAULT 'data'",
+    )
     connection.commit()
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    ddl: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(ddl)
 
 
 def utc_now() -> datetime:

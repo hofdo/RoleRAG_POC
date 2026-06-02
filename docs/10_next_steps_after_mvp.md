@@ -21,7 +21,8 @@ Extend the matrix only when another supported Python version or platform needs c
 
 The repository now has deterministic runtime verification through `doctor` and `smoke-run`.
 It also has deterministic authoring validation through `validate-content` and
-standalone pack scaffolding through `create-scenario-template`.
+standalone pack scaffolding/runtime launch through `create-scenario-template` and
+`start-session --content-root`.
 The next gap is broader integration coverage around:
 
 - CLI plus retrieval wiring
@@ -52,8 +53,7 @@ Add streaming only after the current non-streaming API remains stable. Streaming
 Safe scope:
 
 - additional demo content
-- eventual runtime selection for standalone scenario packs if it can be added without changing
-  current loading boundaries
+- richer scenario-pack templates and documentation
 
 ## Conditional Future Work
 

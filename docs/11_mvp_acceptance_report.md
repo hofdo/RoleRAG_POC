@@ -23,12 +23,12 @@ This report freezes the Phase 18 MVP acceptance baseline for future agents. It r
 - Streaming API.
 - Production hardening.
 - Autonomous planning or game-master loops.
-- Runtime scenario-pack selection/loading support.
+- Broader scenario-pack runtime smoke coverage.
 
 ## Known limitations and risks
 
 - Runtime content is still tied to the active `data/` tree.
-- Standalone scenario packs can be scaffolded and validated but not selected at runtime.
+- Standalone scenario packs can be scaffolded, validated, optionally lore-ingested, and selected at session start through `--content-root`.
 - Retrieval depends on Qdrant availability, while authoritative state remains in SQLite.
 - Actor prompts must stay player-visible only.
 - The critic can inspect hidden context only for validation, not for player output.
@@ -60,4 +60,4 @@ python -m app.cli validate-content
 
 ## Recommended next milestone
 
-The next milestone should be `runtime scenario-pack support`: enable runtime selection and loading of validated standalone scenario packs without changing the current state-ownership boundaries.
+The next milestone should build on runtime scenario-pack support without changing the current state-ownership boundaries.

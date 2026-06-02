@@ -124,7 +124,7 @@ Authoring rules:
 - keep content validation deterministic and conservative
 - reuse existing Pydantic domain models rather than duplicating schema logic
 - do not leak GM-private or character-private text in validation output
-- treat standalone scenario packs as authoring roots; Phase 18 does not change runtime content selection
+- treat standalone scenario packs as runtime content roots once validated; sessions persist the selected root
 
 ## Safe Next Work
 

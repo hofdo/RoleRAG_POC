@@ -264,6 +264,16 @@ python -m app.cli create-scenario-template --output data/scenarios/iron-archduke
 python -m app.cli create-scenario-template --name "Iron Archduke" --output data/scenarios/iron-archduke
 ```
 
+Launch a validated standalone pack directly:
+
+```bash
+python -m app.cli start-session \
+  --content-root data/scenarios/iron-archduke \
+  --world-id iron-archduke \
+  --scene-id iron-archduke-opening \
+  --active-persona-id iron-archduke-narrator
+```
+
 Inspect routing decisions:
 
 ```bash
@@ -286,6 +296,7 @@ RAG ingestion:
 ```bash
 python -m app.cli ingest --help
 python -m app.cli ingest data/documents/demo_lore.md --visibility player --source-type lore --world-id demo_world
+python -m app.cli ingest-scenario-lore --content-root data/scenarios/iron-archduke
 ```
 
 Backfill or repair the vector index for existing SQLite memories:
@@ -378,6 +389,7 @@ Validation behavior:
 - warns when a scene GM summary is duplicated into the player-visible summary
 - validates optional lore metadata in `documents/manifest.json`
 - warns when lore documents exist without a manifest or are omitted from the manifest
+- supports explicit manifest-driven lore ingestion through `ingest-scenario-lore`
 
 Exit semantics:
 
@@ -408,7 +420,7 @@ Template rules:
 
 - generation is deterministic and local-only
 - existing output directories are not overwritten unless `--overwrite` is supplied
-- generated packs are standalone authoring roots; Phase 18 does not change runtime content loading
+- generated packs are standalone content roots that can be launched with `start-session --content-root`
 
 ## API Usage
 

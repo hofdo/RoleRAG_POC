@@ -120,9 +120,16 @@ def _build_readme(*, scenario_name: str, slug: str) -> str:
         "optional lore.\n\n"
         "Validate it with:\n\n"
         f"```bash\npython -m app.cli validate-content --content-root data/scenarios/{slug}\n```\n\n"
-        "To make it part of the active runtime data tree in the current MVP, copy the "
-        "validated files into `data/worlds`, `data/scenes`, `data/personas`, and "
-        "`data/documents`, then ingest any lore you want available to retrieval.\n"
+        "Optionally ingest manifest-listed lore with:\n\n"
+        "```bash\n"
+        f"python -m app.cli ingest-scenario-lore --content-root data/scenarios/{slug}\n"
+        "```\n\n"
+        "Launch it directly with:\n\n"
+        "```bash\n"
+        f"python -m app.cli start-session --content-root data/scenarios/{slug} "
+        f"--world-id {slug} --scene-id {slug}-opening "
+        f"--active-persona-id {slug}-narrator\n"
+        "```\n"
     )
 
 

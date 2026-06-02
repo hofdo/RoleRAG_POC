@@ -41,6 +41,30 @@ def test_session_repository_creates_and_loads_session(tmp_path: Path) -> None:
     assert created.created_at is not None
     assert created.updated_at is not None
     assert loaded == created
+    assert loaded is not None
+    assert loaded.content_root == "data"
+
+
+def test_session_repository_persists_custom_content_root(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    repository = SQLiteSessionRepository(connection)
+
+    created = repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+            content_root=str(tmp_path / "scenario-pack"),
+        )
+    )
+
+    loaded = repository.get_session("session-1")
+    assert loaded == created
+    assert loaded is not None
+    assert loaded.content_root == str(tmp_path / "scenario-pack")
 
 
 def test_turn_repository_appends_turn_and_loads_recent_turns_in_order(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.agents.critic_agent import CriticAgent
 from app.api.routes import get_read_services
 from app.composition import AppServices
+from app.config import Settings, get_settings
 from app.domain import PersonaCard, SceneState
 from app.llm.provider import LlmProvider
 from app.main import app
@@ -93,6 +94,47 @@ def _build_services(tmp_path: Path) -> AppServices:
     )
 
 
+def _write_scenario_pack(root: Path) -> None:
+    (root / "worlds").mkdir(parents=True)
+    (root / "personas").mkdir()
+    (root / "scenes").mkdir()
+    (root / "worlds" / "custom_world.json").write_text(
+        """
+        {
+          "id": "custom_world",
+          "name": "Custom World",
+          "default_scene_id": "custom-opening",
+          "persona_ids": ["custom-narrator"],
+          "scene_ids": ["custom-opening"]
+        }
+        """,
+        encoding="utf-8",
+    )
+    (root / "personas" / "custom-narrator.json").write_text(
+        """
+        {
+          "id": "custom-narrator",
+          "name": "Custom Narrator",
+          "role": "narrator",
+          "public_description": "A custom narrator.",
+          "speaking_style": "Clear."
+        }
+        """,
+        encoding="utf-8",
+    )
+    (root / "scenes" / "custom_opening.json").write_text(
+        """
+        {
+          "id": "custom-opening",
+          "title": "Custom Opening",
+          "location": "Custom Hall",
+          "player_visible_summary": "A custom hall waits."
+        }
+        """,
+        encoding="utf-8",
+    )
+
+
 def test_fastapi_app_imports_successfully() -> None:
     assert app.title == "rolerag-poc"
 
@@ -120,6 +162,41 @@ def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -
     assert "player_name" not in payload
     assert "created_at" not in payload
     assert "updated_at" not in payload
+
+
+def test_post_sessions_uses_process_content_root_without_request_path(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "pack"
+    database_path = tmp_path / "api-custom.db"
+    _write_scenario_pack(pack_root)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "custom_world",
+            "scene_id": "custom-opening",
+            "player_name": "Player",
+            "active_persona_id": "custom-narrator",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["world_id"] == "custom_world"
+    assert "content_root" not in payload
+
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    rows = connection.execute("SELECT content_root FROM sessions").fetchall()
+    connection.close()
+    assert [row["content_root"] for row in rows] == [str(pack_root)]
 
 
 def test_get_session_returns_recent_turns_without_private_state(tmp_path: Path) -> None:

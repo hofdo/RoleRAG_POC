@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +21,7 @@ class Settings(BaseSettings):
 
     app_env: str = "local"
     database_path: str = "data/rolerag.db"
+    content_root: Path = Path("data")
 
     local_llm_base_url: str = "http://localhost:8080/v1"
     local_llm_api_key: str = "local"

@@ -107,6 +107,9 @@ class StubMemoryIndexer:
 
 
 class FakeLoader:
+    def __init__(self, *, marker: str = "default") -> None:
+        self.marker = marker
+
     def load_world(self, world_id: str) -> DemoWorldRecord:
         return DemoWorldRecord(
             id=world_id,
@@ -121,7 +124,7 @@ class FakeLoader:
             raise ValueError(f"Unknown persona: {persona_id}")
         return PersonaCard(
             id="archivist",
-            name="Iria Vale",
+            name=f"Iria Vale ({self.marker})",
             role="npc",
             public_description="A composed palace archivist.",
             private_description="She is quietly aiding the coup.",
@@ -133,7 +136,7 @@ class FakeLoader:
             raise ValueError(f"Unknown scene: {scene_id}")
         return SceneState(
             id="rose-gallery",
-            title="Rose Gallery",
+            title=f"Rose Gallery ({self.marker})",
             location="Winter Palace",
             player_visible_summary="Courtiers drift between mirrors and roses.",
             gm_private_summary="The regent's spy is already in the room.",
@@ -207,6 +210,60 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
     assert result.warnings == []
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_uses_stored_content_root_for_turns(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="custom-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+            content_root="packs/custom",
+        )
+    )
+    turn_repository = SQLiteTurnRepository(connection)
+    loader_roots: list[str] = []
+
+    def build_loader(content_root: str) -> FakeLoader:
+        loader_roots.append(content_root)
+        return FakeLoader(marker=content_root)
+
+    orchestrator = TurnOrchestrator(
+        loader=FakeLoader(marker="entrypoint"),
+        loader_factory=build_loader,
+        provider=provider,
+        critic_agent=StubCritic(),
+        session_repository=session_repository,
+        turn_repository=turn_repository,
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=turn_repository,
+            recent_turns=8,
+        ),
+        local_model="local-model",
+        cloud_model="cloud-model",
+        local_max_tokens=700,
+        cloud_max_tokens=1000,
+        local_temperature=0.75,
+        cloud_temperature=0.65,
+        cloud_mode="ask",
+    )
+
+    await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="custom-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert loader_roots == ["packs/custom"]
+    assert "packs/custom" in provider.requests[0].messages[0].content
 
 
 @pytest.mark.asyncio

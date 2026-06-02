@@ -114,6 +114,70 @@ class RecordingVectorStore:
         self.upsert_calls.append((collection, chunks, vectors))
 
 
+def _write_scenario_pack(root: Path) -> None:
+    (root / "worlds").mkdir(parents=True)
+    (root / "personas").mkdir()
+    (root / "scenes").mkdir()
+    (root / "documents").mkdir()
+    (root / "worlds" / "custom_world.json").write_text(
+        json.dumps(
+            {
+                "id": "custom_world",
+                "name": "Custom World",
+                "default_scene_id": "custom-opening",
+                "persona_ids": ["custom-narrator"],
+                "scene_ids": ["custom-opening"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "personas" / "custom-narrator.json").write_text(
+        json.dumps(
+            {
+                "id": "custom-narrator",
+                "name": "Custom Narrator",
+                "role": "narrator",
+                "public_description": "A custom narrator.",
+                "speaking_style": "Clear.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "scenes" / "custom_opening.json").write_text(
+        json.dumps(
+            {
+                "id": "custom-opening",
+                "title": "Custom Opening",
+                "location": "Custom Hall",
+                "player_visible_summary": "A custom hall waits.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "documents" / "lore.md").write_text(
+        "# Custom Lore\n\nA custom banner hangs in the hall.",
+        encoding="utf-8",
+    )
+    (root / "documents" / "manifest.json").write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {
+                        "path": "lore.md",
+                        "visibility": Visibility.PLAYER.value,
+                        "source_type": "lore",
+                        "tags": ["custom"],
+                        "world_id": "custom_world",
+                        "scene_id": "custom-opening",
+                        "persona_id": "custom-narrator",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 class FakeActorContextRetriever:
     def __init__(self, chunks: list[RetrievedChunk] | None = None) -> None:
         self.chunks = chunks or []
@@ -317,6 +381,40 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
     assert len(context_retriever.calls) == 1
 
 
+def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    database_path = tmp_path / "sessions.db"
+
+    start_result = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "custom-session",
+            "--content-root",
+            str(pack_root),
+            "--world-id",
+            "custom_world",
+            "--scene-id",
+            "custom-opening",
+            "--active-persona-id",
+            "custom-narrator",
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+    resume_result = runner.invoke(
+        app,
+        ["resume", "--session-id", "custom-session"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert start_result.exit_code == 0
+    assert json.loads(start_result.stdout)["content_root"] == str(pack_root)
+    assert resume_result.exit_code == 0
+    assert json.loads(resume_result.stdout)["content_root"] == str(pack_root)
+
+
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
     with (
         patch("app.cli._build_local_provider", return_value=FakeProvider()),
@@ -407,6 +505,33 @@ def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path
     assert chunks[0].visibility == Visibility.PLAYER
     assert chunks[0].tags == ["palace"]
     assert chunks[0].world_id == "demo_world"
+
+
+def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            ["ingest-scenario-lore", "--content-root", str(pack_root)],
+        )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["total_chunk_count"] == 1
+    assert payload["documents"][0]["source"].endswith("documents/lore.md")
+    assert vector_store.ensure_calls == [(RagCollection.CANON_LORE, 2)]
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert chunks[0].visibility == Visibility.PLAYER
+    assert chunks[0].tags == ["custom"]
+    assert chunks[0].world_id == "custom_world"
+    assert chunks[0].scene_id == "custom-opening"
+    assert chunks[0].persona_id == "custom-narrator"
 
 
 def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> None:
