@@ -476,8 +476,10 @@ Important current behavior:
 
 - document ingestion currently supports `.md` and `.txt`
 - world, scene, and persona demo data are loaded from JSON files
+- Qdrant is a derived runtime index; scenario startup does not automatically ingest lore
 - retrieval is fail-open; if Qdrant or embeddings are unavailable during a turn, generation continues without retrieved context
 - actor retrieval gathers candidates from `session_memory`, `persona_memory`, and `canon_lore`, then applies a deterministic reranking pass
+- actor retrieval filters to player-visible chunks and scopes lore, session memory, and persona memory by stored session metadata
 - reranking preserves vector score and adds transparent boosts for collection, matching session/scene/persona metadata, and memory importance
 - curated SQLite memory episodes are indexed into `session_memory` after persistence
 - memory indexing is fail-open during turns; use `reindex-memories` to backfill after an outage
@@ -505,7 +507,7 @@ Run the standalone deterministic regression summary:
 python -m app.evals.regression_runner
 ```
 
-The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation behavior, and cloud-routing policy. It is regression coverage for engine behavior, not a prose-quality benchmark.
+The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation behavior, and cloud-routing policy. It uses deterministic keyword embeddings and in-memory retrieval. It is regression coverage for engine behavior, not a semantic-vector or prose-quality benchmark.
 
 ## Current Limitations
 

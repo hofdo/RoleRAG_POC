@@ -17,3 +17,15 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "cloud_routing",
     }
     assert all(result.passed for result in report.results)
+    retrieval = next(result for result in report.results if result.name == "retrieval")
+    assert set(retrieval.checks) == {
+        "canon_lore_recalled",
+        "session_memory_recalled",
+        "persona_memory_recalled",
+        "wrong_world_excluded",
+        "wrong_session_excluded",
+        "wrong_persona_excluded",
+        "gm_only_excluded",
+        "character_private_excluded",
+        "relevant_memory_ranked_above_irrelevant",
+    }

@@ -90,6 +90,15 @@ Current ranking behavior:
 - keep ranking policy in application code rather than inside Qdrant
 - expose metadata-only diagnostics for selected chunks through the CLI
 
+Retrieval guarantees:
+
+- actor retrieval requests only `player`-visible chunks
+- canon lore is scoped to the stored session `world_id`
+- session memory is scoped to the stored `session_id`
+- persona memory is scoped to the active `persona_id`
+- deterministic reranking is applied after bounded per-collection candidate retrieval
+- diagnostics serialize selected chunk metadata and scores, never chunk text
+
 ## Visibility Rules
 
 The only implemented visibility values are:
@@ -145,6 +154,19 @@ Current indexing behavior:
 - If memory curation returns invalid structured output, memory persistence is skipped and the turn still completes.
 - If memory indexing fails after SQLite persistence, a warning is recorded and the turn still completes.
 
+## Retrieval Checks
+
+Run the deterministic retrieval and policy eval tests:
+
+```bash
+pytest tests/evals -q
+python -m app.evals.regression_runner
+```
+
+These checks use keyword embeddings and `InMemoryVectorStore`. They prove recall, scope isolation,
+visibility filtering, and ranking stability without live Qdrant or real model providers. They are not
+benchmarks for semantic vector quality or generated prose quality.
+
 ## Tests Covering This Design
 
 - `tests/unit/test_chunking.py`
@@ -164,6 +186,12 @@ Current indexing behavior:
 - SQLite remains authoritative for sessions, turns, and durable memories
 - visibility filtering stays in application code, not prompt wording
 - actor prompts never receive `gm` or unrelated `character_private` chunks
+
+## Current Limitations
+
+- Qdrant remains a derived runtime index rather than an authoritative content store
+- scenario startup does not auto-ingest lore into Qdrant
+- production vector quality is not measured by the deterministic keyword eval fixtures
 
 ## Deferred Work
 

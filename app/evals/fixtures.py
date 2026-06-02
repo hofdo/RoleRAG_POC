@@ -121,8 +121,18 @@ class EvalFixture:
     session: SessionState
     primary_persona: PersonaCard
     secondary_persona: PersonaCard
+    canon_lore_chunk_id: str
     public_lore_chunk_id: str
     public_lore_text: str
+    session_memory_chunk_id: str
+    persona_memory_chunk_id: str
+    persona_memory_text: str
+    wrong_world_chunk_id: str
+    wrong_world_text: str
+    wrong_session_chunk_id: str
+    wrong_session_text: str
+    wrong_persona_chunk_id: str
+    wrong_persona_text: str
     gm_only_chunk_id: str
     gm_only_lore_text: str
     character_private_chunk_id: str
@@ -205,6 +215,15 @@ class EvalFixture:
                 "Question: What is publicly known about the mirrored columns and west door?",
             ]
         )
+
+    def build_session_memory_query(self) -> str:
+        return "What did I promise about the archive key before dawn in the gallery?"
+
+    def build_persona_memory_query(self) -> str:
+        return "What does Iria remember about the archive mirror before dawn?"
+
+    def build_isolation_query(self) -> str:
+        return "gallery mirror archive dawn fountain spy clock west"
 
     def build_memory_provider(self, *, kind: str) -> SequencedFakeProvider:
         responses = {
@@ -375,7 +394,11 @@ def build_eval_fixture() -> EvalFixture:
     relevant_memory_text = (
         "The player promised to return before dawn for the archive key in the gallery."
     )
+    persona_memory_text = "Iria remembers that the archive mirror must be checked before dawn."
     irrelevant_memory_text = "The player admired the fountain in the lower garden."
+    wrong_world_text = "Another world's gallery mirror hides an archive clock beside the west door."
+    wrong_session_text = "Another session promised to check the gallery archive before dawn."
+    wrong_persona_text = "Corvin remembers the gallery archive mirror and west door."
 
     _seed_chunk(
         vector_store=vector_store,
@@ -403,6 +426,20 @@ def build_eval_fixture() -> EvalFixture:
             visibility=Visibility.GM,
             tags=["spy"],
             world_id=world.id,
+        ),
+    )
+    _seed_chunk(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.PERSONA_MEMORY,
+        chunk=RagChunk(
+            id="eval-persona-memory",
+            source="eval-persona-memory.md",
+            source_type="memory",
+            text=persona_memory_text,
+            visibility=Visibility.PLAYER,
+            tags=["archive", "mirror", "dawn"],
+            persona_id=primary_persona.id,
         ),
     )
     _seed_chunk(
@@ -447,6 +484,48 @@ def build_eval_fixture() -> EvalFixture:
             session_id=session.id,
         ),
     )
+    _seed_chunk(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.CANON_LORE,
+        chunk=RagChunk(
+            id="eval-wrong-world-lore",
+            source="eval-wrong-world-lore.md",
+            source_type="lore",
+            text=wrong_world_text,
+            visibility=Visibility.PLAYER,
+            tags=["gallery", "archive"],
+            world_id="other-world",
+        ),
+    )
+    _seed_chunk(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.SESSION_MEMORY,
+        chunk=RagChunk(
+            id="eval-wrong-session-memory",
+            source="eval-wrong-session-memory.md",
+            source_type="memory",
+            text=wrong_session_text,
+            visibility=Visibility.PLAYER,
+            tags=["gallery", "archive", "dawn"],
+            session_id="other-session",
+        ),
+    )
+    _seed_chunk(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.PERSONA_MEMORY,
+        chunk=RagChunk(
+            id="eval-wrong-persona-memory",
+            source="eval-wrong-persona-memory.md",
+            source_type="memory",
+            text=wrong_persona_text,
+            visibility=Visibility.PLAYER,
+            tags=["gallery", "archive", "mirror"],
+            persona_id=secondary_persona.id,
+        ),
+    )
 
     return EvalFixture(
         world=world,
@@ -454,8 +533,18 @@ def build_eval_fixture() -> EvalFixture:
         session=session,
         primary_persona=primary_persona,
         secondary_persona=secondary_persona,
+        canon_lore_chunk_id="eval-public-lore",
         public_lore_chunk_id="eval-public-lore",
         public_lore_text=public_lore_text,
+        session_memory_chunk_id="eval-relevant-memory",
+        persona_memory_chunk_id="eval-persona-memory",
+        persona_memory_text=persona_memory_text,
+        wrong_world_chunk_id="eval-wrong-world-lore",
+        wrong_world_text=wrong_world_text,
+        wrong_session_chunk_id="eval-wrong-session-memory",
+        wrong_session_text=wrong_session_text,
+        wrong_persona_chunk_id="eval-wrong-persona-memory",
+        wrong_persona_text=wrong_persona_text,
         gm_only_chunk_id="eval-gm-lore",
         gm_only_lore_text=gm_only_lore_text,
         character_private_chunk_id="eval-private-memory",

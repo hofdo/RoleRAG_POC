@@ -16,11 +16,13 @@ from app.domain import (
     SessionState,
     Visibility,
 )
+from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics, RetrievalResult
 from app.rag.models import RagChunk, RagCollection
+from app.rag.vector_store import InMemoryVectorStore
 
 runner = CliRunner()
 
@@ -112,6 +114,21 @@ class RecordingVectorStore:
         vectors: list[list[float]],
     ) -> None:
         self.upsert_calls.append((collection, chunks, vectors))
+
+
+def _seed_chunks(
+    *,
+    vector_store: InMemoryVectorStore,
+    embedding_provider: DeterministicKeywordEmbeddingProvider,
+    collection: RagCollection,
+    chunks: list[RagChunk],
+) -> None:
+    vector_store.ensure_collection(collection, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        collection,
+        chunks,
+        embedding_provider.embed_batch([chunk.text for chunk in chunks]),
+    )
 
 
 def _write_scenario_pack(root: Path) -> None:
@@ -534,25 +551,49 @@ def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None
     assert chunks[0].persona_id == "custom-narrator"
 
 
-def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> None:
-    context_retriever = FakeActorContextRetriever(
-        [
-            RetrievedChunk(
+def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunks(
+    tmp_path: Path,
+) -> None:
+    embedding_provider = DeterministicKeywordEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    _seed_chunks(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.CANON_LORE,
+        chunks=[
+            RagChunk(
                 id="lore-1",
                 source="demo_lore.md",
                 source_type="lore",
-                text="The Rose Gallery has mirrored columns.",
-                score=0.91,
+                text="The Rose Gallery has mirrored columns around the archive door.",
                 visibility=Visibility.PLAYER,
-            )
-        ]
+                world_id="demo_world",
+            ),
+            RagChunk(
+                id="wrong-world",
+                source="other_lore.md",
+                source_type="lore",
+                text="Another gallery archive mirror hides a clock.",
+                visibility=Visibility.PLAYER,
+                world_id="other_world",
+            ),
+            RagChunk(
+                id="gm-lore",
+                source="gm_lore.md",
+                source_type="lore",
+                text="A spy waits behind the gallery mirror.",
+                visibility=Visibility.GM,
+                world_id="demo_world",
+            ),
+        ],
     )
     provider = FakeProvider()
     with (
         patch("app.cli._build_local_provider", return_value=provider),
         patch("app.cli._build_critic_agent", return_value=FakeCritic()),
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
-        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
     ):
         runner.invoke(
             app,
@@ -561,33 +602,47 @@ def test_cli_turn_uses_fake_retrieved_context_without_qdrant(tmp_path: Path) -> 
         )
         result = runner.invoke(
             app,
-            ["turn", "--session-id", "demo-session", "--message", "What do I notice?"],
+            [
+                "turn",
+                "--session-id",
+                "demo-session",
+                "--message",
+                "What do I notice about the gallery archive mirror?",
+            ],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
 
     assert result.exit_code == 0
-    assert "The Rose Gallery has mirrored columns." in provider.requests[0].messages[0].content
+    prompt = provider.requests[0].messages[0].content
+    assert "The Rose Gallery has mirrored columns around the archive door." in prompt
+    assert "Another gallery archive mirror hides a clock." not in prompt
+    assert "A spy waits behind the gallery mirror." not in prompt
 
 
-def test_cli_retrieve_debug_uses_fake_retriever_and_omits_chunk_text(tmp_path: Path) -> None:
-    context_retriever = FakeActorContextRetriever(
-        [
-            RetrievedChunk(
+def test_cli_retrieve_debug_uses_in_memory_retrieval_and_omits_chunk_text(tmp_path: Path) -> None:
+    embedding_provider = DeterministicKeywordEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    _seed_chunks(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.SESSION_MEMORY,
+        chunks=[
+            RagChunk(
                 id="memory-1",
                 source="memory_episode:memory-1",
                 source_type="session_memory",
                 text="The player promised to return before dawn.",
-                score=0.61,
                 visibility=Visibility.PLAYER,
                 tags=["promise", "dawn"],
                 session_id="demo-session",
                 importance=4,
             )
-        ]
+        ],
     )
     with (
         patch("app.cli._build_file_loader", return_value=FakeLoader()),
-        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
     ):
         runner.invoke(
             app,
@@ -612,6 +667,78 @@ def test_cli_retrieve_debug_uses_fake_retriever_and_omits_chunk_text(tmp_path: P
     assert payload["selected"][0]["id"] == "memory-1"
     assert payload["selected"][0]["adjusted_score"] > payload["selected"][0]["original_score"]
     assert "text" not in result.stdout
+
+
+def test_cli_turn_uses_stored_scenario_pack_world_for_retrieval(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    embedding_provider = DeterministicKeywordEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    _seed_chunks(
+        vector_store=vector_store,
+        embedding_provider=embedding_provider,
+        collection=RagCollection.CANON_LORE,
+        chunks=[
+            RagChunk(
+                id="custom-lore",
+                source="custom-lore.md",
+                source_type="lore",
+                text="The custom hall archive mirror opens before dawn.",
+                visibility=Visibility.PLAYER,
+                world_id="custom_world",
+            ),
+            RagChunk(
+                id="demo-lore",
+                source="demo-lore.md",
+                source_type="lore",
+                text="The demo hall archive mirror opens before dawn.",
+                visibility=Visibility.PLAYER,
+                world_id="demo_world",
+            ),
+        ],
+    )
+    provider = FakeProvider()
+    database_path = tmp_path / "sessions.db"
+    with (
+        patch("app.cli._build_local_provider", return_value=provider),
+        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        start_result = runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "custom-session",
+                "--content-root",
+                str(pack_root),
+                "--world-id",
+                "custom_world",
+                "--scene-id",
+                "custom-opening",
+                "--active-persona-id",
+                "custom-narrator",
+            ],
+            env={"DATABASE_PATH": str(database_path)},
+        )
+        turn_result = runner.invoke(
+            app,
+            [
+                "turn",
+                "--session-id",
+                "custom-session",
+                "--message",
+                "What opens before dawn?",
+            ],
+            env={"DATABASE_PATH": str(database_path)},
+        )
+
+    assert start_result.exit_code == 0
+    assert turn_result.exit_code == 0
+    prompt = provider.requests[0].messages[0].content
+    assert "The custom hall archive mirror opens before dawn." in prompt
+    assert "The demo hall archive mirror opens before dawn." not in prompt
 
 
 def test_cli_reindex_memories_indexes_existing_sqlite_memories(tmp_path: Path) -> None:

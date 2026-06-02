@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 
 from app.domain import PersonaCard, RetrievedChunk, SceneState, StoredTurn, Visibility
 from app.llm.router import ModelProviderName, ModelRoute
-from app.rag.models import RagCollection, RetrievalFilter
+from app.rag.models import RagChunk, RagCollection, RetrievalFilter
 from app.rag.retriever import ActorContextRetriever, Retriever, build_retrieval_query
+from app.rag.vector_store import InMemoryVectorStore
 
 
 class FakeEmbeddingProvider:
@@ -116,6 +117,118 @@ def test_retriever_passes_filters_and_limit_to_vector_store() -> None:
     assert vector == [1.0, float(len("Where is the west door?")), 0.0]
     assert passed_filters == filters
     assert limit == 2
+
+
+def test_in_memory_actor_retrieval_filters_scope_and_hidden_visibility() -> None:
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    canon_chunks = [
+        RagChunk(
+            id="expected-lore",
+            source="expected-lore.md",
+            source_type="lore",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            world_id="demo_world",
+        ),
+        RagChunk(
+            id="wrong-world",
+            source="wrong-world.md",
+            source_type="lore",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            world_id="other_world",
+        ),
+        RagChunk(
+            id="gm-only",
+            source="gm-only.md",
+            source_type="lore",
+            text="gallery",
+            visibility=Visibility.GM,
+            world_id="demo_world",
+        ),
+    ]
+    vector_store.ensure_collection(RagCollection.CANON_LORE, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        RagCollection.CANON_LORE,
+        canon_chunks,
+        embedding_provider.embed_batch([chunk.text for chunk in canon_chunks]),
+    )
+    session_chunks = [
+        RagChunk(
+            id="expected-session",
+            source="expected-session.md",
+            source_type="memory",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            session_id="session-1",
+        ),
+        RagChunk(
+            id="wrong-session",
+            source="wrong-session.md",
+            source_type="memory",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            session_id="session-2",
+        ),
+    ]
+    vector_store.ensure_collection(RagCollection.SESSION_MEMORY, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        RagCollection.SESSION_MEMORY,
+        session_chunks,
+        embedding_provider.embed_batch([chunk.text for chunk in session_chunks]),
+    )
+    persona_chunks = [
+        RagChunk(
+            id="expected-persona",
+            source="expected-persona.md",
+            source_type="memory",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            persona_id="archivist",
+        ),
+        RagChunk(
+            id="wrong-persona",
+            source="wrong-persona.md",
+            source_type="memory",
+            text="gallery",
+            visibility=Visibility.PLAYER,
+            persona_id="envoy",
+        ),
+        RagChunk(
+            id="character-private",
+            source="character-private.md",
+            source_type="memory",
+            text="gallery",
+            visibility=Visibility.CHARACTER_PRIVATE,
+            persona_id="archivist",
+        ),
+    ]
+    vector_store.ensure_collection(RagCollection.PERSONA_MEMORY, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        RagCollection.PERSONA_MEMORY,
+        persona_chunks,
+        embedding_provider.embed_batch([chunk.text for chunk in persona_chunks]),
+    )
+
+    results = ActorContextRetriever(
+        retriever=Retriever(
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+        )
+    ).retrieve_for_actor(
+        query="gallery",
+        world_id="demo_world",
+        session_id="session-1",
+        persona_id="archivist",
+        top_k=10,
+    )
+
+    assert {chunk.id for chunk in results} == {
+        "expected-lore",
+        "expected-session",
+        "expected-persona",
+    }
 
 
 class RecordingRetriever:

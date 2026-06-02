@@ -14,12 +14,14 @@ from app.domain import (
     SessionState,
     Visibility,
 )
+from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.main import app
 from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
+from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
 
 
 class SequencedFakeProvider(LlmProvider):
@@ -170,6 +172,89 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
     )
 
 
+def _build_in_memory_retrieval_services(
+    tmp_path: Path,
+) -> tuple[AppServices, SequencedFakeProvider]:
+    connection = connect_sqlite(tmp_path / "api-in-memory-turns.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    embedding_provider = DeterministicKeywordEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    chunks = [
+        RagChunk(
+            id="public-lore",
+            source="demo_lore.md",
+            source_type="lore",
+            text="The gallery archive mirror marks the locked west door.",
+            visibility=Visibility.PLAYER,
+            world_id="demo_world",
+        ),
+        RagChunk(
+            id="wrong-world",
+            source="other_lore.md",
+            source_type="lore",
+            text="Another gallery archive mirror marks a west door.",
+            visibility=Visibility.PLAYER,
+            world_id="other_world",
+        ),
+        RagChunk(
+            id="gm-lore",
+            source="gm_lore.md",
+            source_type="lore",
+            text="A spy waits behind the gallery archive mirror.",
+            visibility=Visibility.GM,
+            world_id="demo_world",
+        ),
+    ]
+    vector_store.ensure_collection(RagCollection.CANON_LORE, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        RagCollection.CANON_LORE,
+        chunks,
+        embedding_provider.embed_batch([chunk.text for chunk in chunks]),
+    )
+    provider = SequencedFakeProvider(["Only archivists and locksmiths speak of that door."])
+    recent_dialogue_store = RecentDialogueStore(turn_repository=turn_repository, recent_turns=8)
+    orchestrator = TurnOrchestrator(
+        loader=FakeLoader(),
+        provider=provider,
+        critic_agent=FakeCritic(),
+        session_repository=session_repository,
+        turn_repository=turn_repository,
+        recent_dialogue_store=recent_dialogue_store,
+        actor_context_retriever=ActorContextRetriever(
+            retriever=Retriever(
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            )
+        ),
+        local_model="local-model",
+        cloud_model="cloud-model",
+        local_max_tokens=700,
+        cloud_max_tokens=1000,
+        local_temperature=0.75,
+        cloud_temperature=0.65,
+        cloud_mode="ask",
+    )
+    return (
+        AppServices(
+            connection=connection,
+            orchestrator=orchestrator,
+            recent_dialogue_store=recent_dialogue_store,
+        ),
+        provider,
+    )
+
+
 def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -> None:
     services, provider, retriever = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
@@ -205,6 +290,24 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     assert "cipher key" not in prompt
     assert "The regent ordered the poisoning." not in prompt
     assert "route_max_tokens" not in response.text
+
+
+def test_post_turn_uses_in_memory_retrieval_without_live_qdrant(tmp_path: Path) -> None:
+    services, provider = _build_in_memory_retrieval_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "What does the gallery archive mirror mark?"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    prompt = provider.requests[0].messages[0].content
+    assert "The gallery archive mirror marks the locked west door." in prompt
+    assert "Another gallery archive mirror marks a west door." not in prompt
+    assert "A spy waits behind the gallery archive mirror." not in prompt
 
 
 def test_post_turn_returns_404_for_missing_session(tmp_path: Path) -> None:
