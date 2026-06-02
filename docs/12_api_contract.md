@@ -10,6 +10,7 @@ Available endpoints:
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/turns`
+- `POST /sessions/{session_id}/turns/stream`
 
 API routes do not own retrieval, persistence, routing, prompt construction, or visibility logic.
 SQLite remains authoritative state. Qdrant remains a derived retrieval index.
@@ -80,6 +81,41 @@ The success response includes generated text, route metadata, memory-write statu
 `warnings` reports fail-open runtime behavior, such as skipped retrieval or skipped cloud routing.
 A turn can return HTTP `200` with warnings when actor generation still completed.
 
+## Buffered Turn Streaming
+
+`POST /sessions/{session_id}/turns/stream` accepts the same request body as
+`POST /sessions/{session_id}/turns` and returns `Content-Type: text/event-stream`.
+
+The implementation is intentionally buffered. The route awaits the existing validated
+`TurnOrchestrator.run_turn()` pipeline before emitting player-visible text. First output arrives
+only after retrieval, routing, generation, critic validation, repair, persistence, and memory
+handling complete. This endpoint does not add provider token streaming, pre-validation token
+emission, or a second orchestration path.
+
+A successful stream currently emits exactly one `text` event followed by one `final` event:
+
+```text
+event: text
+data: {"text":"<validated final text>"}
+
+event: final
+data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "memory_written":false, "warnings":[]}
+
+```
+
+The contract permits repeated `text` events for future validated fragmentation. Reconstructed
+equivalence means concatenated `text` event content plus `final` metadata matches the existing
+non-streaming `CreateTurnResponse`.
+
+When the orchestrator returns a safe controlled failure after critic and repair attempts, the
+stream emits only one `failure` event and never emits rejected draft text:
+
+```text
+event: failure
+data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "memory_written":false, "warnings":[]}
+
+```
+
 ## Errors
 
 Handled `400`, `404`, and request-validation `422` responses use one envelope:
@@ -101,6 +137,11 @@ Stable error codes:
 - `session_not_found`
 - `validation_error`
 
+Failures known before streaming starts retain the same JSON envelopes: `400 invalid_turn_request`,
+`404 session_not_found`, and `422 validation_error`. Validation details contain only `loc`, `type`,
+and the fixed sanitized message `Request field validation failed`; reflected input and validator
+context are excluded.
+
 ## Exposure Boundaries
 
 Responses do not expose raw prompt contents, hidden retrieved chunk text, GM-only fields,
@@ -109,5 +150,6 @@ diagnostics.
 
 ## Known Limitations
 
-The API does not provide a frontend, streaming, authentication, multi-user isolation, per-request
-scenario selection, hidden-context diagnostics, or raw retrieval/debug payloads.
+The API does not provide a frontend, authentication, multi-user isolation, provider token
+streaming, pre-validation token emission, per-request scenario selection, hidden-context
+diagnostics, or raw retrieval/debug payloads.

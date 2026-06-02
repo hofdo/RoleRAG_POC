@@ -44,9 +44,11 @@ Safe candidates:
 
 Add a frontend only after preserving the current API and orchestration boundaries. The frontend should consume existing backend behavior rather than pulling logic out of the backend.
 
-### Streaming responses
+### Streaming evolution
 
-Add streaming only after the current non-streaming API remains stable. Streaming should be transport behavior, not a new orchestration mode.
+The API now exposes buffered SSE as transport behavior over the existing orchestrator. Consider
+validated fragmentation only if it preserves the current rule: never emit provider tokens or
+draft text before critic validation.
 
 ### Richer authoring
 

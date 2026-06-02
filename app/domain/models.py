@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -116,11 +117,17 @@ class StoredTurn(BaseModel):
     created_at: datetime
 
 
+class TurnOutcome(str, Enum):
+    SUCCESS = "success"
+    CONTROLLED_FAILURE = "controlled_failure"
+
+
 class TurnResult(BaseModel):
     text: str
     route: ModelRoute
     memory_written: bool = False
     warnings: list[str] = Field(default_factory=list)
+    outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
 
 
 class CriticResult(BaseModel):

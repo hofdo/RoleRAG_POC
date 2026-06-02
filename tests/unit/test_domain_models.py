@@ -16,6 +16,7 @@ from app.domain import (
     SessionState,
     StoredTurn,
     TurnInput,
+    TurnOutcome,
     TurnResult,
     Visibility,
 )
@@ -293,6 +294,7 @@ def test_turn_result_accepts_nested_model_route() -> None:
     result = TurnResult(text="The archivist hesitates before answering.", route=route)
 
     assert result.route is route
+    assert result.outcome == TurnOutcome.SUCCESS
     assert result.model_dump() == {
         "text": "The archivist hesitates before answering.",
         "route": {
@@ -306,6 +308,24 @@ def test_turn_result_accepts_nested_model_route() -> None:
         "memory_written": False,
         "warnings": [],
     }
+
+
+def test_turn_result_excludes_controlled_failure_outcome_from_serialization() -> None:
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=900,
+        temperature=0.6,
+        reason="cloud mode is off",
+    )
+    result = TurnResult(
+        text="No validated response was produced.",
+        route=route,
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert "outcome" not in result.model_dump()
 
 
 def test_critic_result_defaults_to_empty_issues_and_nullable_repair_instruction() -> None:

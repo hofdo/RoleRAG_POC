@@ -1325,6 +1325,15 @@ POST /sessions/{session_id}/turns
 }
 ```
 
+### 17.4 Buffered SSE Response
+
+```http
+POST /sessions/{session_id}/turns/stream
+```
+
+The buffered SSE endpoint reuses the validated turn pipeline. It emits final player-visible text
+only after orchestration completes; it does not stream provider tokens or rejected drafts.
+
 ---
 
 ## 18. CLI Design

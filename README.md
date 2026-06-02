@@ -11,7 +11,7 @@ Implemented in this repository:
 - deterministic routing with `CLOUD_MODE=off|ask|auto`
 - structured JSON world, scene, and persona loading
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
-- FastAPI endpoints for session creation, turn execution, and session lookup
+- FastAPI endpoints for session creation, turn execution, buffered SSE turn streaming, and session lookup
 - SQLite persistence for sessions, turns, and durable memory episodes
 - automatic indexing of curated durable memories into session-scoped retrieval
 - Qdrant-backed vector storage for ingested lore and retrieval
@@ -31,7 +31,7 @@ Not implemented:
 - frontend
 - authentication
 - multi-user support
-- streaming API
+- provider token streaming
 - production deployment hardening
 
 ## Quickstart
@@ -434,6 +434,7 @@ Implemented endpoints:
 
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
+- `POST /sessions/{session_id}/turns/stream`
 - `GET /sessions/{session_id}`
 
 Create a session:
@@ -451,6 +452,17 @@ curl -X POST http://127.0.0.1:8000/sessions/<session-id>/turns \
   -H "Content-Type: application/json" \
   -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist","request_cloud":false}'
 ```
+
+Run a buffered SSE turn:
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/sessions/<session-id>/turns/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist","request_cloud":false}'
+```
+
+The SSE route emits validated text only after the existing orchestration pipeline completes. It
+does not stream provider tokens or expose drafts before critic validation.
 
 Read session state:
 
@@ -523,7 +535,7 @@ embedding quality, Qdrant quality, or generated prose quality.
 - personal-use MVP only
 - no frontend
 - no authentication or multi-user isolation
-- no streaming API
+- buffered SSE only; no provider token streaming or pre-validation token emission
 - no production deployment hardening
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
@@ -537,7 +549,8 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - improve integration coverage
 - tune retrieval heuristics from eval evidence
 - expand retrieval observability if another surface needs it
-- add a frontend and streaming only after the current backend boundaries stay intact
+- add a frontend only after the current backend boundaries stay intact
+- consider validated fragmentation only if it preserves the current exposure boundary
 - add auth only if the project becomes multi-user
 
 ## Additional Documentation

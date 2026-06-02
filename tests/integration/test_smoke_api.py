@@ -15,10 +15,12 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         "/sessions",
         "/sessions/{session_id}",
         "/sessions/{session_id}/turns",
+        "/sessions/{session_id}/turns/stream",
     }
     assert set(schema["paths"]["/sessions"]) == {"post"}
     assert set(schema["paths"]["/sessions/{session_id}"]) == {"get"}
     assert set(schema["paths"]["/sessions/{session_id}/turns"]) == {"post"}
+    assert set(schema["paths"]["/sessions/{session_id}/turns/stream"]) == {"post"}
     assert schema["components"]["schemas"]["CreateSessionRequest"]["required"] == [
         "world_id",
         "scene_id",
@@ -50,3 +52,13 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         ]["schema"]["$ref"]
         == "#/components/schemas/ErrorResponse"
     )
+    assert "text/event-stream" in schema["paths"]["/sessions/{session_id}/turns/stream"]["post"][
+        "responses"
+    ]["200"]["content"]
+    for status_code in ("400", "404", "422"):
+        assert (
+            schema["paths"]["/sessions/{session_id}/turns/stream"]["post"]["responses"][
+                status_code
+            ]["content"]["application/json"]["schema"]["$ref"]
+            == "#/components/schemas/ErrorResponse"
+        )

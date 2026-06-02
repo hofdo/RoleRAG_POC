@@ -16,6 +16,7 @@ from app.domain import (
 )
 from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
+from app.llm.router import CloudMode
 from app.main import app
 from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
@@ -125,6 +126,48 @@ class FakeRetriever:
 class FailingRetriever:
     def retrieve_for_actor(self, **_: object) -> list[RetrievedChunk]:
         raise RuntimeError("qdrant offline")
+
+
+class RejectingCritic:
+    async def evaluate(self, **_: object) -> CriticResult:
+        return CriticResult(
+            accepted=False,
+            issues=["unsafe output"],
+            repair_instruction="Remove hidden context.",
+        )
+
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        return actor_messages
+
+    def build_cloud_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        issues: list[str],
+    ) -> list[LlmMessage]:
+        return actor_messages
+
+
+def _parse_sse(response_text: str) -> list[tuple[str, dict[str, object]]]:
+    import json
+
+    events = []
+    for frame in response_text.strip().split("\n\n"):
+        event_line, data_line = frame.splitlines()
+        events.append(
+            (
+                event_line.removeprefix("event: "),
+                json.loads(data_line.removeprefix("data: ")),
+            )
+        )
+    return events
 
 
 def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider, FakeRetriever]:
@@ -426,3 +469,197 @@ def test_post_turn_rejects_invalid_request_with_422(tmp_path: Path) -> None:
     assert payload["error"]["code"] == "validation_error"
     assert payload["error"]["message"] == "Request validation failed"
     assert payload["error"]["details"]
+
+
+def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert _parse_sse(response.text) == [
+        ("text", {"text": "Only archivists and locksmiths speak of that door."}),
+        (
+            "final",
+            {
+                "route": {
+                    "provider": "local",
+                    "model": "local-model",
+                    "reason": "default local route",
+                },
+                "memory_written": False,
+                "warnings": [],
+            },
+        ),
+    ]
+
+
+def test_post_turn_stream_returns_json_404_before_streaming(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/missing-session/turns/stream",
+        json={"message": "Hello there."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["code"] == "session_not_found"
+
+
+def test_post_turn_stream_returns_json_400_before_streaming(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "Hello there.", "active_persona_id": "someone-else"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["code"] == "invalid_turn_request"
+
+
+def test_post_turn_stream_returns_sanitized_json_422_before_streaming(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": ["/Users/private/secret.txt"]},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["details"] == [
+        {
+            "loc": ["body", "message"],
+            "type": "string_type",
+            "message": "Request field validation failed",
+        }
+    ]
+    assert "/Users/private/secret.txt" not in response.text
+
+
+def test_post_turn_stream_sanitizes_path_like_validation_location(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "Hello there.", "/Users/private/secret.txt": "reflected-key"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    assert response.json()["error"]["details"] == [
+        {
+            "loc": ["body", "<field>"],
+            "type": "extra_forbidden",
+            "message": "Request field validation failed",
+        }
+    ]
+    assert "/Users/private/secret.txt" not in response.text
+
+
+def test_post_turn_stream_terminal_event_includes_fail_open_warnings(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    services.orchestrator.actor_context_retriever = FailingRetriever()
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "Hello there.", "request_cloud": True},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert _parse_sse(response.text)[-1][1]["warnings"] == [
+        "retrieval skipped: qdrant offline",
+        "cloud actor skipped: confirmation required for cloud-model (user requested cloud)",
+    ]
+
+
+def test_post_turn_stream_does_not_expose_input_or_hidden_context(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "RAW PLAYER PROMPT"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert "RAW PLAYER PROMPT" not in response.text
+    assert "The west door has stayed locked for years." not in response.text
+    assert "spy waits behind the mirrored column" not in response.text
+    assert "cipher key" not in response.text
+    assert "The regent ordered the poisoning." not in response.text
+
+
+def test_post_turn_stream_reconstructs_non_streaming_response(tmp_path: Path) -> None:
+    json_services, _, _ = _build_services(tmp_path / "json")
+    app.dependency_overrides[get_turn_services] = lambda: json_services
+    client = TestClient(app)
+    json_response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there."},
+    )
+    json_services.close()
+
+    stream_services, _, _ = _build_services(tmp_path / "stream")
+    app.dependency_overrides[get_turn_services] = lambda: stream_services
+    stream_response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "Hello there."},
+    )
+
+    app.dependency_overrides.clear()
+    text_event, final_event = _parse_sse(stream_response.text)
+    reconstructed = {"text": text_event[1]["text"], **final_event[1]}
+    assert reconstructed == json_response.json()
+
+
+def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(
+    tmp_path: Path,
+) -> None:
+    services, provider, _ = _build_services(tmp_path)
+    provider.responses.append("The rejected draft still contains hidden context.")
+    services.orchestrator.critic_agent = RejectingCritic()
+    services.orchestrator.cloud_mode = CloudMode.OFF
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "Tell me the hidden truth."},
+    )
+
+    app.dependency_overrides.clear()
+    events = _parse_sse(response.text)
+    assert len(events) == 1
+    assert events[0][0] == "failure"
+    assert events[0][1]["memory_written"] is False
+    failure_text = events[0][1]["text"]
+    assert isinstance(failure_text, str)
+    assert "could not produce a response that passed validation" in failure_text
+    assert "hidden context" not in response.text

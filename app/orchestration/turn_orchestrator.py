@@ -13,6 +13,7 @@ from app.domain import (
     SceneState,
     SessionState,
     TurnInput,
+    TurnOutcome,
     TurnResult,
 )
 from app.domain.visibility import Visibility
@@ -358,6 +359,7 @@ class TurnOrchestrator:
                         route=cloud_repair_route,
                         memory_written=False,
                         warnings=warnings,
+                        outcome=TurnOutcome.CONTROLLED_FAILURE,
                     )
                 if cloud_repair_route.requires_user_confirmation:
                     warnings.append(
@@ -370,6 +372,7 @@ class TurnOrchestrator:
                         route=cloud_repair_route,
                         memory_written=False,
                         warnings=warnings,
+                        outcome=TurnOutcome.CONTROLLED_FAILURE,
                     )
                 cloud_repaired_text, cloud_final_route = await self._generate_with_fallback(
                     route=cloud_repair_route,
@@ -403,6 +406,7 @@ class TurnOrchestrator:
                         route=cloud_final_route,
                         memory_written=False,
                         warnings=warnings,
+                        outcome=TurnOutcome.CONTROLLED_FAILURE,
                     )
 
         persisted_turn = self.turn_repository.append_turn(

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
+
+ErrorLocation: TypeAlias = str | int
+
+
+class ErrorDetail(BaseModel):
+    loc: list[ErrorLocation]
+    type: str
+    message: str
 
 
 class ErrorBody(BaseModel):
     code: str
     message: str
-    details: list[object]
+    details: list[ErrorDetail]
 
 
 class ErrorResponse(BaseModel):
@@ -50,6 +59,20 @@ class CreateTurnResponse(BaseModel):
     route: RouteResponse
     memory_written: bool
     warnings: list[str]
+
+
+class StreamTextPayload(BaseModel):
+    text: str
+
+
+class StreamFinalPayload(BaseModel):
+    route: RouteResponse
+    memory_written: bool
+    warnings: list[str]
+
+
+class StreamFailurePayload(StreamFinalPayload):
+    text: str
 
 
 class RecentTurnResponse(BaseModel):

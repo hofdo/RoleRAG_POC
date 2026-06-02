@@ -103,11 +103,14 @@ Implemented endpoints:
 
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
+- `POST /sessions/{session_id}/turns/stream`
 - `GET /sessions/{session_id}`
 
 The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
 The public HTTP contract and exposure boundaries are documented in
 [docs/12_api_contract.md](12_api_contract.md).
+The SSE route is transport-only and buffered: it emits player-visible text after the shared
+orchestration pipeline completes, not provider tokens or pre-validation drafts.
 
 ## Config Notes
 
@@ -141,6 +144,7 @@ Current implementation note: `MAX_LOCAL_RETRIES` is part of settings, but the re
   `reindex-memories` to repair the derived index from authoritative SQLite episodes.
 - Memory extraction stays local.
 - API routes stay thin and do not duplicate orchestration logic.
+- Buffered SSE output is emitted only after validation, persistence, and memory handling complete.
 - Tests and evals should continue to avoid live providers.
 
 ## Tests and Verification

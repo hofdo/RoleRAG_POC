@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.api.schemas import ErrorBody, ErrorResponse
+from app.api.schemas import ErrorBody, ErrorDetail, ErrorResponse
 
 
 class ApiError(Exception):
@@ -15,7 +15,7 @@ class ApiError(Exception):
         status_code: int,
         code: str,
         message: str,
-        details: list[object] | None = None,
+        details: list[ErrorDetail] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -42,7 +42,14 @@ def request_validation_error_handler(_: Request, exc: Exception) -> JSONResponse
         status_code=422,
         code="validation_error",
         message="Request validation failed",
-        details=list(exc.errors()),
+        details=[
+            ErrorDetail(
+                loc=[_sanitize_error_location(segment) for segment in error["loc"]],
+                type=str(error["type"]),
+                message="Request field validation failed",
+            )
+            for error in exc.errors()
+        ],
     )
 
 
@@ -51,7 +58,7 @@ def _error_response(
     status_code: int,
     code: str,
     message: str,
-    details: list[object],
+    details: list[ErrorDetail],
 ) -> JSONResponse:
     payload = ErrorResponse(
         error=ErrorBody(
@@ -61,3 +68,9 @@ def _error_response(
         )
     )
     return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+
+
+def _sanitize_error_location(segment: str | int) -> str | int:
+    if isinstance(segment, str) and ("/" in segment or "\\" in segment):
+        return "<field>"
+    return segment

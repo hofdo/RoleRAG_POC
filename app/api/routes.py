@@ -4,6 +4,7 @@ from collections.abc import Generator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
 
 from app.api.errors import ApiError
 from app.api.schemas import (
@@ -16,6 +17,7 @@ from app.api.schemas import (
     RecentTurnResponse,
     RouteResponse,
 )
+from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_services
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult
@@ -26,6 +28,12 @@ router = APIRouter()
 ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
 ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
 ERROR_422_RESPONSE: dict[int | str, dict[str, Any]] = {422: {"model": ErrorResponse}}
+SSE_200_RESPONSE: dict[int | str, dict[str, Any]] = {
+    200: {
+        "description": "Buffered validated turn events",
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+    }
+}
 
 
 def get_read_services(
@@ -89,6 +97,36 @@ async def create_turn(
     request: CreateTurnRequest,
     services: Annotated[AppServices, Depends(get_turn_services)],
 ) -> CreateTurnResponse:
+    return _to_turn_response(await _run_turn(session_id, request, services))
+
+
+@router.post(
+    "/sessions/{session_id}/turns/stream",
+    response_class=StreamingResponse,
+    responses={
+        **SSE_200_RESPONSE,
+        **ERROR_400_RESPONSE,
+        **ERROR_404_RESPONSE,
+        **ERROR_422_RESPONSE,
+    },
+)
+async def stream_turn(
+    session_id: str,
+    request: CreateTurnRequest,
+    services: Annotated[AppServices, Depends(get_turn_services)],
+) -> StreamingResponse:
+    result = await _run_turn(session_id, request, services)
+    return StreamingResponse(
+        iter(build_turn_stream_frames(result)),
+        media_type="text/event-stream",
+    )
+
+
+async def _run_turn(
+    session_id: str,
+    request: CreateTurnRequest,
+    services: AppServices,
+) -> TurnResult:
     try:
         result = await services.orchestrator.run_turn(
             turn_input=TurnInput(
@@ -110,7 +148,7 @@ async def create_turn(
             code="invalid_turn_request",
             message=_safe_request_error_message(exc),
         ) from exc
-    return _to_turn_response(result)
+    return result
 
 
 @router.get(

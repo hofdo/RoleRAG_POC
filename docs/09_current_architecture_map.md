@@ -75,8 +75,10 @@ graph TD
 
 ### FastAPI API
 
-- exposes `POST /sessions`, `POST /sessions/{session_id}/turns`, and `GET /sessions/{session_id}`
+- exposes `POST /sessions`, `POST /sessions/{session_id}/turns`,
+  `POST /sessions/{session_id}/turns/stream`, and `GET /sessions/{session_id}`
 - does not duplicate orchestration logic
+- buffers SSE frames until the shared turn pipeline completes
 
 ### TurnOrchestrator
 
@@ -137,6 +139,7 @@ graph TD
 - actor prompts only receive player-visible retrieved chunks
 - critic and memory extraction stay local
 - route handlers stay thin
+- streamed player-visible text is emitted only after validation and persistence complete
 - retrieval failure does not block turn completion
 - memory indexing failure does not discard persisted memories or completed turns
 - tests avoid real provider and Qdrant dependencies

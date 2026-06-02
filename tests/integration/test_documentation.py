@@ -64,6 +64,7 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "POST /sessions" in contract
     assert "GET /sessions/{session_id}" in contract
     assert "POST /sessions/{session_id}/turns" in contract
+    assert "POST /sessions/{session_id}/turns/stream" in contract
     assert "invalid_session_request" in contract
     assert "invalid_turn_request" in contract
     assert "session_not_found" in contract
@@ -71,3 +72,7 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "CONTENT_ROOT" in contract
     assert "per-request" in contract
     assert "warnings" in contract
+    assert "text/event-stream" in contract
+    assert "buffered" in contract
+    assert "provider token streaming" in contract
+    assert "concatenated" in contract

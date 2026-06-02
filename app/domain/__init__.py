@@ -9,6 +9,7 @@ from app.domain.models import (
     SessionState,
     StoredTurn,
     TurnInput,
+    TurnOutcome,
     TurnResult,
 )
 from app.domain.visibility import Visibility
@@ -24,6 +25,7 @@ __all__ = [
     "SessionState",
     "StoredTurn",
     "TurnInput",
+    "TurnOutcome",
     "TurnResult",
     "Visibility",
 ]
