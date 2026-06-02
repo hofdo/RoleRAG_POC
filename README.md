@@ -549,3 +549,4 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - [docs/05_rag_memory_design.md](docs/05_rag_memory_design.md)
 - [docs/06_local_cloud_model_strategy.md](docs/06_local_cloud_model_strategy.md)
 - [docs/07_mvp_phases.md](docs/07_mvp_phases.md)
+- [docs/12_api_contract.md](docs/12_api_contract.md)

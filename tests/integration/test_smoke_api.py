@@ -26,3 +26,27 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         "active_persona_id",
     ]
     assert schema["components"]["schemas"]["CreateTurnRequest"]["required"] == ["message"]
+    assert schema["components"]["schemas"]["ErrorResponse"]["required"] == ["error"]
+    assert schema["components"]["schemas"]["ErrorBody"]["required"] == [
+        "code",
+        "message",
+        "details",
+    ]
+    assert (
+        schema["paths"]["/sessions"]["post"]["responses"]["400"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/ErrorResponse"
+    )
+    assert (
+        schema["paths"]["/sessions"]["post"]["responses"]["422"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/ErrorResponse"
+    )
+    assert (
+        schema["paths"]["/sessions/{session_id}"]["get"]["responses"]["404"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/ErrorResponse"
+    )

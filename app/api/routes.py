@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
+from app.api.errors import ApiError
 from app.api.schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
     CreateTurnRequest,
     CreateTurnResponse,
+    ErrorResponse,
     GetSessionResponse,
     RecentTurnResponse,
     RouteResponse,
@@ -20,6 +22,10 @@ from app.domain import TurnInput, TurnResult
 from app.persistence import DataFileNotFoundError, DataValidationError, SessionNotFoundError
 
 router = APIRouter()
+
+ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
+ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
+ERROR_422_RESPONSE: dict[int | str, dict[str, Any]] = {422: {"model": ErrorResponse}}
 
 
 def get_read_services(
@@ -46,6 +52,7 @@ def get_turn_services(
     "/sessions",
     response_model=CreateSessionResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={**ERROR_400_RESPONSE, **ERROR_422_RESPONSE},
 )
 def create_session(
     request: CreateSessionRequest,
@@ -59,7 +66,11 @@ def create_session(
             player_name=request.player_name,
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise ApiError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="invalid_session_request",
+            message=_safe_request_error_message(exc),
+        ) from exc
     return CreateSessionResponse(
         session_id=session.id,
         world_id=session.world_id,
@@ -71,6 +82,7 @@ def create_session(
 @router.post(
     "/sessions/{session_id}/turns",
     response_model=CreateTurnResponse,
+    responses={**ERROR_400_RESPONSE, **ERROR_404_RESPONSE, **ERROR_422_RESPONSE},
 )
 async def create_turn(
     session_id: str,
@@ -87,15 +99,24 @@ async def create_turn(
             )
         )
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="session_not_found",
+            message=str(exc),
+        ) from exc
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise ApiError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="invalid_turn_request",
+            message=_safe_request_error_message(exc),
+        ) from exc
     return _to_turn_response(result)
 
 
 @router.get(
     "/sessions/{session_id}",
     response_model=GetSessionResponse,
+    responses=ERROR_404_RESPONSE,
 )
 def get_session(
     session_id: str,
@@ -104,7 +125,11 @@ def get_session(
     try:
         session = services.orchestrator.resume_session(session_id)
     except SessionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="session_not_found",
+            message=str(exc),
+        ) from exc
     recent_turns = [
         RecentTurnResponse(
             turn_index=turn.turn_index,
@@ -134,3 +159,13 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         memory_written=result.memory_written,
         warnings=result.warnings,
     )
+
+
+def _safe_request_error_message(
+    exc: DataFileNotFoundError | DataValidationError | ValueError,
+) -> str:
+    if isinstance(exc, DataFileNotFoundError):
+        return f"Unknown {exc.entity_type} id: {exc.entity_id}"
+    if isinstance(exc, DataValidationError):
+        return f"Invalid {exc.entity_type} id: {exc.entity_id}"
+    return str(exc)

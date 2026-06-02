@@ -46,3 +46,28 @@ def test_env_example_matches_settings_fields() -> None:
     }
 
     assert env_keys == set(Settings.model_fields)
+
+
+def test_api_contract_document_is_linked_from_primary_docs() -> None:
+    readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
+    implementation_guide = (REPOSITORY_ROOT / "docs" / "03_implementation_guide.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docs/12_api_contract.md" in readme
+    assert "12_api_contract.md" in implementation_guide
+
+
+def test_api_contract_document_covers_public_boundaries() -> None:
+    contract = (REPOSITORY_ROOT / "docs" / "12_api_contract.md").read_text(encoding="utf-8")
+
+    assert "POST /sessions" in contract
+    assert "GET /sessions/{session_id}" in contract
+    assert "POST /sessions/{session_id}/turns" in contract
+    assert "invalid_session_request" in contract
+    assert "invalid_turn_request" in contract
+    assert "session_not_found" in contract
+    assert "validation_error" in contract
+    assert "CONTENT_ROOT" in contract
+    assert "per-request" in contract
+    assert "warnings" in contract

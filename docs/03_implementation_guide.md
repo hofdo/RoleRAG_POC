@@ -106,6 +106,8 @@ Implemented endpoints:
 - `GET /sessions/{session_id}`
 
 The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
+The public HTTP contract and exposure boundaries are documented in
+[docs/12_api_contract.md](12_api_contract.md).
 
 ## Config Notes
 
@@ -183,3 +185,4 @@ Safe extension means staying inside the current ownership boundaries:
 - [docs/05_rag_memory_design.md](05_rag_memory_design.md)
 - [docs/06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md)
 - [docs/08_agent_handoff.md](08_agent_handoff.md)
+- [docs/12_api_contract.md](12_api_contract.md)

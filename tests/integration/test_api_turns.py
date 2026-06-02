@@ -122,6 +122,11 @@ class FakeRetriever:
         ]
 
 
+class FailingRetriever:
+    def retrieve_for_actor(self, **_: object) -> list[RetrievedChunk]:
+        raise RuntimeError("qdrant offline")
+
+
 def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider, FakeRetriever]:
     connection = connect_sqlite(tmp_path / "api-turns.db")
     initialize_database(connection)
@@ -322,7 +327,87 @@ def test_post_turn_returns_404_for_missing_session(tmp_path: Path) -> None:
 
     app.dependency_overrides.clear()
     assert response.status_code == 404
-    assert response.json()["detail"] == "Unknown session id: missing-session"
+    assert response.json() == {
+        "error": {
+            "code": "session_not_found",
+            "message": "Unknown session id: missing-session",
+            "details": [],
+        }
+    }
+
+
+def test_post_turn_rejects_persona_override_mismatch_with_400_envelope(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there.", "active_persona_id": "someone-else"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_turn_request",
+            "message": "Turn persona override does not match the stored session persona",
+            "details": [],
+        }
+    }
+
+
+def test_post_turn_returns_retrieval_failure_warning_in_success_response(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    services.orchestrator.actor_context_retriever = FailingRetriever()
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["warnings"] == ["retrieval skipped: qdrant offline"]
+
+
+def test_post_turn_returns_skipped_cloud_warning_in_success_response(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there.", "request_cloud": True},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["warnings"] == [
+        "cloud actor skipped: confirmation required for cloud-model (user requested cloud)"
+    ]
+
+
+def test_post_turn_response_does_not_expose_hidden_context_or_prompt_text(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    serialized = response.text
+    assert "The west door has stayed locked for years." not in serialized
+    assert "spy waits behind the mirrored column" not in serialized
+    assert "cipher key" not in serialized
+    assert "The regent ordered the poisoning." not in serialized
+    assert "route_max_tokens" not in serialized
 
 
 def test_post_turn_rejects_invalid_request_with_422(tmp_path: Path) -> None:
@@ -337,3 +422,7 @@ def test_post_turn_rejects_invalid_request_with_422(tmp_path: Path) -> None:
 
     app.dependency_overrides.clear()
     assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Request validation failed"
+    assert payload["error"]["details"]

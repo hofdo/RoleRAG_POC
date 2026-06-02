@@ -199,6 +199,85 @@ def test_post_sessions_uses_process_content_root_without_request_path(
     assert [row["content_root"] for row in rows] == [str(pack_root)]
 
 
+def test_post_sessions_uses_default_process_content_root(tmp_path: Path) -> None:
+    database_path = tmp_path / "api-default.db"
+    app.dependency_overrides[get_settings] = lambda: Settings(database_path=str(database_path))
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    rows = connection.execute("SELECT content_root FROM sessions").fetchall()
+    connection.close()
+    assert [row["content_root"] for row in rows] == ["data"]
+
+
+def test_post_sessions_rejects_per_request_content_root(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "content_root": "/tmp/other-pack",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_post_sessions_does_not_expose_process_content_root_on_missing_world(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "private-pack"
+    database_path = tmp_path / "api-private-pack.db"
+    _write_scenario_pack(pack_root)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "missing-world",
+            "scene_id": "custom-opening",
+            "player_name": "Player",
+            "active_persona_id": "custom-narrator",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_session_request",
+            "message": "Unknown world id: missing-world",
+            "details": [],
+        }
+    }
+    assert str(pack_root) not in response.text
+
+
 def test_get_session_returns_recent_turns_without_private_state(tmp_path: Path) -> None:
     services = _build_services(tmp_path)
     session = services.orchestrator.create_session(
@@ -248,7 +327,88 @@ def test_get_session_returns_404_for_missing_session(tmp_path: Path) -> None:
 
     app.dependency_overrides.clear()
     assert response.status_code == 404
-    assert response.json()["detail"] == "Unknown session id: missing-session"
+    assert response.json() == {
+        "error": {
+            "code": "session_not_found",
+            "message": "Unknown session id: missing-session",
+            "details": [],
+        }
+    }
+
+
+def test_post_sessions_rejects_invalid_world_with_400_envelope(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "missing-world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_session_request",
+            "message": "Unknown world: missing-world",
+            "details": [],
+        }
+    }
+
+
+def test_post_sessions_rejects_invalid_scene_with_400_envelope(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "missing-scene",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_session_request",
+            "message": "Unknown scene for world demo_world: missing-scene",
+            "details": [],
+        }
+    }
+
+
+def test_post_sessions_rejects_invalid_persona_with_400_envelope(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "missing-persona",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_session_request",
+            "message": "Unknown persona for world demo_world: missing-persona",
+            "details": [],
+        }
+    }
 
 
 def test_post_sessions_rejects_invalid_request_with_422(tmp_path: Path) -> None:
@@ -267,3 +427,7 @@ def test_post_sessions_rejects_invalid_request_with_422(tmp_path: Path) -> None:
 
     app.dependency_overrides.clear()
     assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Request validation failed"
+    assert payload["error"]["details"]
