@@ -61,6 +61,32 @@ export function buildCatalogSessionRequest(selection, playerName) {
   });
 }
 
+export function describeCatalogSetupStatus({
+  catalogLoaded,
+  catalogLoadFailed,
+  selection,
+  manualFallbackOpen,
+}) {
+  if (catalogLoadFailed) {
+    return "Catalog failed to load. Manual fallback is open; session creation will use manual IDs.";
+  }
+  if (manualFallbackOpen) {
+    return "Manual fallback is open; session creation will use manual IDs.";
+  }
+  if (!catalogLoaded) {
+    return "Loading catalog selectors.";
+  }
+  if (!selection?.world) {
+    return "Catalog loaded, but no world is available. Open manual fallback to enter IDs.";
+  }
+
+  const scene = selection.scenes.find((candidate) => candidate.id === selection.sceneId);
+  const persona = selection.personas.find((candidate) => candidate.id === selection.personaId);
+  const sceneName = scene ? `${scene.title} (${scene.location})` : selection.sceneId;
+  const personaName = persona ? `${persona.name} (${persona.role})` : selection.personaId;
+  return `Catalog selection: ${selection.world.name} / ${sceneName} / ${personaName}.`;
+}
+
 export function buildTurnRequest(message, requestCloud) {
   return {
     message,

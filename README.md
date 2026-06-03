@@ -13,7 +13,7 @@ Implemented in this repository:
 - deterministic routing with `CLOUD_MODE=off|ask|auto`
 - structured JSON world, scene, and persona loading
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
-- FastAPI endpoints for session creation, turn execution, buffered SSE turn streaming, and session lookup
+- FastAPI endpoints for public content catalog lookup, session creation, turn execution, buffered SSE turn streaming, and session lookup
 - framework-free local play UI served by FastAPI at `GET /play`
 - SQLite persistence for sessions, turns, and durable memory episodes
 - automatic indexing of curated durable memories into session-scoped retrieval
@@ -116,8 +116,10 @@ uvicorn app.main:app --reload
 ```
 
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local play UI. The UI starts
-new sessions with editable demo defaults, resumes existing sessions by pasted `session_id`, sends
-turns over JSON by default, and exposes buffered SSE as an opt-in developer toggle.
+new sessions from backend-owned catalog selectors, resumes existing sessions by pasted
+`session_id`, sends turns over JSON by default, and exposes buffered SSE as an opt-in developer
+toggle. Scenario packs are selected only by starting FastAPI with the desired process-level
+`CONTENT_ROOT`; the browser has no scenario-pack selector or content-root input.
 
 ## Local Model Setup
 
@@ -439,6 +441,7 @@ uvicorn app.main:app --reload
 Implemented endpoints:
 
 - `GET /play`
+- `GET /content/catalog`
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
@@ -476,15 +479,19 @@ does not stream provider tokens or expose drafts before critic validation.
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) after starting FastAPI. The
 framework-free browser surface is a thin client over the same-origin API:
 
-- `Create session` uses editable `demo_world`, `rose-gallery`, and `archivist` defaults
+- catalog selectors load public worlds, scenes, and personas from `GET /content/catalog`
+- `Create session` uses the selected catalog world, scene, persona, and player name
+- `Developer ID fallback` remains available for manual world, scene, and persona IDs; if catalog
+  loading fails, the fallback opens and session creation uses the manual IDs
 - `Resume session` accepts an existing `session_id` and renders backend `recent_turns`
 - turn execution uses JSON by default
 - the developer panel can opt into buffered SSE and displays safe route, memory, and warning data
-- scenario packs remain a process-level backend choice through `CONTENT_ROOT`
+- scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
+  the desired `CONTENT_ROOT` to use a different scenario pack
 
 The browser does not own orchestration, retrieval, validation, routing, persistence, memory,
 scenario-pack selection, hidden context, or browser-local authoritative state. It provides no
-frontend scenario-pack selection.
+frontend scenario-pack selection, no per-request content-root selection, and no backend ownership moved into browser code.
 
 Read session state:
 

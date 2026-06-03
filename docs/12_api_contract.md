@@ -8,6 +8,7 @@ execution while delegating engine behavior to shared composition and orchestrati
 Available endpoints:
 
 - `GET /play` for the local HTML play surface, excluded from OpenAPI
+- `GET /content/catalog`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/turns`
@@ -16,6 +17,27 @@ Available endpoints:
 API routes and the local browser UI do not own retrieval, persistence, routing, prompt
 construction, or visibility logic.
 SQLite remains authoritative state. Qdrant remains a derived retrieval index.
+
+## Content Catalog
+
+`GET /content/catalog` returns public session-start metadata from the backend process-level
+`CONTENT_ROOT` only. It is a read-only catalog for the local `/play` selectors and does not accept
+query parameters, request bodies, per-request content roots, or frontend scenario-pack selection.
+
+The response groups public metadata into:
+
+- `worlds`: public world identifiers, names, default scene identifiers, and referenced scene and
+  persona identifiers
+- `scenes`: public scene identifiers, titles, locations, player-visible summaries, and active
+  persona identifiers
+- `personas`: public persona identifiers, names, roles, public descriptions, and speaking styles
+
+Catalog responses explicitly exclude private or internal fields: `gm_private_summary`,
+`private_description`, `secrets`, `forbidden_knowledge`, `content_root`, raw file paths, hidden
+lore, raw prompts, retrieved chunks, SQLite internals, Qdrant internals, and provider internals.
+
+If configured content files cannot form a public catalog, the API returns `400
+invalid_content_catalog` using the standard error envelope.
 
 ## Session Creation
 
@@ -137,6 +159,7 @@ Handled `400`, `404`, and request-validation `422` responses use one envelope:
 
 Stable error codes:
 
+- `invalid_content_catalog`
 - `invalid_session_request`
 - `invalid_turn_request`
 - `session_not_found`
@@ -150,12 +173,13 @@ context are excluded.
 ## Exposure Boundaries
 
 Responses do not expose raw prompt contents, hidden retrieved chunk text, GM-only fields,
-character-private fields, `content_root`, provider secrets, SQLite internals, or Qdrant
-diagnostics.
+character-private fields, `gm_private_summary`, `private_description`, `secrets`,
+`forbidden_knowledge`, `content_root`, raw file paths, hidden lore, raw prompts, retrieved chunks,
+provider secrets, SQLite internals, Qdrant internals, provider internals, or Qdrant diagnostics.
 
 ## Known Limitations
 
 The local play UI does not provide authentication, multi-user isolation, browser-local
 authoritative state, or frontend scenario-pack selection. The API does not provide provider token
-streaming, pre-validation token emission, per-request scenario selection, hidden-context
-diagnostics, or raw retrieval/debug payloads.
+streaming, pre-validation token emission, per-request content-root selection, per-request
+scenario-pack selection, hidden-context diagnostics, or raw retrieval/debug payloads.

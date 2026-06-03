@@ -9,6 +9,7 @@ import {
   buildTurnRequest,
   createCatalogSelection,
   createPlayState,
+  describeCatalogSetupStatus,
   resumeSession,
   startNewSession,
 } from "../../app/web/assets/play-model.mjs";
@@ -107,6 +108,37 @@ test("catalog session request uses selected catalog IDs", () => {
     active_persona_id: "archivist",
     player_name: "Avery",
   });
+});
+
+test("catalog setup status shows selected catalog display names", () => {
+  const selection = createCatalogSelection(CATALOG, "demo_world");
+
+  assert.equal(describeCatalogSetupStatus({
+    catalogLoaded: true,
+    catalogLoadFailed: false,
+    selection,
+    manualFallbackOpen: false,
+  }), "Catalog selection: Winter Palace Intrigue / Rose Gallery (Palace) / Iria Vale (npc).");
+});
+
+test("catalog setup status explains manual fallback behavior", () => {
+  const selection = createCatalogSelection(CATALOG, "demo_world");
+
+  assert.equal(describeCatalogSetupStatus({
+    catalogLoaded: true,
+    catalogLoadFailed: false,
+    selection,
+    manualFallbackOpen: true,
+  }), "Manual fallback is open; session creation will use manual IDs.");
+});
+
+test("catalog setup status explains catalog load failure", () => {
+  assert.equal(describeCatalogSetupStatus({
+    catalogLoaded: false,
+    catalogLoadFailed: true,
+    selection: null,
+    manualFallbackOpen: true,
+  }), "Catalog failed to load. Manual fallback is open; session creation will use manual IDs.");
 });
 
 test("turn request contains only message and request_cloud", () => {

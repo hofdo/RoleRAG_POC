@@ -14,6 +14,7 @@ import {
   buildTurnRequest,
   createCatalogSelection,
   createPlayState,
+  describeCatalogSetupStatus,
   resumeSession,
   startNewSession,
 } from "./play-model.mjs";
@@ -27,6 +28,7 @@ const elements = {
   catalogWorld: document.querySelector("#catalog-world"),
   catalogScene: document.querySelector("#catalog-scene"),
   catalogPersona: document.querySelector("#catalog-persona"),
+  setupStatus: document.querySelector("#setup-status"),
   manualSessionPanel: document.querySelector("#manual-session-panel"),
   worldId: document.querySelector("#world-id"),
   sceneId: document.querySelector("#scene-id"),
@@ -47,6 +49,7 @@ const elements = {
 let state = createPlayState();
 let contentCatalog = null;
 let catalogSelection = null;
+let catalogLoadFailed = false;
 
 function showError(error) {
   const prefix = error instanceof ApiError ? `${error.code}: ` : "";
@@ -79,11 +82,21 @@ function syncManualIds() {
   elements.personaId.value = catalogSelection.personaId;
 }
 
+function renderSetupStatus() {
+  elements.setupStatus.textContent = describeCatalogSetupStatus({
+    catalogLoaded: Boolean(contentCatalog),
+    catalogLoadFailed,
+    selection: catalogSelection,
+    manualFallbackOpen: elements.manualSessionPanel.open,
+  });
+}
+
 function renderCatalogSelection() {
   if (!contentCatalog || !catalogSelection) {
     elements.catalogWorld.disabled = true;
     elements.catalogScene.disabled = true;
     elements.catalogPersona.disabled = true;
+    renderSetupStatus();
     return;
   }
   setSelectOptions(
@@ -108,18 +121,22 @@ function renderCatalogSelection() {
   elements.catalogScene.disabled = catalogSelection.scenes.length === 0;
   elements.catalogPersona.disabled = catalogSelection.personas.length === 0;
   syncManualIds();
+  renderSetupStatus();
 }
 
 async function loadCatalog() {
   try {
     contentCatalog = await getContentCatalog();
     catalogSelection = createCatalogSelection(contentCatalog);
+    catalogLoadFailed = false;
     renderCatalogSelection();
   } catch (error) {
     contentCatalog = null;
     catalogSelection = null;
+    catalogLoadFailed = true;
     renderCatalogSelection();
     elements.manualSessionPanel.open = true;
+    renderSetupStatus();
     showError(error);
   }
 }
@@ -222,6 +239,7 @@ elements.catalogScene.addEventListener("change", () => {
   }
   catalogSelection = { ...catalogSelection, sceneId: elements.catalogScene.value };
   syncManualIds();
+  renderSetupStatus();
 });
 
 elements.catalogPersona.addEventListener("change", () => {
@@ -230,6 +248,11 @@ elements.catalogPersona.addEventListener("change", () => {
   }
   catalogSelection = { ...catalogSelection, personaId: elements.catalogPersona.value };
   syncManualIds();
+  renderSetupStatus();
+});
+
+elements.manualSessionPanel.addEventListener("toggle", () => {
+  renderSetupStatus();
 });
 
 elements.resumeForm.addEventListener("submit", async (event) => {
@@ -296,6 +319,8 @@ elements.newSession.addEventListener("click", () => {
   if (contentCatalog) {
     catalogSelection = createCatalogSelection(contentCatalog);
     renderCatalogSelection();
+  } else {
+    renderSetupStatus();
   }
   renderSession();
   renderTranscript();

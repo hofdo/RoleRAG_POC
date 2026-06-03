@@ -61,21 +61,44 @@ def test_api_contract_document_is_linked_from_primary_docs() -> None:
 def test_api_contract_document_covers_public_boundaries() -> None:
     contract = (REPOSITORY_ROOT / "docs" / "12_api_contract.md").read_text(encoding="utf-8")
 
+    assert "GET /content/catalog" in contract
     assert "POST /sessions" in contract
     assert "GET /sessions/{session_id}" in contract
     assert "POST /sessions/{session_id}/turns" in contract
     assert "POST /sessions/{session_id}/turns/stream" in contract
+    assert "invalid_content_catalog" in contract
     assert "invalid_session_request" in contract
     assert "invalid_turn_request" in contract
     assert "session_not_found" in contract
     assert "validation_error" in contract
+    assert "Content Catalog" in contract
+    assert "worlds" in contract
+    assert "scenes" in contract
+    assert "personas" in contract
+    assert "process-level" in contract
     assert "CONTENT_ROOT" in contract
     assert "per-request" in contract
+    assert "frontend scenario-pack selection" in contract
     assert "warnings" in contract
     assert "text/event-stream" in contract
     assert "buffered" in contract
     assert "provider token streaming" in contract
     assert "concatenated" in contract
+    for excluded in [
+        "gm_private_summary",
+        "private_description",
+        "secrets",
+        "forbidden_knowledge",
+        "content_root",
+        "raw file paths",
+        "hidden lore",
+        "raw prompts",
+        "retrieved chunks",
+        "SQLite internals",
+        "Qdrant internals",
+        "provider internals",
+    ]:
+        assert excluded in contract
 
 
 def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
@@ -87,11 +110,17 @@ def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
 
     assert "uvicorn app.main:app --reload" in readme
     assert "http://127.0.0.1:8000/play" in readme
+    assert "GET /content/catalog" in readme
+    assert "catalog selectors" in readme
     assert "Create session" in readme
+    assert "manual" in readme
+    assert "fallback" in readme
     assert "Resume session" in readme
     assert "session_id" in readme
     assert "JSON" in readme
     assert "buffered SSE" in readme
+    assert "scenario packs" in readme
+    assert "process-level backend choice through `CONTENT_ROOT`" in readme
     assert "CONTENT_ROOT" in readme
     assert "thin client" in readme
     assert "no authentication or multi-user isolation" in readme
@@ -99,5 +128,7 @@ def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
     assert "no production deployment hardening" in readme
     assert "no browser-local authoritative state" in readme
     assert "no frontend scenario-pack selection" in readme
+    assert "no per-request content-root selection" in readme
+    assert "no backend ownership moved into browser code" in readme
     assert "app/web/" in architecture
     assert "GET /play" in current_map
