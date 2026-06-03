@@ -21,6 +21,25 @@
 
 /**
  * @typedef {{
+ *   turn_index: number,
+ *   user_message: string,
+ *   assistant_message: string,
+ *   created_at: string,
+ * }} RecentTurnResponse
+ */
+
+/**
+ * @typedef {{
+ *   session_id: string,
+ *   world_id: string,
+ *   active_scene_id: string,
+ *   active_persona_id: string,
+ *   recent_turns: RecentTurnResponse[],
+ * }} GetSessionResponse
+ */
+
+/**
+ * @typedef {{
  *   text: string,
  *   route: RouteResponse,
  *   memory_written: boolean,
@@ -52,12 +71,13 @@ async function throwApiError(response) {
   );
 }
 
-async function requestJson(url, body, fetchImpl) {
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function requestJson(url, { method = "GET", body = undefined } = {}, fetchImpl) {
+  const options = { method };
+  if (body !== undefined) {
+    options.headers = { "content-type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetchImpl(url, options);
   if (!response.ok) {
     await throwApiError(response);
   }
@@ -70,12 +90,28 @@ async function requestJson(url, body, fetchImpl) {
  * @returns {Promise<CreateSessionResponse>}
  */
 export function createSession(request, { fetchImpl = fetch } = {}) {
-  return requestJson("/sessions", {
-    world_id: request.world_id,
-    scene_id: request.scene_id,
-    player_name: request.player_name,
-    active_persona_id: request.active_persona_id,
-  }, fetchImpl);
+  return requestJson(
+    "/sessions",
+    {
+      method: "POST",
+      body: {
+        world_id: request.world_id,
+        scene_id: request.scene_id,
+        player_name: request.player_name,
+        active_persona_id: request.active_persona_id,
+      },
+    },
+    fetchImpl,
+  );
+}
+
+/**
+ * @param {string} sessionId
+ * @param {{ fetchImpl?: typeof fetch }} options
+ * @returns {Promise<GetSessionResponse>}
+ */
+export function getSession(sessionId, { fetchImpl = fetch } = {}) {
+  return requestJson(`/sessions/${encodeURIComponent(sessionId)}`, { method: "GET" }, fetchImpl);
 }
 
 /**
@@ -85,10 +121,17 @@ export function createSession(request, { fetchImpl = fetch } = {}) {
  * @returns {Promise<CreateTurnResponse>}
  */
 export function createTurn(sessionId, request, { fetchImpl = fetch } = {}) {
-  return requestJson(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
-    message: request.message,
-    request_cloud: request.request_cloud,
-  }, fetchImpl);
+  return requestJson(
+    `/sessions/${encodeURIComponent(sessionId)}/turns`,
+    {
+      method: "POST",
+      body: {
+        message: request.message,
+        request_cloud: request.request_cloud,
+      },
+    },
+    fetchImpl,
+  );
 }
 
 function applyEvent(result, eventName, payload) {

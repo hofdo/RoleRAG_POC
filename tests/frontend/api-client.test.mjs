@@ -6,6 +6,7 @@ import {
   createBufferedTurn,
   createSession,
   createTurn,
+  getSession,
 } from "../../app/web/assets/api-client.mjs";
 
 function jsonResponse(payload, { ok = true, status = 200 } = {}) {
@@ -69,6 +70,81 @@ test("createTurn uses the JSON endpoint and sends no persona override", async ()
     request_cloud: false,
   });
   assert.equal(turn.text, "The gallery is quiet.");
+});
+
+test("getSession uses the encoded session lookup endpoint with GET", async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({
+      session_id: "session/with spaces",
+      world_id: "demo_world",
+      active_scene_id: "rose-gallery",
+      active_persona_id: "archivist",
+      recent_turns: [],
+    });
+  };
+
+  await getSession("session/with spaces", { fetchImpl });
+
+  assert.equal(request.url, "/sessions/session%2Fwith%20spaces");
+  assert.equal(request.options.method, "GET");
+  assert.equal("body" in request.options, false);
+});
+
+test("getSession returns safe session fields and recent turns", async () => {
+  const fetchImpl = async () => jsonResponse({
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    recent_turns: [
+      {
+        turn_index: 1,
+        user_message: "I listen.",
+        assistant_message: "The gallery is quiet.",
+        created_at: "2026-06-03T10:00:00Z",
+      },
+    ],
+  });
+
+  const session = await getSession("session-1", { fetchImpl });
+
+  assert.deepEqual(session, {
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    recent_turns: [
+      {
+        turn_index: 1,
+        user_message: "I listen.",
+        assistant_message: "The gallery is quiet.",
+        created_at: "2026-06-03T10:00:00Z",
+      },
+    ],
+  });
+});
+
+test("structured session lookup 404 becomes an ApiError", async () => {
+  const fetchImpl = async () => jsonResponse({
+    error: {
+      code: "session_not_found",
+      message: "Session not found: missing-session",
+      details: [],
+    },
+  }, { ok: false, status: 404 });
+
+  await assert.rejects(
+    getSession("missing-session", { fetchImpl }),
+    (error) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.code, "session_not_found");
+      assert.equal(error.message, "Session not found: missing-session");
+      assert.equal(error.status, 404);
+      return true;
+    },
+  );
 });
 
 test("createBufferedTurn handles split chunks, repeated text, and terminal metadata", async () => {

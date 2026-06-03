@@ -76,6 +76,9 @@ def test_play_page_and_assets_are_served_outside_openapi() -> None:
 
     assert page.status_code == 200
     assert '<script type="module" src="/play/assets/play-ui.mjs"></script>' in page.text
+    assert 'id="resume-form"' in page.text
+    assert 'id="resume-session-id"' in page.text
+    assert "Resume session" in page.text
     assert css.status_code == 200
     assert api_client.status_code == 200
     assert play_model.status_code == 200

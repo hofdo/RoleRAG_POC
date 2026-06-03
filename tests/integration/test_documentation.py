@@ -87,6 +87,9 @@ def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
 
     assert "uvicorn app.main:app --reload" in readme
     assert "http://127.0.0.1:8000/play" in readme
+    assert "Create session" in readme
+    assert "Resume session" in readme
+    assert "session_id" in readme
     assert "JSON" in readme
     assert "buffered SSE" in readme
     assert "CONTENT_ROOT" in readme
@@ -94,5 +97,7 @@ def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
     assert "no authentication or multi-user isolation" in readme
     assert "no provider token streaming" in readme
     assert "no production deployment hardening" in readme
+    assert "no browser-local authoritative state" in readme
+    assert "no frontend scenario-pack selection" in readme
     assert "app/web/" in architecture
     assert "GET /play" in current_map

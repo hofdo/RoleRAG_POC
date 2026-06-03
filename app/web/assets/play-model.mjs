@@ -8,6 +8,7 @@ export const SESSION_DEFAULTS = Object.freeze({
 export function createPlayState() {
   return {
     session: null,
+    sessionSource: null,
     transcript: [],
     debug: null,
   };
@@ -42,13 +43,39 @@ export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
   };
 }
 
+export function startNewSession(sessionResponse) {
+  return {
+    ...createPlayState(),
+    session: sessionResponse,
+    sessionSource: "new",
+  };
+}
+
+export function resumeSession(sessionResponse) {
+  const recentTurns = [...sessionResponse.recent_turns].sort(
+    (left, right) => left.turn_index - right.turn_index,
+  );
+  return {
+    ...createPlayState(),
+    session: sessionResponse,
+    sessionSource: "resumed",
+    transcript: recentTurns.flatMap((turn) => {
+      const label = `Resumed turn #${turn.turn_index}`;
+      return [
+        { role: "player", text: turn.user_message, label, source: "resumed" },
+        { role: "assistant", text: turn.assistant_message, label, source: "resumed" },
+      ];
+    }),
+  };
+}
+
 export function appendSuccessfulTurn(state, playerText, turn) {
   return {
     ...state,
     transcript: [
       ...state.transcript,
-      { role: "player", text: playerText },
-      { role: "assistant", text: turn.text },
+      { role: "player", text: playerText, source: "new" },
+      { role: "assistant", text: turn.text, source: "new" },
     ],
   };
 }

@@ -51,6 +51,9 @@ support through `--content-root` remains available.
 It does not return player names, content roots, hidden scene state, private persona state, SQLite
 internals, or Qdrant diagnostics.
 
+The local `/play` UI uses this endpoint only when a user pastes a `session_id` into `Resume
+session`; the returned `recent_turns` are rendered as transcript entries and remain backend-owned.
+
 ## Turn Execution
 
 `POST /sessions/{session_id}/turns` accepts:
@@ -152,6 +155,7 @@ diagnostics.
 
 ## Known Limitations
 
-The local play UI does not provide existing-session resume, authentication, or multi-user
-isolation. The API does not provide provider token streaming, pre-validation token emission,
-per-request scenario selection, hidden-context diagnostics, or raw retrieval/debug payloads.
+The local play UI does not provide authentication, multi-user isolation, browser-local
+authoritative state, or frontend scenario-pack selection. The API does not provide provider token
+streaming, pre-validation token emission, per-request scenario selection, hidden-context
+diagnostics, or raw retrieval/debug payloads.

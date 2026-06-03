@@ -19,7 +19,7 @@
       <section id="setup-panel" class="card">
         <div class="section-heading">
           <p class="eyebrow">Step 1</p>
-          <h2>Start a session</h2>
+          <h2>Start or resume</h2>
         </div>
         <form id="session-form" class="form-grid">
           <label>
@@ -39,6 +39,13 @@
             <input id="player-name" name="player-name" autocomplete="name" required>
           </label>
           <button type="submit">Create session</button>
+        </form>
+        <form id="resume-form" class="resume-form">
+          <label>
+            Session ID
+            <input id="resume-session-id" name="session-id" autocomplete="off" required>
+          </label>
+          <button type="submit" class="secondary">Resume session</button>
         </form>
       </section>
 

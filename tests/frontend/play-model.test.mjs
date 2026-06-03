@@ -7,6 +7,8 @@ import {
   buildSessionRequest,
   buildTurnRequest,
   createPlayState,
+  resumeSession,
+  startNewSession,
 } from "../../app/web/assets/play-model.mjs";
 
 test("session form request preserves editable defaults and player name", () => {
@@ -43,8 +45,87 @@ test("transcript appends player and assistant messages atomically after success"
 
   assert.deepEqual(state.transcript, []);
   assert.deepEqual(next.transcript, [
-    { role: "player", text: "I listen." },
-    { role: "assistant", text: "The gallery is quiet." },
+    { role: "player", text: "I listen.", source: "new" },
+    { role: "assistant", text: "The gallery is quiet.", source: "new" },
+  ]);
+});
+
+test("new session state starts with an empty transcript", () => {
+  const state = startNewSession({
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+  });
+
+  assert.equal(state.session.session_id, "session-1");
+  assert.deepEqual(state.transcript, []);
+  assert.equal(state.sessionSource, "new");
+});
+
+test("resume state converts recent turns into ordered transcript entries", () => {
+  const state = resumeSession({
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    recent_turns: [
+      {
+        turn_index: 2,
+        user_message: "What do I hear?",
+        assistant_message: "Rain at the glass.",
+        created_at: "2026-06-03T10:01:00Z",
+      },
+      {
+        turn_index: 1,
+        user_message: "I listen.",
+        assistant_message: "The gallery is quiet.",
+        created_at: "2026-06-03T10:00:00Z",
+      },
+    ],
+  });
+
+  assert.equal(state.sessionSource, "resumed");
+  assert.deepEqual(state.transcript, [
+    { role: "player", text: "I listen.", label: "Resumed turn #1", source: "resumed" },
+    { role: "assistant", text: "The gallery is quiet.", label: "Resumed turn #1", source: "resumed" },
+    { role: "player", text: "What do I hear?", label: "Resumed turn #2", source: "resumed" },
+    { role: "assistant", text: "Rain at the glass.", label: "Resumed turn #2", source: "resumed" },
+  ]);
+});
+
+test("new appended turns stay distinguishable and do not mutate resumed state", () => {
+  const resumed = resumeSession({
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    recent_turns: [
+      {
+        turn_index: 3,
+        user_message: "I enter.",
+        assistant_message: "The room waits.",
+        created_at: "2026-06-03T10:00:00Z",
+      },
+    ],
+  });
+
+  const next = appendSuccessfulTurn(resumed, "I bow.", {
+    text: "The archivist nods.",
+    route: { provider: "local", model: "local-model", reason: "default local route" },
+    memory_written: false,
+    warnings: [],
+  });
+
+  assert.deepEqual(resumed.transcript, [
+    { role: "player", text: "I enter.", label: "Resumed turn #3", source: "resumed" },
+    { role: "assistant", text: "The room waits.", label: "Resumed turn #3", source: "resumed" },
+  ]);
+  assert.deepEqual(next.transcript, [
+    { role: "player", text: "I enter.", label: "Resumed turn #3", source: "resumed" },
+    { role: "assistant", text: "The room waits.", label: "Resumed turn #3", source: "resumed" },
+    { role: "player", text: "I bow.", source: "new" },
+    { role: "assistant", text: "The archivist nods.", source: "new" },
   ]);
 });
 

@@ -23,6 +23,8 @@ test("frontend assets stay free of backend orchestration and secret-handling log
     "qdrant",
     "api_key",
     "provider_secret",
+    "orchestrator",
+    "orchestration",
   ]) {
     assert.equal(source.toLowerCase().includes(forbidden), false, forbidden);
   }

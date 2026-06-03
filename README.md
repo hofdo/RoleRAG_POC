@@ -116,8 +116,8 @@ uvicorn app.main:app --reload
 ```
 
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local play UI. The UI starts
-new sessions with editable demo defaults, sends turns over JSON by default, and exposes buffered
-SSE as an opt-in developer toggle.
+new sessions with editable demo defaults, resumes existing sessions by pasted `session_id`, sends
+turns over JSON by default, and exposes buffered SSE as an opt-in developer toggle.
 
 ## Local Model Setup
 
@@ -476,13 +476,15 @@ does not stream provider tokens or expose drafts before critic validation.
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) after starting FastAPI. The
 framework-free browser surface is a thin client over the same-origin API:
 
-- session creation uses editable `demo_world`, `rose-gallery`, and `archivist` defaults
+- `Create session` uses editable `demo_world`, `rose-gallery`, and `archivist` defaults
+- `Resume session` accepts an existing `session_id` and renders backend `recent_turns`
 - turn execution uses JSON by default
 - the developer panel can opt into buffered SSE and displays safe route, memory, and warning data
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`
 
 The browser does not own orchestration, retrieval, validation, routing, persistence, memory,
-scenario-pack selection, or hidden context. It does not resume existing sessions.
+scenario-pack selection, hidden context, or browser-local authoritative state. It provides no
+frontend scenario-pack selection.
 
 Read session state:
 
@@ -557,7 +559,8 @@ embedding quality, Qdrant quality, or generated prose quality.
 - no authentication or multi-user isolation
 - buffered SSE only; no provider token streaming or pre-validation token emission
 - no production deployment hardening
-- no existing-session resume in the play UI
+- no browser-local authoritative state
+- no frontend scenario-pack selection
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
 - memory vector indexing is derived from SQLite and may require `reindex-memories` after an outage
@@ -570,7 +573,6 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - improve integration coverage
 - tune retrieval heuristics from eval evidence
 - expand retrieval observability if another surface needs it
-- add existing-session resume only when the local play workflow needs it
 - consider validated fragmentation only if it preserves the current exposure boundary
 - add auth only if the project becomes multi-user
 

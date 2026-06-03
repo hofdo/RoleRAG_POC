@@ -1,10 +1,12 @@
-import { ApiError, createBufferedTurn, createSession, createTurn } from "./api-client.mjs";
+import { ApiError, createBufferedTurn, createSession, createTurn, getSession } from "./api-client.mjs";
 import {
   appendSuccessfulTurn,
   buildDebugState,
   buildSessionRequest,
   buildTurnRequest,
   createPlayState,
+  resumeSession,
+  startNewSession,
 } from "./play-model.mjs";
 
 const elements = {
@@ -12,10 +14,12 @@ const elements = {
   setupPanel: document.querySelector("#setup-panel"),
   playPanel: document.querySelector("#play-panel"),
   sessionForm: document.querySelector("#session-form"),
+  resumeForm: document.querySelector("#resume-form"),
   worldId: document.querySelector("#world-id"),
   sceneId: document.querySelector("#scene-id"),
   personaId: document.querySelector("#persona-id"),
   playerName: document.querySelector("#player-name"),
+  resumeSessionId: document.querySelector("#resume-session-id"),
   sessionSummary: document.querySelector("#session-summary"),
   newSession: document.querySelector("#new-session"),
   turnForm: document.querySelector("#turn-form"),
@@ -60,7 +64,14 @@ function renderTranscript() {
     role.textContent = entry.role === "player" ? "You" : "Assistant";
     const text = document.createElement("p");
     text.textContent = entry.text;
-    item.append(role, text);
+    item.append(role);
+    if (entry.label) {
+      const label = document.createElement("span");
+      label.className = "transcript-label";
+      label.textContent = entry.label;
+      item.append(label);
+    }
+    item.append(text);
     elements.transcript.append(item);
   }
 }
@@ -94,15 +105,32 @@ elements.sessionForm.addEventListener("submit", async (event) => {
   const submit = elements.sessionForm.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
-    state = {
-      ...createPlayState(),
-      session: await createSession(buildSessionRequest({
+    state = startNewSession(
+      await createSession(buildSessionRequest({
         worldId: elements.worldId.value,
         sceneId: elements.sceneId.value,
         personaId: elements.personaId.value,
         playerName: elements.playerName.value,
       })),
-    };
+    );
+    renderSession();
+    renderTranscript();
+    renderDebugState();
+    elements.turnMessage.focus();
+  } catch (error) {
+    showError(error);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+elements.resumeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearError();
+  const submit = elements.resumeForm.querySelector("button[type='submit']");
+  submit.disabled = true;
+  try {
+    state = resumeSession(await getSession(elements.resumeSessionId.value));
     renderSession();
     renderTranscript();
     renderDebugState();
@@ -154,6 +182,7 @@ elements.newSession.addEventListener("click", () => {
   clearError();
   state = createPlayState();
   elements.turnMessage.value = "";
+  elements.resumeSessionId.value = "";
   elements.requestCloud.checked = false;
   elements.useStream.checked = false;
   renderSession();
