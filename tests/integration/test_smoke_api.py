@@ -12,11 +12,13 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
     schema = response.json()
     assert schema["info"]["title"] == "rolerag-poc"
     assert set(schema["paths"]) >= {
+        "/content/catalog",
         "/sessions",
         "/sessions/{session_id}",
         "/sessions/{session_id}/turns",
         "/sessions/{session_id}/turns/stream",
     }
+    assert set(schema["paths"]["/content/catalog"]) == {"get"}
     assert set(schema["paths"]["/sessions"]) == {"post"}
     assert set(schema["paths"]["/sessions/{session_id}"]) == {"get"}
     assert set(schema["paths"]["/sessions/{session_id}/turns"]) == {"post"}
@@ -34,6 +36,12 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         "message",
         "details",
     ]
+    assert (
+        schema["paths"]["/content/catalog"]["get"]["responses"]["400"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/ErrorResponse"
+    )
     assert (
         schema["paths"]["/sessions"]["post"]["responses"]["400"]["content"][
             "application/json"

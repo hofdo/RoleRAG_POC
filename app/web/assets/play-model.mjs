@@ -23,6 +23,44 @@ export function buildSessionRequest(form) {
   };
 }
 
+export function createCatalogSelection(catalog, selectedWorldId = undefined) {
+  const worlds = catalog.worlds;
+  const scenesById = new Map(catalog.scenes.map((scene) => [scene.id, scene]));
+  const personasById = new Map(catalog.personas.map((persona) => [persona.id, persona]));
+  const world =
+    worlds.find((candidate) => candidate.id === selectedWorldId) ??
+    worlds[0] ??
+    null;
+  if (!world) {
+    return {
+      world: null,
+      scenes: [],
+      personas: [],
+      sceneId: "",
+      personaId: "",
+    };
+  }
+  const scenes = world.scene_ids.map((id) => scenesById.get(id)).filter(Boolean);
+  const personas = world.persona_ids.map((id) => personasById.get(id)).filter(Boolean);
+  const defaultScene = scenes.find((scene) => scene.id === world.default_scene_id) ?? scenes[0];
+  return {
+    world,
+    scenes,
+    personas,
+    sceneId: defaultScene?.id ?? "",
+    personaId: personas[0]?.id ?? "",
+  };
+}
+
+export function buildCatalogSessionRequest(selection, playerName) {
+  return buildSessionRequest({
+    worldId: selection.world?.id ?? "",
+    sceneId: selection.sceneId,
+    personaId: selection.personaId,
+    playerName,
+  });
+}
+
 export function buildTurnRequest(message, requestCloud) {
   return {
     message,

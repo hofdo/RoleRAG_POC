@@ -4,12 +4,65 @@ import test from "node:test";
 import {
   appendSuccessfulTurn,
   buildDebugState,
+  buildCatalogSessionRequest,
   buildSessionRequest,
   buildTurnRequest,
+  createCatalogSelection,
   createPlayState,
   resumeSession,
   startNewSession,
 } from "../../app/web/assets/play-model.mjs";
+
+const CATALOG = Object.freeze({
+  worlds: [
+    {
+      id: "demo_world",
+      name: "Winter Palace Intrigue",
+      default_scene_id: "rose-gallery",
+      scene_ids: ["rose-gallery", "armory"],
+      persona_ids: ["archivist", "guard"],
+    },
+    {
+      id: "fallback_world",
+      name: "Fallback",
+      default_scene_id: "missing-scene",
+      scene_ids: ["armory"],
+      persona_ids: ["missing-persona", "guard"],
+    },
+  ],
+  scenes: [
+    {
+      id: "armory",
+      title: "Armory",
+      location: "Keep",
+      player_visible_summary: "Steel lines the walls.",
+      active_personas: ["guard"],
+    },
+    {
+      id: "rose-gallery",
+      title: "Rose Gallery",
+      location: "Palace",
+      player_visible_summary: "Roses climb mirrored walls.",
+      active_personas: ["archivist"],
+    },
+  ],
+  personas: [
+    {
+      id: "archivist",
+      name: "Iria Vale",
+      role: "npc",
+      public_description: "A composed archivist.",
+      speaking_style: "Precise.",
+    },
+    {
+      id: "guard",
+      name: "Gate Guard",
+      role: "npc",
+      public_description: "A watchful guard.",
+      speaking_style: "Blunt.",
+    },
+  ],
+});
 
 test("session form request preserves editable defaults and player name", () => {
   assert.deepEqual(buildSessionRequest({
@@ -18,6 +71,37 @@ test("session form request preserves editable defaults and player name", () => {
     personaId: "archivist",
     playerName: "Avery",
   }), {
+    world_id: "demo_world",
+    scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    player_name: "Avery",
+  });
+});
+
+test("catalog selection filters scenes and personas through the selected world", () => {
+  const selection = createCatalogSelection(CATALOG, "demo_world");
+
+  assert.equal(selection.world.id, "demo_world");
+  assert.deepEqual(selection.scenes.map((scene) => scene.id), ["rose-gallery", "armory"]);
+  assert.deepEqual(selection.personas.map((persona) => persona.id), ["archivist", "guard"]);
+  assert.equal(selection.sceneId, "rose-gallery");
+  assert.equal(selection.personaId, "archivist");
+});
+
+test("catalog selection falls back to first valid referenced scene and persona", () => {
+  const selection = createCatalogSelection(CATALOG, "fallback_world");
+
+  assert.equal(selection.world.id, "fallback_world");
+  assert.deepEqual(selection.scenes.map((scene) => scene.id), ["armory"]);
+  assert.deepEqual(selection.personas.map((persona) => persona.id), ["guard"]);
+  assert.equal(selection.sceneId, "armory");
+  assert.equal(selection.personaId, "guard");
+});
+
+test("catalog session request uses selected catalog IDs", () => {
+  const selection = createCatalogSelection(CATALOG, "demo_world");
+
+  assert.deepEqual(buildCatalogSessionRequest(selection, "Avery"), {
     world_id: "demo_world",
     scene_id: "rose-gallery",
     active_persona_id: "archivist",

@@ -117,7 +117,10 @@ def _write_scenario_pack(root: Path) -> None:
           "name": "Custom Narrator",
           "role": "narrator",
           "public_description": "A custom narrator.",
-          "speaking_style": "Clear."
+          "private_description": "Private narrator notes.",
+          "speaking_style": "Clear.",
+          "secrets": ["A hidden alliance."],
+          "forbidden_knowledge": ["The ending."]
         }
         """,
         encoding="utf-8",
@@ -128,7 +131,8 @@ def _write_scenario_pack(root: Path) -> None:
           "id": "custom-opening",
           "title": "Custom Opening",
           "location": "Custom Hall",
-          "player_visible_summary": "A custom hall waits."
+          "player_visible_summary": "A custom hall waits.",
+          "gm_private_summary": "A trap is armed."
         }
         """,
         encoding="utf-8",
@@ -162,6 +166,106 @@ def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -
     assert "player_name" not in payload
     assert "created_at" not in payload
     assert "updated_at" not in payload
+
+
+def test_get_content_catalog_returns_default_public_catalog() -> None:
+    client = TestClient(app)
+
+    response = client.get("/content/catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worlds"] == [
+        {
+            "id": "demo_world",
+            "name": "Winter Palace Intrigue",
+            "default_scene_id": "rose-gallery",
+            "scene_ids": ["rose-gallery"],
+            "persona_ids": ["archivist"],
+        }
+    ]
+    assert payload["scenes"] == [
+        {
+            "id": "rose-gallery",
+            "title": "Rose Gallery",
+            "location": "Winter Palace",
+            "player_visible_summary": "Courtiers drift between mirrors and roses while musicians "
+            "play softly.",
+            "active_personas": ["archivist"],
+        }
+    ]
+    assert payload["personas"] == [
+        {
+            "id": "archivist",
+            "name": "Iria Vale",
+            "role": "npc",
+            "public_description": "A composed palace archivist with an excellent memory.",
+            "speaking_style": "Precise, dry, and difficult to rattle.",
+        }
+    ]
+    forbidden_terms = [
+        "gm_private_summary",
+        "private_description",
+        "secrets",
+        "forbidden_knowledge",
+        "content_root",
+        "data/",
+        "lore",
+        "prompt",
+        "retrieval",
+        "sqlite",
+        "qdrant",
+        "provider",
+    ]
+    response_text = response.text.lower()
+    for term in forbidden_terms:
+        assert term not in response_text
+
+
+def test_get_content_catalog_uses_custom_process_content_root_without_path_leak(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "private-pack"
+    database_path = tmp_path / "api-custom-catalog.db"
+    _write_scenario_pack(pack_root)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    response = client.get("/content/catalog")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["worlds"][0]["id"] == "custom_world"
+    assert payload["scenes"][0]["id"] == "custom-opening"
+    assert payload["personas"][0]["id"] == "custom-narrator"
+    assert str(pack_root) not in response.text
+    assert "Private narrator notes" not in response.text
+    assert "A trap is armed" not in response.text
+
+
+def test_get_content_catalog_returns_safe_structured_error_for_invalid_root(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "missing-private-pack"
+    app.dependency_overrides[get_settings] = lambda: Settings(content_root=pack_root)
+    client = TestClient(app)
+
+    response = client.get("/content/catalog")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_content_catalog",
+            "message": "Configured content catalog is missing the worlds directory.",
+            "details": [],
+        }
+    }
+    assert str(pack_root) not in response.text
 
 
 def test_post_sessions_uses_process_content_root_without_request_path(

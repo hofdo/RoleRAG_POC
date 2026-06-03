@@ -40,6 +40,36 @@ class CreateSessionResponse(BaseModel):
     active_persona_id: str
 
 
+class CatalogWorldResponse(BaseModel):
+    id: str
+    name: str
+    default_scene_id: str
+    scene_ids: list[str]
+    persona_ids: list[str]
+
+
+class CatalogSceneResponse(BaseModel):
+    id: str
+    title: str
+    location: str
+    player_visible_summary: str
+    active_personas: list[str]
+
+
+class CatalogPersonaResponse(BaseModel):
+    id: str
+    name: str
+    role: str
+    public_description: str
+    speaking_style: str
+
+
+class ContentCatalogResponse(BaseModel):
+    worlds: list[CatalogWorldResponse]
+    scenes: list[CatalogSceneResponse]
+    personas: list[CatalogPersonaResponse]
+
+
 class CreateTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

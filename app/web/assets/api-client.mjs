@@ -16,6 +16,44 @@
  * }} CreateSessionResponse
  */
 
+/**
+ * @typedef {{
+ *   id: string,
+ *   name: string,
+ *   default_scene_id: string,
+ *   scene_ids: string[],
+ *   persona_ids: string[],
+ * }} CatalogWorld
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   title: string,
+ *   location: string,
+ *   player_visible_summary: string,
+ *   active_personas: string[],
+ * }} CatalogScene
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   name: string,
+ *   role: string,
+ *   public_description: string,
+ *   speaking_style: string,
+ * }} CatalogPersona
+ */
+
+/**
+ * @typedef {{
+ *   worlds: CatalogWorld[],
+ *   scenes: CatalogScene[],
+ *   personas: CatalogPersona[],
+ * }} ContentCatalog
+ */
+
 /** @typedef {{ message: string, request_cloud: boolean }} CreateTurnRequest */
 /** @typedef {{ provider: string, model: string, reason: string }} RouteResponse */
 
@@ -103,6 +141,14 @@ export function createSession(request, { fetchImpl = fetch } = {}) {
     },
     fetchImpl,
   );
+}
+
+/**
+ * @param {{ fetchImpl?: typeof fetch }} options
+ * @returns {Promise<ContentCatalog>}
+ */
+export function getContentCatalog({ fetchImpl = fetch } = {}) {
+  return requestJson("/content/catalog", { method: "GET" }, fetchImpl);
 }
 
 /**

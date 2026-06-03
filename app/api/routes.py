@@ -8,6 +8,10 @@ from fastapi.responses import StreamingResponse
 
 from app.api.errors import ApiError
 from app.api.schemas import (
+    CatalogPersonaResponse,
+    CatalogSceneResponse,
+    CatalogWorldResponse,
+    ContentCatalogResponse,
     CreateSessionRequest,
     CreateSessionResponse,
     CreateTurnRequest,
@@ -18,10 +22,15 @@ from app.api.schemas import (
     RouteResponse,
 )
 from app.api.sse import build_turn_stream_frames
-from app.composition import AppServices, build_services
+from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings
 from app.domain import TurnInput, TurnResult
-from app.persistence import DataFileNotFoundError, DataValidationError, SessionNotFoundError
+from app.persistence import (
+    ContentCatalogError,
+    DataFileNotFoundError,
+    DataValidationError,
+    SessionNotFoundError,
+)
 
 router = APIRouter()
 
@@ -54,6 +63,56 @@ def get_turn_services(
         yield services
     finally:
         services.close()
+
+
+@router.get(
+    "/content/catalog",
+    response_model=ContentCatalogResponse,
+    responses=ERROR_400_RESPONSE,
+)
+def get_content_catalog(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ContentCatalogResponse:
+    try:
+        catalog = build_file_loader(settings.content_root).load_catalog()
+    except ContentCatalogError as exc:
+        raise ApiError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="invalid_content_catalog",
+            message=exc.message,
+        ) from exc
+    return ContentCatalogResponse(
+        worlds=[
+            CatalogWorldResponse(
+                id=world.id,
+                name=world.name,
+                default_scene_id=world.default_scene_id,
+                scene_ids=world.scene_ids,
+                persona_ids=world.persona_ids,
+            )
+            for world in catalog.worlds
+        ],
+        scenes=[
+            CatalogSceneResponse(
+                id=scene.id,
+                title=scene.title,
+                location=scene.location,
+                player_visible_summary=scene.player_visible_summary,
+                active_personas=scene.active_personas,
+            )
+            for scene in catalog.scenes
+        ],
+        personas=[
+            CatalogPersonaResponse(
+                id=persona.id,
+                name=persona.name,
+                role=persona.role,
+                public_description=persona.public_description,
+                speaking_style=persona.speaking_style,
+            )
+            for persona in catalog.personas
+        ],
+    )
 
 
 @router.post(

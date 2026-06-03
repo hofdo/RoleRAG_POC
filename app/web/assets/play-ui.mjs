@@ -1,9 +1,18 @@
-import { ApiError, createBufferedTurn, createSession, createTurn, getSession } from "./api-client.mjs";
+import {
+  ApiError,
+  createBufferedTurn,
+  createSession,
+  createTurn,
+  getContentCatalog,
+  getSession,
+} from "./api-client.mjs";
 import {
   appendSuccessfulTurn,
   buildDebugState,
+  buildCatalogSessionRequest,
   buildSessionRequest,
   buildTurnRequest,
+  createCatalogSelection,
   createPlayState,
   resumeSession,
   startNewSession,
@@ -15,6 +24,10 @@ const elements = {
   playPanel: document.querySelector("#play-panel"),
   sessionForm: document.querySelector("#session-form"),
   resumeForm: document.querySelector("#resume-form"),
+  catalogWorld: document.querySelector("#catalog-world"),
+  catalogScene: document.querySelector("#catalog-scene"),
+  catalogPersona: document.querySelector("#catalog-persona"),
+  manualSessionPanel: document.querySelector("#manual-session-panel"),
   worldId: document.querySelector("#world-id"),
   sceneId: document.querySelector("#scene-id"),
   personaId: document.querySelector("#persona-id"),
@@ -32,6 +45,8 @@ const elements = {
 };
 
 let state = createPlayState();
+let contentCatalog = null;
+let catalogSelection = null;
 
 function showError(error) {
   const prefix = error instanceof ApiError ? `${error.code}: ` : "";
@@ -42,6 +57,71 @@ function showError(error) {
 function clearError() {
   elements.error.textContent = "";
   elements.error.hidden = true;
+}
+
+function setSelectOptions(select, options, selectedId, labelForOption) {
+  select.replaceChildren();
+  for (const optionItem of options) {
+    const option = document.createElement("option");
+    option.value = optionItem.id;
+    option.textContent = labelForOption(optionItem);
+    option.selected = optionItem.id === selectedId;
+    select.append(option);
+  }
+}
+
+function syncManualIds() {
+  if (!catalogSelection?.world) {
+    return;
+  }
+  elements.worldId.value = catalogSelection.world.id;
+  elements.sceneId.value = catalogSelection.sceneId;
+  elements.personaId.value = catalogSelection.personaId;
+}
+
+function renderCatalogSelection() {
+  if (!contentCatalog || !catalogSelection) {
+    elements.catalogWorld.disabled = true;
+    elements.catalogScene.disabled = true;
+    elements.catalogPersona.disabled = true;
+    return;
+  }
+  setSelectOptions(
+    elements.catalogWorld,
+    contentCatalog.worlds,
+    catalogSelection.world?.id,
+    (world) => world.name,
+  );
+  setSelectOptions(
+    elements.catalogScene,
+    catalogSelection.scenes,
+    catalogSelection.sceneId,
+    (scene) => `${scene.title} (${scene.location})`,
+  );
+  setSelectOptions(
+    elements.catalogPersona,
+    catalogSelection.personas,
+    catalogSelection.personaId,
+    (persona) => `${persona.name} (${persona.role})`,
+  );
+  elements.catalogWorld.disabled = false;
+  elements.catalogScene.disabled = catalogSelection.scenes.length === 0;
+  elements.catalogPersona.disabled = catalogSelection.personas.length === 0;
+  syncManualIds();
+}
+
+async function loadCatalog() {
+  try {
+    contentCatalog = await getContentCatalog();
+    catalogSelection = createCatalogSelection(contentCatalog);
+    renderCatalogSelection();
+  } catch (error) {
+    contentCatalog = null;
+    catalogSelection = null;
+    renderCatalogSelection();
+    elements.manualSessionPanel.open = true;
+    showError(error);
+  }
 }
 
 function renderSession() {
@@ -105,13 +185,17 @@ elements.sessionForm.addEventListener("submit", async (event) => {
   const submit = elements.sessionForm.querySelector("button[type='submit']");
   submit.disabled = true;
   try {
-    state = startNewSession(
-      await createSession(buildSessionRequest({
+    const useManualIds = elements.manualSessionPanel.open || !catalogSelection?.world;
+    const request = useManualIds
+      ? buildSessionRequest({
         worldId: elements.worldId.value,
         sceneId: elements.sceneId.value,
         personaId: elements.personaId.value,
         playerName: elements.playerName.value,
-      })),
+      })
+      : buildCatalogSessionRequest(catalogSelection, elements.playerName.value);
+    state = startNewSession(
+      await createSession(request),
     );
     renderSession();
     renderTranscript();
@@ -122,6 +206,30 @@ elements.sessionForm.addEventListener("submit", async (event) => {
   } finally {
     submit.disabled = false;
   }
+});
+
+elements.catalogWorld.addEventListener("change", () => {
+  if (!contentCatalog) {
+    return;
+  }
+  catalogSelection = createCatalogSelection(contentCatalog, elements.catalogWorld.value);
+  renderCatalogSelection();
+});
+
+elements.catalogScene.addEventListener("change", () => {
+  if (!catalogSelection) {
+    return;
+  }
+  catalogSelection = { ...catalogSelection, sceneId: elements.catalogScene.value };
+  syncManualIds();
+});
+
+elements.catalogPersona.addEventListener("change", () => {
+  if (!catalogSelection) {
+    return;
+  }
+  catalogSelection = { ...catalogSelection, personaId: elements.catalogPersona.value };
+  syncManualIds();
 });
 
 elements.resumeForm.addEventListener("submit", async (event) => {
@@ -185,8 +293,15 @@ elements.newSession.addEventListener("click", () => {
   elements.resumeSessionId.value = "";
   elements.requestCloud.checked = false;
   elements.useStream.checked = false;
+  if (contentCatalog) {
+    catalogSelection = createCatalogSelection(contentCatalog);
+    renderCatalogSelection();
+  }
   renderSession();
   renderTranscript();
   renderDebugState();
   elements.playerName.focus();
 });
+
+renderCatalogSelection();
+void loadCatalog();

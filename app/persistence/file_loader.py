@@ -19,6 +19,18 @@ class DemoWorldRecord(BaseModel):
     scene_ids: list[str]
 
 
+class ContentCatalogRecord(BaseModel):
+    worlds: list[DemoWorldRecord]
+    scenes: list[SceneState]
+    personas: list[PersonaCard]
+
+
+class ContentCatalogError(ValueError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 class DataFileNotFoundError(FileNotFoundError):
     def __init__(self, *, entity_type: str, entity_id: str, path: Path) -> None:
         self.entity_type = entity_type
@@ -64,6 +76,62 @@ class FileDataLoader:
             path=self.base_path / "scenes" / filename,
             model_type=SceneState,
         )
+
+    def load_catalog(self) -> ContentCatalogRecord:
+        for directory in ("worlds", "scenes", "personas"):
+            if not (self.base_path / directory).is_dir():
+                raise ContentCatalogError(
+                    f"Configured content catalog is missing the {directory} directory."
+                )
+        return ContentCatalogRecord(
+            worlds=sorted(
+                self._load_catalog_directory(
+                    entity_type="world",
+                    directory="worlds",
+                    model_type=DemoWorldRecord,
+                ),
+                key=lambda item: item.id,
+            ),
+            scenes=sorted(
+                self._load_catalog_directory(
+                    entity_type="scene",
+                    directory="scenes",
+                    model_type=SceneState,
+                ),
+                key=lambda item: item.id,
+            ),
+            personas=sorted(
+                self._load_catalog_directory(
+                    entity_type="persona",
+                    directory="personas",
+                    model_type=PersonaCard,
+                ),
+                key=lambda item: item.id,
+            ),
+        )
+
+    def _load_catalog_directory(
+        self,
+        *,
+        entity_type: str,
+        directory: str,
+        model_type: type[ModelT],
+    ) -> list[ModelT]:
+        records: list[ModelT] = []
+        for path in sorted((self.base_path / directory).glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ContentCatalogError(
+                    f"Configured content catalog contains an invalid {entity_type} file."
+                ) from exc
+            try:
+                records.append(model_type.model_validate(payload))
+            except ValidationError as exc:
+                raise ContentCatalogError(
+                    f"Configured content catalog contains an invalid {entity_type} file."
+                ) from exc
+        return records
 
     def _load_model(
         self,

@@ -23,21 +23,38 @@
         </div>
         <form id="session-form" class="form-grid">
           <label>
-            World ID
-            <input id="world-id" name="world-id" value="demo_world" required>
+            World
+            <select id="catalog-world" name="catalog-world"></select>
           </label>
           <label>
-            Scene ID
-            <input id="scene-id" name="scene-id" value="rose-gallery" required>
+            Scene
+            <select id="catalog-scene" name="catalog-scene"></select>
           </label>
           <label>
-            Persona ID
-            <input id="persona-id" name="persona-id" value="archivist" required>
+            Persona
+            <select id="catalog-persona" name="catalog-persona"></select>
           </label>
           <label>
             Player name
             <input id="player-name" name="player-name" autocomplete="name" required>
           </label>
+          <details id="manual-session-panel" class="manual-session-panel">
+            <summary>Developer ID fallback</summary>
+            <div class="manual-session-grid">
+              <label>
+                World ID
+                <input id="world-id" name="world-id" value="demo_world" required>
+              </label>
+              <label>
+                Scene ID
+                <input id="scene-id" name="scene-id" value="rose-gallery" required>
+              </label>
+              <label>
+                Persona ID
+                <input id="persona-id" name="persona-id" value="archivist" required>
+              </label>
+            </div>
+          </details>
           <button type="submit">Create session</button>
         </form>
         <form id="resume-form" class="resume-form">

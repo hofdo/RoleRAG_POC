@@ -1,4 +1,6 @@
 from app.persistence.file_loader import (
+    ContentCatalogError,
+    ContentCatalogRecord,
     DataFileNotFoundError,
     DataValidationError,
     DemoWorldRecord,
@@ -13,6 +15,8 @@ from app.persistence.repositories import (
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
 __all__ = [
+    "ContentCatalogError",
+    "ContentCatalogRecord",
     "DataFileNotFoundError",
     "DataValidationError",
     "DemoWorldRecord",

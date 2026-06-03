@@ -59,6 +59,77 @@ def test_file_loader_loads_persona_scene_and_world_metadata(tmp_path: Path) -> N
     assert scene.title == "Rose Gallery"
 
 
+def test_file_loader_loads_public_catalog_sorted_by_id(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "worlds" / "z_world.json",
+        {
+            "id": "z_world",
+            "name": "Zed",
+            "default_scene_id": "z-scene",
+            "persona_ids": ["z-persona"],
+            "scene_ids": ["z-scene"],
+        },
+    )
+    _write_json(
+        tmp_path / "worlds" / "a_world.json",
+        {
+            "id": "a_world",
+            "name": "Alpha",
+            "default_scene_id": "a-scene",
+            "persona_ids": ["a-persona"],
+            "scene_ids": ["a-scene"],
+        },
+    )
+    _write_json(
+        tmp_path / "personas" / "z-persona.json",
+        {
+            "id": "z-persona",
+            "name": "Zed Persona",
+            "role": "npc",
+            "public_description": "Public.",
+            "private_description": "Private.",
+            "speaking_style": "Dry.",
+            "secrets": ["Hidden."],
+            "forbidden_knowledge": ["Forbidden."],
+        },
+    )
+    _write_json(
+        tmp_path / "personas" / "a-persona.json",
+        {
+            "id": "a-persona",
+            "name": "Alpha Persona",
+            "role": "narrator",
+            "public_description": "Public.",
+            "speaking_style": "Clear.",
+        },
+    )
+    _write_json(
+        tmp_path / "scenes" / "z_scene.json",
+        {
+            "id": "z-scene",
+            "title": "Zed Scene",
+            "location": "Zed",
+            "player_visible_summary": "Visible.",
+            "gm_private_summary": "Private.",
+        },
+    )
+    _write_json(
+        tmp_path / "scenes" / "a_scene.json",
+        {
+            "id": "a-scene",
+            "title": "Alpha Scene",
+            "location": "Alpha",
+            "player_visible_summary": "Visible.",
+        },
+    )
+
+    catalog = FileDataLoader(base_path=tmp_path).load_catalog()
+
+    assert [world.id for world in catalog.worlds] == ["a_world", "z_world"]
+    assert [scene.id for scene in catalog.scenes] == ["a-scene", "z-scene"]
+    assert [persona.id for persona in catalog.personas] == ["a-persona", "z-persona"]
+
+
 def test_file_loader_raises_clear_error_for_missing_persona(tmp_path: Path) -> None:
     loader = FileDataLoader(base_path=tmp_path)
 

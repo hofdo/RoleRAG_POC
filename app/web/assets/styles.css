@@ -96,6 +96,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #3a4353;
@@ -108,6 +109,23 @@ textarea {
 
 textarea {
   resize: vertical;
+}
+
+.manual-session-panel {
+  grid-column: 1 / -1;
+}
+
+.manual-session-panel summary {
+  cursor: pointer;
+  color: #d6b985;
+  font-weight: 800;
+}
+
+.manual-session-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
 }
 
 button {
@@ -240,6 +258,10 @@ button:disabled {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-session-grid {
     grid-template-columns: 1fr;
   }
 

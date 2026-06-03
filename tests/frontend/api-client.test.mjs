@@ -6,6 +6,7 @@ import {
   createBufferedTurn,
   createSession,
   createTurn,
+  getContentCatalog,
   getSession,
 } from "../../app/web/assets/api-client.mjs";
 
@@ -44,6 +45,53 @@ test("createSession sends exactly the public creation fields", async () => {
     player_name: "Avery",
     active_persona_id: "archivist",
   });
+});
+
+test("getContentCatalog uses the catalog endpoint with GET", async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({
+      worlds: [
+        {
+          id: "demo_world",
+          name: "Winter Palace Intrigue",
+          default_scene_id: "rose-gallery",
+          scene_ids: ["rose-gallery"],
+          persona_ids: ["archivist"],
+        },
+      ],
+      scenes: [],
+      personas: [],
+    });
+  };
+
+  const catalog = await getContentCatalog({ fetchImpl });
+
+  assert.equal(request.url, "/content/catalog");
+  assert.equal(request.options.method, "GET");
+  assert.equal("body" in request.options, false);
+  assert.equal(catalog.worlds[0].id, "demo_world");
+});
+
+test("structured catalog errors stay ApiError instances", async () => {
+  const fetchImpl = async () => jsonResponse({
+    error: {
+      code: "invalid_content_catalog",
+      message: "Configured content catalog is missing the worlds directory.",
+      details: [],
+    },
+  }, { ok: false, status: 400 });
+
+  await assert.rejects(
+    getContentCatalog({ fetchImpl }),
+    (error) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.code, "invalid_content_catalog");
+      assert.equal(error.status, 400);
+      return true;
+    },
+  );
 });
 
 test("createTurn uses the JSON endpoint and sends no persona override", async () => {
