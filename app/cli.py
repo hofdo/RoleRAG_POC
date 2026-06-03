@@ -140,6 +140,7 @@ def _build_services(
     )
     return AppServices(
         connection=connection,
+        session_repository=session_repository,
         orchestrator=orchestrator,
         recent_dialogue_store=recent_dialogue_store,
     )

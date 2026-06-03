@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from app.agents.critic_agent import CriticAgent
 from app.api.routes import get_read_services
 from app.composition import AppServices
 from app.config import Settings, get_settings
-from app.domain import PersonaCard, SceneState
+from app.domain import PersonaCard, SceneState, SessionState
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode
 from app.main import app
@@ -88,6 +89,7 @@ def _build_services(tmp_path: Path) -> AppServices:
     )
     return AppServices(
         connection=connection,
+        session_repository=session_repository,
         orchestrator=orchestrator,
         recent_dialogue_store=RecentDialogueStore(
             turn_repository=turn_repository,
@@ -168,6 +170,115 @@ def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -
     assert "player_name" not in payload
     assert "created_at" not in payload
     assert "updated_at" not in payload
+
+
+def test_get_sessions_returns_recent_safe_metadata_only(tmp_path: Path) -> None:
+    services = _build_services(tmp_path)
+    created_at = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)
+    services.session_repository.create_session(
+        SessionState(
+            id="older-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+            created_at=created_at,
+            updated_at=created_at + timedelta(minutes=1),
+        )
+    )
+    services.session_repository.create_session(
+        SessionState(
+            id="newer-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Blair",
+            content_root=str(tmp_path / "private-pack"),
+            created_at=created_at + timedelta(minutes=2),
+            updated_at=created_at + timedelta(minutes=3),
+        )
+    )
+    services.close()
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/sessions")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"sessions"}
+    assert [session["session_id"] for session in payload["sessions"]] == [
+        "newer-session",
+        "older-session",
+    ]
+    assert set(payload["sessions"][0]) == {
+        "session_id",
+        "world_id",
+        "active_scene_id",
+        "active_persona_id",
+        "player_name",
+        "created_at",
+        "updated_at",
+    }
+    serialized = response.text.lower()
+    for forbidden in [
+        "recent_turns",
+        "messages",
+        "prompt",
+        "content_root",
+        str(tmp_path).lower(),
+        "retrieved",
+        "memory",
+        "sqlite",
+        "qdrant",
+        "provider",
+        "private-pack",
+        "hidden",
+    ]:
+        assert forbidden not in serialized
+
+
+def test_get_sessions_orders_by_updated_at_then_created_at_and_limits_to_10(
+    tmp_path: Path,
+) -> None:
+    services = _build_services(tmp_path)
+    base = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)
+    for index in range(12):
+        services.session_repository.create_session(
+            SessionState(
+                id=f"session-{index:02d}",
+                world_id="demo_world",
+                active_scene_id="rose-gallery",
+                active_persona_id="archivist",
+                player_name=f"Player {index}",
+                created_at=base + timedelta(minutes=index),
+                updated_at=base + timedelta(hours=index),
+            )
+        )
+    services.session_repository.create_session(
+        SessionState(
+            id="tie-breaker",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Tie",
+            created_at=base + timedelta(days=1),
+            updated_at=base + timedelta(hours=11),
+        )
+    )
+    services.close()
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/sessions")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    session_ids = [session["session_id"] for session in response.json()["sessions"]]
+    assert len(session_ids) == 10
+    assert session_ids[:3] == ["tie-breaker", "session-11", "session-10"]
+    assert "session-00" not in session_ids
 
 
 def test_get_content_catalog_returns_default_public_catalog() -> None:

@@ -22,6 +22,8 @@ class SessionRepository(Protocol):
 
     def get_session(self, session_id: str) -> SessionState | None: ...
 
+    def list_recent_sessions(self, limit: int) -> list[SessionState]: ...
+
     def update_session_activity(self, session_id: str, *, updated_at: datetime) -> None: ...
 
 
@@ -127,6 +129,40 @@ class SQLiteSessionRepository:
             created_at=parse_datetime(row["created_at"]),
             updated_at=parse_datetime(row["updated_at"]),
         )
+
+    def list_recent_sessions(self, limit: int) -> list[SessionState]:
+        if limit <= 0:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT
+                id,
+                world_id,
+                active_scene_id,
+                active_persona_id,
+                player_name,
+                content_root,
+                created_at,
+                updated_at
+            FROM sessions
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            SessionState(
+                id=row["id"],
+                world_id=row["world_id"],
+                active_scene_id=row["active_scene_id"],
+                active_persona_id=row["active_persona_id"],
+                player_name=row["player_name"],
+                content_root=row["content_root"],
+                created_at=parse_datetime(row["created_at"]),
+                updated_at=parse_datetime(row["updated_at"]),
+            )
+            for row in rows
+        ]
 
     def update_session_activity(self, session_id: str, *, updated_at: datetime) -> None:
         cursor = self.connection.execute(

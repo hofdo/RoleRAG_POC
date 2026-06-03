@@ -10,6 +10,7 @@ Available endpoints:
 - `GET /play` for the local HTML play surface, excluded from OpenAPI
 - `GET /runtime/status`
 - `GET /content/catalog`
+- `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `POST /sessions/{session_id}/turns`
@@ -101,14 +102,45 @@ The API uses the process-level `CONTENT_ROOT` settings value when creating sessi
 do not accept a per-request content root or per-request scenario-pack selection. CLI scenario-pack
 support through `--content-root` remains available.
 
+## Recent Sessions
+
+`GET /sessions` is a local-use recent-session list for the `/play` resume selector. It returns
+only safe metadata from SQLite authoritative state, ordered by `updated_at` descending with
+`created_at` as the deterministic tie-breaker, and capped at 10 sessions. It accepts no query
+parameters and no request body.
+
+The fixed response shape is:
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "<id>",
+      "world_id": "demo_world",
+      "active_scene_id": "rose-gallery",
+      "active_persona_id": "archivist",
+      "player_name": "Avery",
+      "created_at": "2026-06-03T10:00:00Z",
+      "updated_at": "2026-06-03T10:05:00Z"
+    }
+  ]
+}
+```
+
+This endpoint does not instantiate turn services, call LLMs, query Qdrant, load turns, load
+memory, run retrieval, or include diagnostics. It explicitly excludes messages, prompts,
+`content_root`, file paths, retrieved chunks, memory, SQLite details, Qdrant details, provider
+data, hidden/private fields, and storage diagnostics.
+
 ## Session Lookup
 
 `GET /sessions/{session_id}` returns safe session identifiers and a bounded recent-turn list.
 It does not return player names, content roots, hidden scene state, private persona state, SQLite
 internals, or Qdrant diagnostics.
 
-The local `/play` UI uses this endpoint only when a user pastes a `session_id` into `Resume
-session`; the returned `recent_turns` are rendered as transcript entries and remain backend-owned.
+The local `/play` UI uses this endpoint when a user resumes from the recent-session selector or
+pastes a `session_id` into `Resume session`; the returned `recent_turns` are rendered as transcript
+entries and remain backend-owned.
 
 ## Turn Execution
 

@@ -18,6 +18,24 @@
 
 /**
  * @typedef {{
+ *   session_id: string,
+ *   world_id: string,
+ *   active_scene_id: string,
+ *   active_persona_id: string,
+ *   player_name: string,
+ *   created_at: string,
+ *   updated_at: string,
+ * }} RecentSessionResponse
+ */
+
+/**
+ * @typedef {{
+ *   sessions: RecentSessionResponse[],
+ * }} RecentSessionsResponse
+ */
+
+/**
+ * @typedef {{
  *   id: string,
  *   name: string,
  *   default_scene_id: string,
@@ -170,6 +188,14 @@ export function getContentCatalog({ fetchImpl = fetch } = {}) {
  */
 export function getRuntimeStatus({ fetchImpl = fetch } = {}) {
   return requestJson("/runtime/status", { method: "GET" }, fetchImpl);
+}
+
+/**
+ * @param {{ fetchImpl?: typeof fetch }} options
+ * @returns {Promise<RecentSessionsResponse>}
+ */
+export function getRecentSessions({ fetchImpl = fetch } = {}) {
+  return requestJson("/sessions", { method: "GET" }, fetchImpl);
 }
 
 /**

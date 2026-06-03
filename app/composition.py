@@ -18,6 +18,7 @@ from app.persistence import (
     connect_sqlite,
     initialize_database,
 )
+from app.persistence.repositories import SessionRepository
 from app.rag import (
     ActorContextRetriever,
     EmbeddingProvider,
@@ -31,6 +32,7 @@ from app.rag import (
 @dataclass
 class AppServices:
     connection: sqlite3.Connection
+    session_repository: SessionRepository
     orchestrator: TurnOrchestrator
     recent_dialogue_store: RecentDialogueStore
 
@@ -159,6 +161,7 @@ def build_services(
     )
     return AppServices(
         connection=connection,
+        session_repository=session_repository,
         orchestrator=orchestrator,
         recent_dialogue_store=recent_dialogue_store,
     )

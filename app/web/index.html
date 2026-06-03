@@ -67,6 +67,14 @@
           </details>
           <button type="submit">Create session</button>
         </form>
+        <form id="recent-session-form" class="resume-form">
+          <label>
+            Recent sessions
+            <select id="recent-session-select" name="recent-session"></select>
+          </label>
+          <button id="resume-recent-session" type="submit" class="secondary">Resume selected</button>
+          <p id="recent-session-status" class="setup-status" aria-live="polite"></p>
+        </form>
         <form id="resume-form" class="resume-form">
           <label>
             Session ID

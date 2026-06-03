@@ -63,6 +63,7 @@ def test_api_contract_document_covers_public_boundaries() -> None:
 
     assert "GET /runtime/status" in contract
     assert "GET /content/catalog" in contract
+    assert "GET /sessions" in contract
     assert "POST /sessions" in contract
     assert "GET /sessions/{session_id}" in contract
     assert "POST /sessions/{session_id}/turns" in contract
@@ -86,6 +87,11 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "provider token streaming" in contract
     assert "concatenated" in contract
     assert "safe, shallow, non-diagnostic runtime metadata" in contract
+    assert "local-use recent-session list" in contract
+    assert "safe metadata from SQLite authoritative state" in contract
+    assert "capped at 10 sessions" in contract
+    assert "excludes messages, prompts" in contract
+    assert "storage diagnostics" in contract
     assert "does not call LLMs" in contract
     assert "probe Qdrant reachability" in contract
     assert "python -m app.cli doctor" in contract

@@ -10,9 +10,13 @@ import {
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeRecentSessionsStatus,
   describeRuntimeStatus,
+  formatRecentSessionOption,
+  RECENT_SESSIONS_UNAVAILABLE_TEXT,
   RUNTIME_STATUS_UNAVAILABLE_TEXT,
   resumeSession,
+  selectedRecentSessionId,
   startNewSession,
 } from "../../app/web/assets/play-model.mjs";
 
@@ -172,6 +176,50 @@ test("runtime status description gives non-blocking load failure text", () => {
     warning: RUNTIME_STATUS_UNAVAILABLE_TEXT,
     rows: [],
   });
+});
+
+test("recent sessions status formats loading, empty, populated, and failure states", () => {
+  assert.equal(describeRecentSessionsStatus({
+    recentSessionsLoaded: false,
+    recentSessionsLoadFailed: false,
+    recentSessions: [],
+  }), "Loading recent sessions.");
+  assert.equal(describeRecentSessionsStatus({
+    recentSessionsLoaded: true,
+    recentSessionsLoadFailed: false,
+    recentSessions: [],
+  }), "No recent sessions yet.");
+  assert.equal(describeRecentSessionsStatus({
+    recentSessionsLoaded: true,
+    recentSessionsLoadFailed: false,
+    recentSessions: [{ session_id: "session-1" }, { session_id: "session-2" }],
+  }), "2 recent sessions available.");
+  assert.equal(describeRecentSessionsStatus({
+    recentSessionsLoaded: false,
+    recentSessionsLoadFailed: true,
+    recentSessions: [],
+  }), RECENT_SESSIONS_UNAVAILABLE_TEXT);
+});
+
+test("recent session option includes safe visible identifiers and updated time", () => {
+  const label = formatRecentSessionOption({
+    session_id: "session-1",
+    world_id: "demo_world",
+    active_scene_id: "rose-gallery",
+    active_persona_id: "archivist",
+    player_name: "Avery",
+    created_at: "2026-06-03T10:00:00Z",
+    updated_at: "2026-06-03T10:05:00Z",
+  });
+
+  assert.match(label, /Avery/);
+  assert.match(label, /demo_world/);
+  assert.match(label, /rose-gallery/);
+  assert.match(label, /archivist/);
+});
+
+test("recent session selection returns the chosen session id", () => {
+  assert.equal(selectedRecentSessionId("session-1"), "session-1");
 });
 
 test("turn request contains only message and request_cloud", () => {

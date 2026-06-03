@@ -102,6 +102,7 @@ uvicorn app.main:app --reload
 Implemented endpoints:
 
 - `GET /play`
+- `GET /sessions`
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
@@ -114,11 +115,12 @@ The SSE route is transport-only and buffered: it emits player-visible text after
 orchestration pipeline completes, not provider tokens or pre-validation drafts.
 
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local framework-free UI.
-Use `Create session` to start from editable demo defaults, or `Resume session` with an existing
-`session_id` to render backend `recent_turns`. It sends turns as JSON by default and exposes
-buffered SSE through an optional developer toggle. The UI is a thin same-origin client: scenario
-packs remain a process-level backend choice through `CONTENT_ROOT`, and orchestration, retrieval,
-validation, routing, persistence, memory, and authoritative session state stay in the backend.
+Use `Create session` to start from editable demo defaults, `Resume selected` for the local recent
+session list, or `Resume session` with an existing `session_id` fallback to render backend
+`recent_turns`. It sends turns as JSON by default and exposes buffered SSE through an optional
+developer toggle. The UI is a thin same-origin client: scenario packs remain a process-level
+backend choice through `CONTENT_ROOT`, and orchestration, retrieval, validation, routing,
+persistence, memory, and authoritative session state stay in the backend.
 
 ## Config Notes
 

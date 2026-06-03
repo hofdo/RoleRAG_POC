@@ -7,6 +7,7 @@ import {
   createSession,
   createTurn,
   getContentCatalog,
+  getRecentSessions,
   getRuntimeStatus,
   getSession,
 } from "../../app/web/assets/api-client.mjs";
@@ -98,6 +99,33 @@ test("getRuntimeStatus uses the runtime endpoint with GET", async () => {
   assert.equal("body" in request.options, false);
   assert.equal(status.app_name, "rolerag-poc");
   assert.equal(status.cloud_provider_configured, false);
+});
+
+test("getRecentSessions uses the sessions endpoint with GET and no body", async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({
+      sessions: [
+        {
+          session_id: "session-1",
+          world_id: "demo_world",
+          active_scene_id: "rose-gallery",
+          active_persona_id: "archivist",
+          player_name: "Avery",
+          created_at: "2026-06-03T10:00:00Z",
+          updated_at: "2026-06-03T10:05:00Z",
+        },
+      ],
+    });
+  };
+
+  const response = await getRecentSessions({ fetchImpl });
+
+  assert.equal(request.url, "/sessions");
+  assert.equal(request.options.method, "GET");
+  assert.equal("body" in request.options, false);
+  assert.equal(response.sessions[0].session_id, "session-1");
 });
 
 test("structured catalog errors stay ApiError instances", async () => {

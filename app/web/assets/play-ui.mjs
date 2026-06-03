@@ -4,6 +4,7 @@ import {
   createSession,
   createTurn,
   getContentCatalog,
+  getRecentSessions,
   getRuntimeStatus,
   getSession,
 } from "./api-client.mjs";
@@ -16,8 +17,11 @@ import {
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeRecentSessionsStatus,
   describeRuntimeStatus,
+  formatRecentSessionOption,
   resumeSession,
+  selectedRecentSessionId,
   startNewSession,
 } from "./play-model.mjs";
 
@@ -28,11 +32,15 @@ const elements = {
   setupPanel: document.querySelector("#setup-panel"),
   playPanel: document.querySelector("#play-panel"),
   sessionForm: document.querySelector("#session-form"),
+  recentSessionForm: document.querySelector("#recent-session-form"),
   resumeForm: document.querySelector("#resume-form"),
   catalogWorld: document.querySelector("#catalog-world"),
   catalogScene: document.querySelector("#catalog-scene"),
   catalogPersona: document.querySelector("#catalog-persona"),
   setupStatus: document.querySelector("#setup-status"),
+  recentSessionSelect: document.querySelector("#recent-session-select"),
+  recentSessionStatus: document.querySelector("#recent-session-status"),
+  resumeRecentSession: document.querySelector("#resume-recent-session"),
   manualSessionPanel: document.querySelector("#manual-session-panel"),
   worldId: document.querySelector("#world-id"),
   sceneId: document.querySelector("#scene-id"),
@@ -56,6 +64,9 @@ let catalogSelection = null;
 let catalogLoadFailed = false;
 let runtimeStatus = null;
 let runtimeStatusFailed = false;
+let recentSessions = [];
+let recentSessionsLoaded = false;
+let recentSessionsLoadFailed = false;
 
 function showError(error) {
   const prefix = error instanceof ApiError ? `${error.code}: ` : "";
@@ -111,6 +122,23 @@ function renderRuntimeStatus() {
   elements.runtimeStatusWarning.hidden = description.warning === "";
 }
 
+function renderRecentSessions() {
+  elements.recentSessionSelect.replaceChildren();
+  for (const recentSession of recentSessions) {
+    const option = document.createElement("option");
+    option.value = recentSession.session_id;
+    option.textContent = formatRecentSessionOption(recentSession);
+    elements.recentSessionSelect.append(option);
+  }
+  elements.recentSessionSelect.disabled = recentSessions.length === 0 || recentSessionsLoadFailed;
+  elements.resumeRecentSession.disabled = recentSessions.length === 0 || recentSessionsLoadFailed;
+  elements.recentSessionStatus.textContent = describeRecentSessionsStatus({
+    recentSessionsLoaded,
+    recentSessionsLoadFailed,
+    recentSessions,
+  });
+}
+
 async function loadRuntimeStatus() {
   try {
     runtimeStatus = await getRuntimeStatus();
@@ -120,6 +148,20 @@ async function loadRuntimeStatus() {
     runtimeStatusFailed = true;
   }
   renderRuntimeStatus();
+}
+
+async function loadRecentSessions() {
+  try {
+    const response = await getRecentSessions();
+    recentSessions = response.sessions;
+    recentSessionsLoaded = true;
+    recentSessionsLoadFailed = false;
+  } catch {
+    recentSessions = [];
+    recentSessionsLoaded = false;
+    recentSessionsLoadFailed = true;
+  }
+  renderRecentSessions();
 }
 
 function renderCatalogSelection() {
@@ -245,6 +287,7 @@ elements.sessionForm.addEventListener("submit", async (event) => {
     state = startNewSession(
       await createSession(request),
     );
+    await loadRecentSessions();
     renderSession();
     renderTranscript();
     renderDebugState();
@@ -253,6 +296,28 @@ elements.sessionForm.addEventListener("submit", async (event) => {
     showError(error);
   } finally {
     submit.disabled = false;
+  }
+});
+
+elements.recentSessionForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearError();
+  const submit = elements.resumeRecentSession;
+  submit.disabled = true;
+  try {
+    const sessionId = selectedRecentSessionId(elements.recentSessionSelect.value);
+    if (!sessionId) {
+      return;
+    }
+    state = resumeSession(await getSession(sessionId));
+    renderSession();
+    renderTranscript();
+    renderDebugState();
+    elements.turnMessage.focus();
+  } catch (error) {
+    showError(error);
+  } finally {
+    submit.disabled = recentSessions.length === 0 || recentSessionsLoadFailed;
   }
 });
 
@@ -361,5 +426,7 @@ elements.newSession.addEventListener("click", () => {
 
 renderCatalogSelection();
 renderRuntimeStatus();
+renderRecentSessions();
 void loadRuntimeStatus();
+void loadRecentSessions();
 void loadCatalog();

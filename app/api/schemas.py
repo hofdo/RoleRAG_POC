@@ -40,6 +40,20 @@ class CreateSessionResponse(BaseModel):
     active_persona_id: str
 
 
+class RecentSessionResponse(BaseModel):
+    session_id: str
+    world_id: str
+    active_scene_id: str
+    active_persona_id: str
+    player_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class RecentSessionsResponse(BaseModel):
+    sessions: list[RecentSessionResponse]
+
+
 class CatalogWorldResponse(BaseModel):
     id: str
     name: str

@@ -90,6 +90,9 @@ export function describeCatalogSetupStatus({
 export const RUNTIME_STATUS_UNAVAILABLE_TEXT =
   "Runtime status unavailable; gameplay controls remain available.";
 
+export const RECENT_SESSIONS_UNAVAILABLE_TEXT =
+  "Recent sessions unavailable; use Session ID fallback.";
+
 function yesNo(value) {
   return value ? "yes" : "no";
 }
@@ -113,6 +116,41 @@ export function describeRuntimeStatus(status) {
       ["Cloud route", yesNo(status.cloud_provider_configured)],
     ],
   };
+}
+
+export function describeRecentSessionsStatus({
+  recentSessionsLoaded,
+  recentSessionsLoadFailed,
+  recentSessions,
+}) {
+  if (recentSessionsLoadFailed) {
+    return RECENT_SESSIONS_UNAVAILABLE_TEXT;
+  }
+  if (!recentSessionsLoaded) {
+    return "Loading recent sessions.";
+  }
+  if (recentSessions.length === 0) {
+    return "No recent sessions yet.";
+  }
+  return `${recentSessions.length} recent session${recentSessions.length === 1 ? "" : "s"} available.`;
+}
+
+export function formatRecentSessionOption(session) {
+  const updated = new Date(session.updated_at);
+  const updatedLabel = Number.isNaN(updated.getTime())
+    ? session.updated_at
+    : updated.toLocaleString();
+  return [
+    session.player_name,
+    session.world_id,
+    session.active_scene_id,
+    session.active_persona_id,
+    updatedLabel,
+  ].join(" / ");
+}
+
+export function selectedRecentSessionId(selectedSessionId) {
+  return selectedSessionId;
 }
 
 export function buildTurnRequest(message, requestCloud) {

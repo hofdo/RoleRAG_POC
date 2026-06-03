@@ -442,6 +442,7 @@ Implemented endpoints:
 
 - `GET /play`
 - `GET /content/catalog`
+- `GET /sessions`
 - `POST /sessions`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
@@ -483,7 +484,8 @@ framework-free browser surface is a thin client over the same-origin API:
 - `Create session` uses the selected catalog world, scene, persona, and player name
 - `Developer ID fallback` remains available for manual world, scene, and persona IDs; if catalog
   loading fails, the fallback opens and session creation uses the manual IDs
-- `Resume session` accepts an existing `session_id` and renders backend `recent_turns`
+- recent sessions load from `GET /sessions`; `Resume selected` restores through backend session lookup
+- `Resume session` accepts an existing `session_id` fallback and renders backend `recent_turns`
 - turn execution uses JSON by default
 - the developer panel can opt into buffered SSE and displays safe route, memory, and warning data
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
@@ -497,6 +499,12 @@ Read session state:
 
 ```bash
 curl http://127.0.0.1:8000/sessions/<session-id>
+```
+
+List recent local sessions:
+
+```bash
+curl http://127.0.0.1:8000/sessions
 ```
 
 ## Qdrant and Retrieval

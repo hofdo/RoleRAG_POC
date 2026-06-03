@@ -19,6 +19,8 @@ from app.api.schemas import (
     CreateTurnResponse,
     ErrorResponse,
     GetSessionResponse,
+    RecentSessionResponse,
+    RecentSessionsResponse,
     RecentTurnResponse,
     RouteResponse,
     RuntimeStatusResponse,
@@ -26,7 +28,7 @@ from app.api.schemas import (
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
-from app.domain import TurnInput, TurnResult
+from app.domain import SessionState, TurnInput, TurnResult
 from app.persistence import (
     ContentCatalogError,
     DataFileNotFoundError,
@@ -35,6 +37,7 @@ from app.persistence import (
 )
 
 router = APIRouter()
+RECENT_SESSIONS_LIMIT = 10
 
 ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
 ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
@@ -182,6 +185,20 @@ def create_session(
     )
 
 
+@router.get("/sessions", response_model=RecentSessionsResponse)
+def list_recent_sessions(
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> RecentSessionsResponse:
+    return RecentSessionsResponse(
+        sessions=[
+            _to_recent_session_response(session)
+            for session in services.session_repository.list_recent_sessions(
+                RECENT_SESSIONS_LIMIT
+            )
+        ]
+    )
+
+
 @router.post(
     "/sessions/{session_id}/turns",
     response_model=CreateTurnResponse,
@@ -278,6 +295,20 @@ def get_session(
         active_scene_id=session.active_scene_id,
         active_persona_id=session.active_persona_id,
         recent_turns=recent_turns,
+    )
+
+
+def _to_recent_session_response(session: SessionState) -> RecentSessionResponse:
+    if session.created_at is None or session.updated_at is None:
+        raise RuntimeError("Persisted sessions must include timestamps")
+    return RecentSessionResponse(
+        session_id=session.id,
+        world_id=session.world_id,
+        active_scene_id=session.active_scene_id,
+        active_persona_id=session.active_persona_id,
+        player_name=session.player_name,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
     )
 
 

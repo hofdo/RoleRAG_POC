@@ -78,14 +78,16 @@ graph TD
 
 ### FastAPI API
 
-- exposes `GET /play`, `POST /sessions`, `POST /sessions/{session_id}/turns`,
-  `POST /sessions/{session_id}/turns/stream`, and `GET /sessions/{session_id}`
+- exposes `GET /play`, `GET /sessions`, `POST /sessions`,
+  `POST /sessions/{session_id}/turns`, `POST /sessions/{session_id}/turns/stream`,
+  and `GET /sessions/{session_id}`
 - does not duplicate orchestration logic
 - buffers SSE frames until the shared turn pipeline completes
 
 ### Local play UI
 
 - starts new sessions through the existing API with editable demo defaults
+- resumes from a local recent-session selector or manual `session_id` fallback
 - uses JSON turns by default and buffered SSE only as an opt-in developer transport
 - renders safe session, transcript, route, memory, and warning data
 - does not own orchestration, scenario-pack selection, retrieval, validation, routing,

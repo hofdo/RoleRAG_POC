@@ -209,6 +209,7 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
     return (
         AppServices(
             connection=connection,
+            session_repository=session_repository,
             orchestrator=orchestrator,
             recent_dialogue_store=RecentDialogueStore(
                 turn_repository=turn_repository,
@@ -296,6 +297,7 @@ def _build_in_memory_retrieval_services(
     return (
         AppServices(
             connection=connection,
+            session_repository=session_repository,
             orchestrator=orchestrator,
             recent_dialogue_store=recent_dialogue_store,
         ),

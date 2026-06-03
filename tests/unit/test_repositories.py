@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.domain import MemoryCandidate, SessionState, Visibility
@@ -167,6 +167,47 @@ def test_session_repository_updates_activity_timestamp(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.created_at == created.created_at
     assert loaded.updated_at == later
+
+
+def test_session_repository_lists_recent_sessions_with_limit_and_tie_breaker(
+    tmp_path: Path,
+) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    repository = SQLiteSessionRepository(connection)
+    base = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    for index in range(3):
+        repository.create_session(
+            SessionState(
+                id=f"session-{index}",
+                world_id="demo_world",
+                active_scene_id="rose-gallery",
+                active_persona_id="archivist",
+                player_name=f"Player {index}",
+                created_at=base + timedelta(minutes=index),
+                updated_at=base + timedelta(hours=index),
+            )
+        )
+    repository.create_session(
+        SessionState(
+            id="latest-created-tie",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Tie",
+            created_at=base + timedelta(days=1),
+            updated_at=base + timedelta(hours=2),
+        )
+    )
+
+    sessions = repository.list_recent_sessions(limit=3)
+
+    assert [session.id for session in sessions] == [
+        "latest-created-tie",
+        "session-2",
+        "session-1",
+    ]
+    assert repository.list_recent_sessions(limit=0) == []
 
 
 def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) -> None:

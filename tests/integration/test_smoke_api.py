@@ -21,7 +21,7 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
     }
     assert set(schema["paths"]["/runtime/status"]) == {"get"}
     assert set(schema["paths"]["/content/catalog"]) == {"get"}
-    assert set(schema["paths"]["/sessions"]) == {"post"}
+    assert set(schema["paths"]["/sessions"]) == {"get", "post"}
     assert set(schema["paths"]["/sessions/{session_id}"]) == {"get"}
     assert set(schema["paths"]["/sessions/{session_id}/turns"]) == {"post"}
     assert set(schema["paths"]["/sessions/{session_id}/turns/stream"]) == {"post"}
