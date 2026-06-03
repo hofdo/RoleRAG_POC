@@ -54,6 +54,19 @@
  * }} ContentCatalog
  */
 
+/**
+ * @typedef {{
+ *   app_name: string,
+ *   app_version: string,
+ *   environment: string,
+ *   cloud_mode: string,
+ *   retrieval_configured: boolean,
+ *   content_catalog_available: boolean,
+ *   local_provider_configured: boolean,
+ *   cloud_provider_configured: boolean,
+ * }} RuntimeStatus
+ */
+
 /** @typedef {{ message: string, request_cloud: boolean }} CreateTurnRequest */
 /** @typedef {{ provider: string, model: string, reason: string }} RouteResponse */
 
@@ -149,6 +162,14 @@ export function createSession(request, { fetchImpl = fetch } = {}) {
  */
 export function getContentCatalog({ fetchImpl = fetch } = {}) {
   return requestJson("/content/catalog", { method: "GET" }, fetchImpl);
+}
+
+/**
+ * @param {{ fetchImpl?: typeof fetch }} options
+ * @returns {Promise<RuntimeStatus>}
+ */
+export function getRuntimeStatus({ fetchImpl = fetch } = {}) {
+  return requestJson("/runtime/status", { method: "GET" }, fetchImpl);
 }
 
 /**

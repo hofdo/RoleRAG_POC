@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
+from app import __version__
 from app.api.errors import ApiError
 from app.api.schemas import (
     CatalogPersonaResponse,
@@ -20,10 +21,11 @@ from app.api.schemas import (
     GetSessionResponse,
     RecentTurnResponse,
     RouteResponse,
+    RuntimeStatusResponse,
 )
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.domain import TurnInput, TurnResult
 from app.persistence import (
     ContentCatalogError,
@@ -45,6 +47,10 @@ SSE_200_RESPONSE: dict[int | str, dict[str, Any]] = {
 }
 
 
+def _has_text(value: str) -> bool:
+    return bool(value.strip())
+
+
 def get_read_services(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> Generator[AppServices, None, None]:
@@ -63,6 +69,36 @@ def get_turn_services(
         yield services
     finally:
         services.close()
+
+
+@router.get("/runtime/status", response_model=RuntimeStatusResponse)
+def get_runtime_status(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RuntimeStatusResponse:
+    try:
+        build_file_loader(settings.content_root).load_catalog()
+        content_catalog_available = True
+    except ContentCatalogError:
+        content_catalog_available = False
+
+    return RuntimeStatusResponse(
+        app_name="rolerag-poc",
+        app_version=__version__,
+        environment=settings.app_env,
+        cloud_mode=settings.cloud_mode.value,
+        retrieval_configured=_has_text(settings.qdrant_url) and _has_text(settings.embedding_model),
+        content_catalog_available=content_catalog_available,
+        local_provider_configured=(
+            _has_text(settings.local_llm_base_url)
+            and _has_text(settings.local_llm_api_key)
+            and _has_text(settings.local_llm_model)
+        ),
+        cloud_provider_configured=(
+            _has_text(settings.cloud_llm_base_url)
+            and _has_text(settings.cloud_llm_model)
+            and is_usable_cloud_api_key(settings.cloud_llm_api_key)
+        ),
+    )
 
 
 @router.get(

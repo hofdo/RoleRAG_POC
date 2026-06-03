@@ -10,6 +10,8 @@ import {
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeRuntimeStatus,
+  RUNTIME_STATUS_UNAVAILABLE_TEXT,
   resumeSession,
   startNewSession,
 } from "../../app/web/assets/play-model.mjs";
@@ -139,6 +141,37 @@ test("catalog setup status explains catalog load failure", () => {
     selection: null,
     manualFallbackOpen: true,
   }), "Catalog failed to load. Manual fallback is open; session creation will use manual IDs.");
+});
+
+test("runtime status description formats healthy shallow metadata", () => {
+  assert.deepEqual(describeRuntimeStatus({
+    app_name: "rolerag-poc",
+    app_version: "0.1.0",
+    environment: "local",
+    cloud_mode: "ask",
+    retrieval_configured: true,
+    content_catalog_available: true,
+    local_provider_configured: true,
+    cloud_provider_configured: false,
+  }), {
+    warning: "",
+    rows: [
+      ["App", "rolerag-poc 0.1.0"],
+      ["Environment", "local"],
+      ["Cloud mode", "ask"],
+      ["Retrieval", "yes"],
+      ["Catalog", "yes"],
+      ["Local route", "yes"],
+      ["Cloud route", "no"],
+    ],
+  });
+});
+
+test("runtime status description gives non-blocking load failure text", () => {
+  assert.deepEqual(describeRuntimeStatus(null), {
+    warning: RUNTIME_STATUS_UNAVAILABLE_TEXT,
+    rows: [],
+  });
 });
 
 test("turn request contains only message and request_cloud", () => {

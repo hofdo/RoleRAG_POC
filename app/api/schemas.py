@@ -70,6 +70,17 @@ class ContentCatalogResponse(BaseModel):
     personas: list[CatalogPersonaResponse]
 
 
+class RuntimeStatusResponse(BaseModel):
+    app_name: str
+    app_version: str
+    environment: str
+    cloud_mode: str
+    retrieval_configured: bool
+    content_catalog_available: bool
+    local_provider_configured: bool
+    cloud_provider_configured: bool
+
+
 class CreateTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

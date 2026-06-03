@@ -8,6 +8,7 @@ execution while delegating engine behavior to shared composition and orchestrati
 Available endpoints:
 
 - `GET /play` for the local HTML play surface, excluded from OpenAPI
+- `GET /runtime/status`
 - `GET /content/catalog`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
@@ -17,6 +18,39 @@ Available endpoints:
 API routes and the local browser UI do not own retrieval, persistence, routing, prompt
 construction, or visibility logic.
 SQLite remains authoritative state. Qdrant remains a derived retrieval index.
+
+## Runtime Status
+
+`GET /runtime/status` returns safe, shallow, non-diagnostic runtime metadata for the local `/play`
+status panel. It does not call LLMs, instantiate providers, open SQLite, probe Qdrant reachability,
+query retrieval collections, or perform deep runtime checks.
+
+The response shape is:
+
+```json
+{
+  "app_name": "rolerag-poc",
+  "app_version": "<app.__version__>",
+  "environment": "local",
+  "cloud_mode": "ask",
+  "retrieval_configured": true,
+  "content_catalog_available": true,
+  "local_provider_configured": true,
+  "cloud_provider_configured": false
+}
+```
+
+The boolean fields mean required settings are present, not that external systems are reachable.
+`content_catalog_available` may validate the configured catalog enough to return a boolean, but
+catalog errors are collapsed to `false` without diagnostic details.
+
+Use `python -m app.cli doctor` and `python -m app.cli smoke-run --real-runtime` for deeper
+operational checks. Those tools remain the place for configuration diagnostics, SQLite checks,
+Qdrant checks, provider reachability, and real-runtime smoke validation.
+
+Runtime status responses explicitly exclude API keys, provider URLs, model secrets,
+`content_root`, file paths, SQLite paths, Qdrant URLs, prompts, retrieved chunks,
+GM/private fields, hidden context, and internals.
 
 ## Content Catalog
 

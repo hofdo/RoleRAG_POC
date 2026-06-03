@@ -61,6 +61,7 @@ def test_api_contract_document_is_linked_from_primary_docs() -> None:
 def test_api_contract_document_covers_public_boundaries() -> None:
     contract = (REPOSITORY_ROOT / "docs" / "12_api_contract.md").read_text(encoding="utf-8")
 
+    assert "GET /runtime/status" in contract
     assert "GET /content/catalog" in contract
     assert "POST /sessions" in contract
     assert "GET /sessions/{session_id}" in contract
@@ -84,16 +85,31 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "buffered" in contract
     assert "provider token streaming" in contract
     assert "concatenated" in contract
+    assert "safe, shallow, non-diagnostic runtime metadata" in contract
+    assert "does not call LLMs" in contract
+    assert "probe Qdrant reachability" in contract
+    assert "python -m app.cli doctor" in contract
+    assert "python -m app.cli smoke-run --real-runtime" in contract
     for excluded in [
+        "API keys",
+        "provider URLs",
+        "model secrets",
         "gm_private_summary",
         "private_description",
         "secrets",
         "forbidden_knowledge",
         "content_root",
+        "file paths",
+        "SQLite paths",
+        "Qdrant URLs",
         "raw file paths",
         "hidden lore",
+        "prompts",
         "raw prompts",
         "retrieved chunks",
+        "GM/private fields",
+        "hidden context",
+        "internals",
         "SQLite internals",
         "Qdrant internals",
         "provider internals",

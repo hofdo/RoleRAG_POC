@@ -7,6 +7,7 @@ import {
   createSession,
   createTurn,
   getContentCatalog,
+  getRuntimeStatus,
   getSession,
 } from "../../app/web/assets/api-client.mjs";
 
@@ -72,6 +73,31 @@ test("getContentCatalog uses the catalog endpoint with GET", async () => {
   assert.equal(request.options.method, "GET");
   assert.equal("body" in request.options, false);
   assert.equal(catalog.worlds[0].id, "demo_world");
+});
+
+test("getRuntimeStatus uses the runtime endpoint with GET", async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({
+      app_name: "rolerag-poc",
+      app_version: "0.1.0",
+      environment: "local",
+      cloud_mode: "ask",
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: false,
+    });
+  };
+
+  const status = await getRuntimeStatus({ fetchImpl });
+
+  assert.equal(request.url, "/runtime/status");
+  assert.equal(request.options.method, "GET");
+  assert.equal("body" in request.options, false);
+  assert.equal(status.app_name, "rolerag-poc");
+  assert.equal(status.cloud_provider_configured, false);
 });
 
 test("structured catalog errors stay ApiError instances", async () => {

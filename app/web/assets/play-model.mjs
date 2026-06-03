@@ -87,6 +87,34 @@ export function describeCatalogSetupStatus({
   return `Catalog selection: ${selection.world.name} / ${sceneName} / ${personaName}.`;
 }
 
+export const RUNTIME_STATUS_UNAVAILABLE_TEXT =
+  "Runtime status unavailable; gameplay controls remain available.";
+
+function yesNo(value) {
+  return value ? "yes" : "no";
+}
+
+export function describeRuntimeStatus(status) {
+  if (!status) {
+    return {
+      warning: RUNTIME_STATUS_UNAVAILABLE_TEXT,
+      rows: [],
+    };
+  }
+  return {
+    warning: "",
+    rows: [
+      ["App", `${status.app_name} ${status.app_version}`],
+      ["Environment", status.environment],
+      ["Cloud mode", status.cloud_mode],
+      ["Retrieval", yesNo(status.retrieval_configured)],
+      ["Catalog", yesNo(status.content_catalog_available)],
+      ["Local route", yesNo(status.local_provider_configured)],
+      ["Cloud route", yesNo(status.cloud_provider_configured)],
+    ],
+  };
+}
+
 export function buildTurnRequest(message, requestCloud) {
   return {
     message,

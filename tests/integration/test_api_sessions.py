@@ -5,12 +5,14 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app import __version__
 from app.agents.critic_agent import CriticAgent
 from app.api.routes import get_read_services
 from app.composition import AppServices
 from app.config import Settings, get_settings
 from app.domain import PersonaCard, SceneState
 from app.llm.provider import LlmProvider
+from app.llm.router import CloudMode
 from app.main import app
 from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
@@ -266,6 +268,112 @@ def test_get_content_catalog_returns_safe_structured_error_for_invalid_root(
         }
     }
     assert str(pack_root) not in response.text
+
+
+def test_get_runtime_status_returns_exact_safe_shape() -> None:
+    client = TestClient(app)
+
+    response = client.get("/runtime/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "app_name": "rolerag-poc",
+        "app_version": __version__,
+        "environment": "local",
+        "cloud_mode": "ask",
+        "retrieval_configured": True,
+        "content_catalog_available": True,
+        "local_provider_configured": True,
+        "cloud_provider_configured": False,
+    }
+    assert set(payload) == {
+        "app_name",
+        "app_version",
+        "environment",
+        "cloud_mode",
+        "retrieval_configured",
+        "content_catalog_available",
+        "local_provider_configured",
+        "cloud_provider_configured",
+    }
+
+
+def test_get_runtime_status_booleans_come_from_settings_and_catalog(
+    tmp_path: Path,
+) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        app_env="test",
+        content_root=tmp_path / "missing-content",
+        local_llm_base_url=" ",
+        local_llm_api_key="local-key",
+        local_llm_model="local-model",
+        cloud_mode=CloudMode.AUTO,
+        cloud_llm_base_url="https://cloud.example/v1",
+        cloud_llm_api_key="real-cloud-key",
+        cloud_llm_model="cloud-model",
+        qdrant_url=" ",
+        embedding_model="embedding-model",
+    )
+    client = TestClient(app)
+
+    response = client.get("/runtime/status")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["environment"] == "test"
+    assert payload["cloud_mode"] == "auto"
+    assert payload["retrieval_configured"] is False
+    assert payload["content_catalog_available"] is False
+    assert payload["local_provider_configured"] is False
+    assert payload["cloud_provider_configured"] is True
+
+
+def test_get_runtime_status_does_not_expose_diagnostic_or_private_values(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path / "private-pack"
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        app_env="prod",
+        database_path=str(tmp_path / "private.db"),
+        content_root=private_root,
+        local_llm_base_url="http://local.example/v1",
+        local_llm_api_key="super-secret-local",
+        local_llm_model="secret-local-model",
+        cloud_llm_base_url="https://cloud.example/v1",
+        cloud_llm_api_key="super-secret-cloud",
+        cloud_llm_model="secret-cloud-model",
+        qdrant_url="http://qdrant.example:6333",
+        embedding_model="secret-embedding-model",
+    )
+    client = TestClient(app)
+
+    response = client.get("/runtime/status")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    serialized = response.text.lower()
+    for forbidden in [
+        "super-secret-local",
+        "super-secret-cloud",
+        "http://local.example",
+        "https://cloud.example",
+        "secret-local-model",
+        "secret-cloud-model",
+        "secret-embedding-model",
+        str(private_root).lower(),
+        "private.db",
+        "content_root",
+        "sqlite",
+        "qdrant.example",
+        "prompt",
+        "retrieved_chunks",
+        "gm_private_summary",
+        "private_description",
+        "hidden_context",
+    ]:
+        assert forbidden not in serialized
 
 
 def test_post_sessions_uses_process_content_root_without_request_path(

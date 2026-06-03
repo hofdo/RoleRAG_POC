@@ -12,12 +12,14 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
     schema = response.json()
     assert schema["info"]["title"] == "rolerag-poc"
     assert set(schema["paths"]) >= {
+        "/runtime/status",
         "/content/catalog",
         "/sessions",
         "/sessions/{session_id}",
         "/sessions/{session_id}/turns",
         "/sessions/{session_id}/turns/stream",
     }
+    assert set(schema["paths"]["/runtime/status"]) == {"get"}
     assert set(schema["paths"]["/content/catalog"]) == {"get"}
     assert set(schema["paths"]["/sessions"]) == {"post"}
     assert set(schema["paths"]["/sessions/{session_id}"]) == {"get"}

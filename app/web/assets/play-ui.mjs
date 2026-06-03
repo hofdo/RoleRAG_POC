@@ -4,6 +4,7 @@ import {
   createSession,
   createTurn,
   getContentCatalog,
+  getRuntimeStatus,
   getSession,
 } from "./api-client.mjs";
 import {
@@ -15,12 +16,15 @@ import {
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeRuntimeStatus,
   resumeSession,
   startNewSession,
 } from "./play-model.mjs";
 
 const elements = {
   error: document.querySelector("#error-message"),
+  runtimeStatusList: document.querySelector("#runtime-status-list"),
+  runtimeStatusWarning: document.querySelector("#runtime-status-warning"),
   setupPanel: document.querySelector("#setup-panel"),
   playPanel: document.querySelector("#play-panel"),
   sessionForm: document.querySelector("#session-form"),
@@ -50,6 +54,8 @@ let state = createPlayState();
 let contentCatalog = null;
 let catalogSelection = null;
 let catalogLoadFailed = false;
+let runtimeStatus = null;
+let runtimeStatusFailed = false;
 
 function showError(error) {
   const prefix = error instanceof ApiError ? `${error.code}: ` : "";
@@ -89,6 +95,31 @@ function renderSetupStatus() {
     selection: catalogSelection,
     manualFallbackOpen: elements.manualSessionPanel.open,
   });
+}
+
+function renderRuntimeStatus() {
+  const description = describeRuntimeStatus(runtimeStatusFailed ? null : runtimeStatus);
+  elements.runtimeStatusList.replaceChildren();
+  for (const [label, value] of description.rows) {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    elements.runtimeStatusList.append(term, detail);
+  }
+  elements.runtimeStatusWarning.textContent = description.warning;
+  elements.runtimeStatusWarning.hidden = description.warning === "";
+}
+
+async function loadRuntimeStatus() {
+  try {
+    runtimeStatus = await getRuntimeStatus();
+    runtimeStatusFailed = false;
+  } catch {
+    runtimeStatus = null;
+    runtimeStatusFailed = true;
+  }
+  renderRuntimeStatus();
 }
 
 function renderCatalogSelection() {
@@ -329,4 +360,6 @@ elements.newSession.addEventListener("click", () => {
 });
 
 renderCatalogSelection();
+renderRuntimeStatus();
+void loadRuntimeStatus();
 void loadCatalog();
