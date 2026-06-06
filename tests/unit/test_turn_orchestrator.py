@@ -208,6 +208,19 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
     assert result.route.reason == "default local route"
     assert result.memory_written is False
     assert result.warnings == []
+    assert result.model_dump() == {
+        "text": "I have heard enough to know the regent fears open daylight.",
+        "route": {
+            "provider": ModelProviderName.LOCAL,
+            "model": "local-model",
+            "max_tokens": 700,
+            "temperature": 0.75,
+            "reason": "default local route",
+            "requires_user_confirmation": False,
+        },
+        "memory_written": False,
+        "warnings": [],
+    }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
 
