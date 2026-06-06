@@ -25,9 +25,9 @@ Configure an OpenAI-compatible local endpoint in `.env`.
 Default:
 
 ```env
-LOCAL_LLM_BASE_URL=http://localhost:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=local-model
+LOCAL_LLM_MODEL=chatgpt-onnechan
 ```
 
 Alternative Ollama-compatible setup:

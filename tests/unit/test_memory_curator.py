@@ -103,7 +103,7 @@ async def test_memory_curator_returns_structured_candidates_from_valid_json() ->
 async def test_memory_curator_rejects_invalid_json() -> None:
     provider = FakeProvider("not json")
 
-    with pytest.raises(MemoryCuratorOutputError):
+    with pytest.raises(MemoryCuratorOutputError) as exc_info:
         await MemoryCurator().curate(
             provider=provider,
             route=_build_route(),
@@ -113,3 +113,41 @@ async def test_memory_curator_rejects_invalid_json() -> None:
             user_message="Hello there.",
             assistant_message="Good evening.",
         )
+    assert exc_info.value.category == "parse"
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_accepts_recoverable_wrapped_json() -> None:
+    provider = FakeProvider(
+        'Memory result:\n{"write_memory": false, "memories": [], "reason": "trivial"}'
+    )
+
+    result = await MemoryCurator().curate(
+        provider=provider,
+        route=_build_route(),
+        session=_build_session(),
+        scene=_build_scene(),
+        persona=_build_persona(),
+        user_message="Hello there.",
+        assistant_message="Good evening.",
+    )
+
+    assert result.write_memory is False
+    assert result.memories == []
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_rejects_schema_invalid_payload() -> None:
+    provider = FakeProvider('{"write_memory": true, "memories": [], "reason": "missing memory"}')
+
+    with pytest.raises(MemoryCuratorOutputError) as exc_info:
+        await MemoryCurator().curate(
+            provider=provider,
+            route=_build_route(),
+            session=_build_session(),
+            scene=_build_scene(),
+            persona=_build_persona(),
+            user_message="I promise to return.",
+            assistant_message="I will remember that.",
+        )
+    assert exc_info.value.category == "schema"

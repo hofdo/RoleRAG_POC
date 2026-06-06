@@ -21,10 +21,11 @@ Both local and cloud model access go through that same provider shape.
 The current settings are defined in [app/config.py](../app/config.py):
 
 ```env
-LOCAL_LLM_BASE_URL=http://localhost:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=local-model
-LOCAL_LLM_MAX_TOKENS=700
+LOCAL_LLM_MODEL=chatgpt-onnechan
+LOCAL_LLM_MAX_TOKENS=500
+LOCAL_STRUCTURED_MAX_TOKENS=350
 LOCAL_LLM_TEMPERATURE=0.75
 
 CLOUD_MODE=ask

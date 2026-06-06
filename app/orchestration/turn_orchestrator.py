@@ -121,6 +121,7 @@ class TurnOrchestrator:
         local_model: str,
         cloud_model: str,
         local_max_tokens: int,
+        local_structured_max_tokens: int = 350,
         cloud_max_tokens: int,
         local_temperature: float,
         cloud_temperature: float,
@@ -132,6 +133,7 @@ class TurnOrchestrator:
         actor_context_retriever: ActorContextRetrieving | None = None,
         retrieval_top_k: int = 5,
         max_retrieved_chunk_chars: int = 800,
+        recent_dialogue_max_message_chars: int = 900,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -154,10 +156,12 @@ class TurnOrchestrator:
         self.local_model = local_model
         self.cloud_model = cloud_model
         self.local_max_tokens = local_max_tokens
+        self.local_structured_max_tokens = local_structured_max_tokens
         self.cloud_max_tokens = cloud_max_tokens
         self.local_temperature = local_temperature
         self.cloud_temperature = cloud_temperature
         self.cloud_mode = CloudMode(cloud_mode)
+        self.recent_dialogue_max_message_chars = recent_dialogue_max_message_chars
 
     def create_session(
         self,
@@ -244,6 +248,7 @@ class TurnOrchestrator:
             local_model=self.local_model,
             cloud_model=self.cloud_model,
             local_max_tokens=self.local_max_tokens,
+            local_structured_max_tokens=self.local_structured_max_tokens,
             cloud_max_tokens=self.cloud_max_tokens,
             local_temperature=self.local_temperature,
             cloud_temperature=self.cloud_temperature,
@@ -259,6 +264,7 @@ class TurnOrchestrator:
             recent_turns=recent_turns,
             retrieved_chunks=retrieved_chunks,
             context_budget=self.context_budget,
+            recent_dialogue_max_message_chars=self.recent_dialogue_max_message_chars,
         )
         final_text: str
         final_route: ModelRoute
@@ -303,6 +309,7 @@ class TurnOrchestrator:
                 local_model=self.local_model,
                 cloud_model=self.cloud_model,
                 local_max_tokens=self.local_max_tokens,
+                local_structured_max_tokens=self.local_structured_max_tokens,
                 cloud_max_tokens=self.cloud_max_tokens,
                 local_temperature=self.local_temperature,
                 cloud_temperature=self.cloud_temperature,
@@ -584,6 +591,7 @@ class TurnOrchestrator:
             local_model=self.local_model,
             cloud_model=self.cloud_model,
             local_max_tokens=self.local_max_tokens,
+            local_structured_max_tokens=self.local_structured_max_tokens,
             cloud_max_tokens=self.cloud_max_tokens,
             local_temperature=self.local_temperature,
             cloud_temperature=self.cloud_temperature,

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import json
-
 from pydantic import ValidationError
 
 from app.domain import MemoryCuratorResult, PersonaCard, SceneState, SessionState
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest
 from app.llm.router import ModelRoute
+from app.llm.structured_output import StructuredOutputParseError, parse_single_json_object
 from app.memory.policies import MEMORY_EXTRACTION_PROMPT
 
 
 class MemoryCuratorOutputError(ValueError):
-    pass
+    def __init__(self, message: str, *, category: str) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class MemoryCurator:
@@ -48,13 +49,17 @@ class MemoryCurator:
         )
         response = await provider.generate(request)
         try:
-            payload = json.loads(response.text)
-        except json.JSONDecodeError as exc:
-            raise MemoryCuratorOutputError("invalid structured output") from exc
+            payload = parse_single_json_object(response.text)
+        except StructuredOutputParseError as exc:
+            raise MemoryCuratorOutputError(
+                "invalid structured output", category="parse"
+            ) from exc
         try:
             return MemoryCuratorResult.model_validate(payload)
         except ValidationError as exc:
-            raise MemoryCuratorOutputError("invalid structured output") from exc
+            raise MemoryCuratorOutputError(
+                "invalid structured output", category="schema"
+            ) from exc
 
     def _build_context(
         self,

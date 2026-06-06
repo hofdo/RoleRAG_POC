@@ -134,3 +134,61 @@ def test_context_builder_includes_recent_turns_before_current_user_message() -> 
         "Only a servant and a guard.",
         "What have you heard about the regent?",
     ]
+
+
+def test_context_builder_truncates_only_prior_dialogue_messages() -> None:
+    persona = PersonaCard(
+        id="archivist",
+        name="Iria Vale",
+        role="npc",
+        public_description="A composed palace archivist.",
+        speaking_style="Precise and dry.",
+    )
+    scene = SceneState(
+        id="rose-gallery",
+        title="Rose Gallery",
+        location="Winter Palace",
+        player_visible_summary="Courtiers drift between mirrors and roses.",
+    )
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=500,
+        temperature=0.75,
+        reason="default local route",
+    )
+    full_user_message = "U" * 50
+    full_assistant_message = "A" * 50
+    recent_turns = [
+        StoredTurn(
+            id=1,
+            session_id="demo-session",
+            turn_index=1,
+            scene_id="rose-gallery",
+            persona_id="archivist",
+            user_message=full_user_message,
+            assistant_message=full_assistant_message,
+            route=route,
+            created_at=datetime(2026, 5, 27, 11, 0, tzinfo=UTC),
+        )
+    ]
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    messages = build_actor_messages(
+        persona=persona,
+        scene=scene,
+        turn_input=turn_input,
+        recent_turns=recent_turns,
+        recent_dialogue_max_message_chars=10,
+    )
+
+    assert messages[1].content.startswith("U" * 10)
+    assert "Prior dialogue truncated for prompt budget" in messages[1].content
+    assert messages[2].content.startswith("A" * 10)
+    assert "Prior dialogue truncated for prompt budget" in messages[2].content
+    assert messages[3].content == "What have you heard about the regent?"
+    assert recent_turns[0].user_message == full_user_message
+    assert recent_turns[0].assistant_message == full_assistant_message

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pytest import MonkeyPatch
+
 from app.config import Settings
 from app.diagnostics.runtime_checks import (
     DiagnosticStatus,
@@ -83,3 +85,38 @@ def test_runtime_diagnostics_never_leaks_api_keys(tmp_path: Path) -> None:
 
     assert "super-secret-local" not in serialized
     assert "super-secret-cloud" not in serialized
+
+
+def test_runtime_diagnostics_sends_local_provider_auth_header(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    def fake_get(url: str, *, headers: dict[str, str], timeout: float) -> FakeResponse:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("app.diagnostics.runtime_checks.httpx.get", fake_get)
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.OFF,
+        local_llm_base_url="http://127.0.0.1:8080/v1",
+        local_llm_api_key="super-secret-local",
+    )
+
+    report = build_runtime_diagnostics(settings, check_local_provider=True)
+
+    checks = {check.name: check for check in report.checks}
+    assert checks["local_provider"].status == DiagnosticStatus.PASS
+    assert captured == {
+        "url": "http://127.0.0.1:8080/v1/models",
+        "headers": {"Authorization": "Bearer super-secret-local"},
+        "timeout": 5.0,
+    }
+    assert "super-secret-local" not in str(report.model_dump(mode="json"))

@@ -112,7 +112,7 @@ python -m app.cli ingest data/documents/demo_lore.md \
 ### Run the API
 
 ```bash
-uvicorn app.main:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local play UI. The UI starts
@@ -126,15 +126,19 @@ toggle. Scenario packs are selected only by starting FastAPI with the desired pr
 The default local configuration expects an OpenAI-compatible endpoint:
 
 ```env
-LOCAL_LLM_BASE_URL=http://localhost:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=local-model
+LOCAL_LLM_MODEL=chatgpt-onnechan
 ```
 
 Example `llama.cpp` server flow:
 
 ```bash
-./server -m /path/to/model.gguf --host 127.0.0.1 --port 8080
+llama-server -m /path/to/model.gguf \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --alias chatgpt-onnechan \
+  --api-key local
 ```
 
 Example Ollama-compatible setup:
@@ -157,10 +161,11 @@ Key values:
 APP_ENV=local
 DATABASE_PATH=data/rolerag.db
 
-LOCAL_LLM_BASE_URL=http://localhost:8080/v1
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=local-model
-LOCAL_LLM_MAX_TOKENS=700
+LOCAL_LLM_MODEL=chatgpt-onnechan
+LOCAL_LLM_MAX_TOKENS=500
+LOCAL_STRUCTURED_MAX_TOKENS=350
 LOCAL_LLM_TEMPERATURE=0.75
 
 CLOUD_MODE=ask
@@ -178,6 +183,7 @@ RAG_CHUNK_OVERLAP_CHARS=120
 RAG_MAX_RETRIEVED_CHUNK_CHARS=800
 MAX_LOCAL_RETRIES=1
 RECENT_DIALOGUE_TURNS=8
+RECENT_DIALOGUE_MAX_MESSAGE_CHARS=900
 ```
 
 Cloud behavior:
@@ -339,12 +345,52 @@ python -m app.cli doctor --check-qdrant --check-local-provider
 python -m app.cli smoke-run --real-runtime
 ```
 
+Run the isolated live stack smoke. It first reuses a local OpenAI-compatible model server if
+`/v1/models` already exposes `chatgpt-onnechan`; otherwise, provide local llama.cpp binary and GGUF
+paths and the script will start `llama-server` for the run:
+
+```bash
+npm install
+npx playwright install chromium
+LLAMA_CPP_SERVER_PATH=/path/to/llama-server \
+LLAMA_CPP_MODEL_PATH=/path/to/model.gguf \
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1 \
+LOCAL_LLM_API_KEY=local \
+LOCAL_LLM_MODEL=chatgpt-onnechan \
+PYTHON=.venv/bin/python \
+bash scripts/live-smoke.sh
+```
+
+That script starts disposable Qdrant on `127.0.0.1:6334`, uses a temporary SQLite database under
+`/tmp/rolerag-live-test`, starts FastAPI on `127.0.0.1:18080`, runs live doctor/smoke/API checks,
+runs a Playwright UI smoke, writes `/tmp/rolerag-live-test/report.md`, and removes its Qdrant
+container on exit. If it starts managed llama.cpp, it writes
+`/tmp/rolerag-live-test/raw/llama-server.log` and kills only that managed process on exit. It leaves
+existing `data/qdrant` and user runtime data untouched.
+
+The equivalent manual FastAPI context for the live stack is:
+
+```bash
+DATABASE_PATH=/tmp/rolerag-live-test/work/rolerag-live.db \
+QDRANT_URL=http://127.0.0.1:6334 \
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1 \
+LOCAL_LLM_API_KEY=local \
+LOCAL_LLM_MODEL=chatgpt-onnechan \
+CLOUD_MODE=off \
+.venv/bin/uvicorn app.main:app --reload
+```
+
+Managed llama.cpp startup accepts `LLAMA_CPP_HOST` and `LLAMA_CPP_PORT` for binding,
+`LLAMA_CPP_CTX_SIZE` for `-c`, optional `LLAMA_CPP_N_GPU_LAYERS`, and optional
+whitespace-separated `LLAMA_CPP_SERVER_ARGS` appended after the core startup flags.
+
 Operational rules:
 
 - `health` is config-only and never probes SQLite, Qdrant, or providers.
 - `doctor` never mutates the configured runtime database. It verifies SQLite using a temporary file.
 - `smoke-run` uses a temporary SQLite database, deterministic embeddings, in-memory retrieval, and fake provider responses by default.
 - `--real-runtime` adds shallow Qdrant and local-provider reachability checks only. It does not call cloud APIs, real completions, or write to Qdrant.
+- `scripts/live-smoke.sh` is the live local-stack path. It requires Docker, npm, and Playwright browser installation. It reuses an existing local model server exposing the configured model id, or starts managed llama.cpp when `LLAMA_CPP_SERVER_PATH` and `LLAMA_CPP_MODEL_PATH` are set. Structured-output warnings from critic or memory extraction are preserved in the report but are not treated as infrastructure failures when the actor turn succeeds.
 - cloud placeholder keys such as `replace_me` are treated as unusable and reported clearly.
 
 Failure interpretation:
@@ -435,7 +481,7 @@ Template rules:
 Start the server:
 
 ```bash
-uvicorn app.main:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 Implemented endpoints:
@@ -545,7 +591,7 @@ Run all checks:
 ruff check .
 mypy .
 pytest
-node --test tests/frontend/*.test.mjs
+npm run test:frontend
 ```
 
 Run only eval tests:
@@ -559,6 +605,14 @@ Run the standalone deterministic regression summary:
 ```bash
 python -m app.evals.regression_runner
 ```
+
+CI runs those deterministic checks on push and pull request. The separate `Live Smoke` workflow is
+manual and targets self-hosted runners because GitHub-hosted runners do not provide the required
+local GGUF model or llama.cpp binary. Use its optional `llama_server_path`, `llama_model_path`,
+`llama_ctx_size`, and `llama_n_gpu_layers` inputs to start managed llama.cpp on the runner. The live
+workflow uploads `/tmp/rolerag-live-test` as an artifact, including `report.md`, raw command
+outputs, API flow JSON, llama-server logs when managed startup is used, and Playwright traces on
+failure.
 
 The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation
 behavior, long-session durable-memory continuity, and cloud-routing policy. The 16-turn

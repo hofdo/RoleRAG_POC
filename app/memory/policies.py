@@ -19,7 +19,8 @@ Do not write memory for:
 - repeated facts
 - short emotional reactions without consequence
 
-Return JSON only with this shape:
+Return exactly one JSON object and no markdown.
+Use this shape:
 {
   "write_memory": true | false,
   "memories": [

@@ -4,6 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from app.domain import RetrievedChunk
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
@@ -189,7 +190,7 @@ class QdrantVectorStore:
 
         points = [
             models.PointStruct(
-                id=chunk.id,
+                id=_qdrant_point_id(collection, chunk.id),
                 vector=list(vector),
                 payload=_chunk_to_payload(chunk),
             )
@@ -210,7 +211,7 @@ class QdrantVectorStore:
             return
         points = [
             models.PointStruct(
-                id=chunk.id,
+                id=_qdrant_point_id(collection, chunk.id),
                 vector=list(vector),
                 payload=_chunk_to_payload(chunk),
             )
@@ -227,12 +228,12 @@ class QdrantVectorStore:
     ) -> list[RetrievedChunk]:
         if not self.client.collection_exists(collection_name=collection.value):
             return []
-        results = self.client.search(
+        results = _search_qdrant_points(
+            self.client,
             collection_name=collection.value,
             query_vector=list(vector),
             query_filter=_build_qdrant_filter(filters),
             limit=limit,
-            with_payload=True,
         )
         return [
             _payload_to_retrieved_chunk(result.payload, score=result.score)
@@ -344,6 +345,38 @@ def _payload_to_retrieved_chunk(payload: dict[str, Any] | None, *, score: float)
         actor_id=raw_payload.get("actor_id"),
         importance=raw_payload.get("importance"),
     )
+
+
+def _qdrant_point_id(collection: RagCollection, chunk_id: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"rolerag:{collection.value}:{chunk_id}"))
+
+
+def _search_qdrant_points(
+    client: Any,
+    *,
+    collection_name: str,
+    query_vector: list[float],
+    query_filter: Any,
+    limit: int,
+) -> list[Any]:
+    if hasattr(client, "search"):
+        return list(
+            client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+            )
+        )
+    response = client.query_points(
+        collection_name=collection_name,
+        query=query_vector,
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=True,
+    )
+    return list(response.points)
 
 
 def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:

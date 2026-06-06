@@ -1,0 +1,106 @@
+name: Live Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        description: "JSON array of self-hosted runner labels."
+        required: true
+        default: '["self-hosted"]'
+      local_base_url:
+        description: "OpenAI-compatible local model base URL."
+        required: true
+        default: "http://127.0.0.1:8080/v1"
+      local_model:
+        description: "Model id that must be exposed by /v1/models."
+        required: true
+        default: "chatgpt-onnechan"
+      api_port:
+        description: "FastAPI port for the isolated live smoke."
+        required: true
+        default: "18080"
+      qdrant_port:
+        description: "Disposable Qdrant host port."
+        required: true
+        default: "6334"
+      llama_server_path:
+        description: "Optional llama-server binary path for managed llama.cpp startup."
+        required: false
+        default: ""
+      llama_model_path:
+        description: "Optional GGUF model path for managed llama.cpp startup."
+        required: false
+        default: ""
+      llama_ctx_size:
+        description: "Context size for managed llama.cpp startup."
+        required: false
+        default: "4096"
+      llama_n_gpu_layers:
+        description: "Optional --n-gpu-layers value for managed llama.cpp startup."
+        required: false
+        default: ""
+      skip_browser:
+        description: "Set to 1 to skip Playwright UI smoke."
+        required: true
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    name: Disposable local stack
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        if: ${{ inputs.skip_browser != '1' }}
+        run: npx playwright install chromium
+
+      - name: Run live smoke
+        env:
+          API_PORT: ${{ inputs.api_port }}
+          QDRANT_PORT: ${{ inputs.qdrant_port }}
+          LOCAL_LLM_BASE_URL: ${{ inputs.local_base_url }}
+          LOCAL_LLM_API_KEY: local
+          LOCAL_LLM_MODEL: ${{ inputs.local_model }}
+          LLAMA_CPP_SERVER_PATH: ${{ inputs.llama_server_path }}
+          LLAMA_CPP_MODEL_PATH: ${{ inputs.llama_model_path }}
+          LLAMA_CPP_CTX_SIZE: ${{ inputs.llama_ctx_size }}
+          LLAMA_CPP_N_GPU_LAYERS: ${{ inputs.llama_n_gpu_layers }}
+          LIVE_SKIP_BROWSER: ${{ inputs.skip_browser }}
+          LIVE_ARTIFACT_DIR: /tmp/rolerag-live-test
+          CLOUD_MODE: off
+        run: bash scripts/live-smoke.sh
+
+      - name: Upload live smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-smoke-artifacts
+          path: /tmp/rolerag-live-test
+          if-no-files-found: warn

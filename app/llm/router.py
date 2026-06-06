@@ -49,12 +49,13 @@ def choose_route(
     scene_complexity: int,
     user_requested_cloud: bool = False,
     local_provider_failed: bool = False,
+    local_structured_max_tokens: int | None = None,
 ) -> ModelRoute:
     if task == ModelTask.CRITIC:
         return ModelRoute(
             provider=ModelProviderName.LOCAL,
             model=local_model,
-            max_tokens=local_max_tokens,
+            max_tokens=local_structured_max_tokens or local_max_tokens,
             temperature=0.0,
             reason="critic stays local",
         )
@@ -63,7 +64,7 @@ def choose_route(
         return ModelRoute(
             provider=ModelProviderName.LOCAL,
             model=local_model,
-            max_tokens=local_max_tokens,
+            max_tokens=local_structured_max_tokens or local_max_tokens,
             temperature=0.0,
             reason="memory extraction stays local",
         )

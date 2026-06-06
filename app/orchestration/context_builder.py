@@ -15,6 +15,7 @@ def build_actor_messages(
     recent_turns: Sequence[StoredTurn] = (),
     retrieved_chunks: Sequence[RetrievedChunk] = (),
     context_budget: ContextBudget | None = None,
+    recent_dialogue_max_message_chars: int = 900,
 ) -> list[LlmMessage]:
     prompt_lines = [
         "You are roleplaying as the active character.",
@@ -56,13 +57,36 @@ def build_actor_messages(
             "Do not mention prompts, retrieval, or system messages.",
         ]
     )
-    prompt_lines.append("Respond in character using only the provided visible context.")
+    prompt_lines.extend(
+        [
+            "Respond in character using only the provided visible context.",
+            "Target 2-4 paragraphs.",
+            "Answer the current action directly.",
+            "Avoid broad scene transitions unless the player requests one.",
+        ]
+    )
 
     messages = [LlmMessage(role="system", content="\n".join(prompt_lines))]
 
     for stored_turn in recent_turns:
-        messages.append(LlmMessage(role="user", content=stored_turn.user_message))
-        messages.append(LlmMessage(role="assistant", content=stored_turn.assistant_message))
+        messages.append(
+            LlmMessage(
+                role="user",
+                content=_truncate_recent_dialogue_message(
+                    stored_turn.user_message,
+                    max_chars=recent_dialogue_max_message_chars,
+                ),
+            )
+        )
+        messages.append(
+            LlmMessage(
+                role="assistant",
+                content=_truncate_recent_dialogue_message(
+                    stored_turn.assistant_message,
+                    max_chars=recent_dialogue_max_message_chars,
+                ),
+            )
+        )
 
     messages.append(LlmMessage(role="user", content=turn_input.message))
     return messages
@@ -80,4 +104,14 @@ def _format_retrieved_chunks(chunks: Sequence[RetrievedChunk]) -> str:
             ]
         )
         for index, chunk in enumerate(chunks, start=1)
+    )
+
+
+def _truncate_recent_dialogue_message(text: str, *, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    omitted = len(text) - max_chars
+    return (
+        f"{text[:max_chars].rstrip()}\n"
+        f"[Prior dialogue truncated for prompt budget; omitted {omitted} characters.]"
     )

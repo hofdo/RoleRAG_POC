@@ -90,6 +90,7 @@ def test_router_keeps_memory_extraction_local() -> None:
         local_model="local-model",
         cloud_model="cloud-model",
         local_max_tokens=700,
+        local_structured_max_tokens=350,
         cloud_max_tokens=1000,
         local_temperature=0.75,
         cloud_temperature=0.65,
@@ -99,6 +100,7 @@ def test_router_keeps_memory_extraction_local() -> None:
     )
 
     assert route.provider == ModelProviderName.LOCAL
+    assert route.max_tokens == 350
     assert route.reason == "memory extraction stays local"
 
 
@@ -109,6 +111,7 @@ def test_router_keeps_critic_local_with_zero_temperature() -> None:
         local_model="local-model",
         cloud_model="cloud-model",
         local_max_tokens=700,
+        local_structured_max_tokens=350,
         cloud_max_tokens=1000,
         local_temperature=0.75,
         cloud_temperature=0.65,
@@ -118,5 +121,6 @@ def test_router_keeps_critic_local_with_zero_temperature() -> None:
     )
 
     assert route.provider == ModelProviderName.LOCAL
+    assert route.max_tokens == 350
     assert route.temperature == 0.0
     assert route.reason == "critic stays local"

@@ -130,7 +130,7 @@ async def test_critic_agent_parses_rejected_json() -> None:
 async def test_critic_agent_rejects_invalid_json() -> None:
     provider = FakeProvider("not json")
 
-    with pytest.raises(CriticAgentOutputError):
+    with pytest.raises(CriticAgentOutputError) as exc_info:
         await CriticAgent().evaluate(
             provider=provider,
             route=_build_route(),
@@ -140,6 +140,43 @@ async def test_critic_agent_rejects_invalid_json() -> None:
             draft="Good evening.",
             retrieved_chunks=[],
         )
+    assert exc_info.value.category == "parse"
+
+
+@pytest.mark.asyncio
+async def test_critic_agent_accepts_recoverable_wrapped_json() -> None:
+    provider = FakeProvider(
+        '```json\n{"accepted": true, "issues": [], "repair_instruction": null}\n```'
+    )
+
+    result = await CriticAgent().evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=[],
+    )
+
+    assert result.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_critic_agent_rejects_schema_invalid_payload() -> None:
+    provider = FakeProvider('{"issues": []}')
+
+    with pytest.raises(CriticAgentOutputError) as exc_info:
+        await CriticAgent().evaluate(
+            provider=provider,
+            route=_build_route(),
+            persona=_build_persona(),
+            scene=_build_scene(),
+            user_message="Hello.",
+            draft="Good evening.",
+            retrieved_chunks=[],
+        )
+    assert exc_info.value.category == "schema"
 
 
 @pytest.mark.asyncio

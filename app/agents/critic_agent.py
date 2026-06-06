@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 
 from pydantic import ValidationError
@@ -8,10 +7,13 @@ from pydantic import ValidationError
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest
 from app.llm.router import ModelRoute
+from app.llm.structured_output import StructuredOutputParseError, parse_single_json_object
 
 
 class CriticAgentOutputError(ValueError):
-    pass
+    def __init__(self, message: str, *, category: str) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class CriticAgent:
@@ -48,13 +50,17 @@ class CriticAgent:
         )
         response = await provider.generate(request)
         try:
-            payload = json.loads(response.text)
-        except json.JSONDecodeError as exc:
-            raise CriticAgentOutputError("invalid structured output") from exc
+            payload = parse_single_json_object(response.text)
+        except StructuredOutputParseError as exc:
+            raise CriticAgentOutputError(
+                "invalid structured output", category="parse"
+            ) from exc
         try:
             return CriticResult.model_validate(payload)
         except ValidationError as exc:
-            raise CriticAgentOutputError("invalid structured output") from exc
+            raise CriticAgentOutputError(
+                "invalid structured output", category="schema"
+            ) from exc
 
     def build_local_repair_messages(
         self,
@@ -114,7 +120,8 @@ class CriticAgent:
                 "6. ignoring the user's action",
                 "Hidden facts are for detection only.",
                 "Do not repeat hidden facts in issues or repair instructions.",
-                "Return JSON only with keys accepted, issues, and repair_instruction.",
+                "Return exactly one JSON object and no markdown.",
+                "Use only keys accepted, issues, and repair_instruction.",
             ]
         )
 

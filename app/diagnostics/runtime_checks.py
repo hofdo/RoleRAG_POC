@@ -188,7 +188,7 @@ def _check_qdrant(settings: Settings) -> DiagnosticCheck:
 def _check_local_provider(settings: Settings) -> DiagnosticCheck:
     url = settings.local_llm_base_url.rstrip("/") + "/models"
     try:
-        response = httpx.get(url, timeout=5.0)
+        response = httpx.get(url, headers=_local_provider_headers(settings), timeout=5.0)
     except Exception as exc:
         return DiagnosticCheck(
             name="local_provider",
@@ -225,6 +225,12 @@ def _check_local_provider(settings: Settings) -> DiagnosticCheck:
         message=f"Local provider returned HTTP {response.status_code}.",
         hint="Inspect the local provider logs and verify LOCAL_LLM_BASE_URL.",
     )
+
+
+def _local_provider_headers(settings: Settings) -> dict[str, str]:
+    if not settings.local_llm_api_key:
+        return {}
+    return {"Authorization": f"Bearer {settings.local_llm_api_key}"}
 
 
 def _skipped_qdrant_check() -> DiagnosticCheck:

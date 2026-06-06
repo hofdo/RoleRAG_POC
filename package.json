@@ -1,0 +1,12 @@
+{
+  "name": "rolerag-poc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:frontend": "node --test tests/frontend/*.test.mjs",
+    "test:live-ui": "playwright test tests/e2e/live-play.spec.mjs --project=chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}
