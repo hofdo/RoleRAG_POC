@@ -31,10 +31,14 @@ on:
         description: "Optional GGUF model path for managed llama.cpp startup."
         required: false
         default: ""
+      llama_hf_model:
+        description: "Hugging Face GGUF repo and quantization for managed startup."
+        required: false
+        default: "DavidAU/gemma-4-E4B-it-The-DECKARD-Expresso-Universe-HERETIC-UNCENSORED-Thinking-GGUF:Q8_0"
       llama_ctx_size:
         description: "Context size for managed llama.cpp startup."
         required: false
-        default: "4096"
+        default: ""
       llama_n_gpu_layers:
         description: "Optional --n-gpu-layers value for managed llama.cpp startup."
         required: false
@@ -43,6 +47,14 @@ on:
         description: "Set to 1 to skip Playwright UI smoke."
         required: true
         default: "0"
+      turn_count:
+        description: "Rose Gallery conversation turns (5-50)."
+        required: true
+        default: "8"
+      fail_on_structured_warnings:
+        description: "Set to 1 to fail on critic, memory, indexing, or retrieval warnings."
+        required: true
+        default: "1"
 
 permissions:
   contents: read
@@ -51,7 +63,7 @@ jobs:
   live-smoke:
     name: Disposable local stack
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
-    timeout-minutes: 30
+    timeout-minutes: 90
 
     steps:
       - name: Check out repository
@@ -81,6 +93,14 @@ jobs:
         if: ${{ inputs.skip_browser != '1' }}
         run: npx playwright install chromium
 
+      - name: Validate live smoke inputs
+        env:
+          TURN_COUNT: ${{ inputs.turn_count }}
+          FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings }}
+        run: |
+          [[ "$TURN_COUNT" =~ ^[0-9]+$ ]] && (( TURN_COUNT >= 5 && TURN_COUNT <= 50 ))
+          [[ "$FAIL_ON_STRUCTURED_WARNINGS" == "0" || "$FAIL_ON_STRUCTURED_WARNINGS" == "1" ]]
+
       - name: Run live smoke
         env:
           API_PORT: ${{ inputs.api_port }}
@@ -90,9 +110,12 @@ jobs:
           LOCAL_LLM_MODEL: ${{ inputs.local_model }}
           LLAMA_CPP_SERVER_PATH: ${{ inputs.llama_server_path }}
           LLAMA_CPP_MODEL_PATH: ${{ inputs.llama_model_path }}
+          LLAMA_CPP_HF_MODEL: ${{ inputs.llama_hf_model }}
           LLAMA_CPP_CTX_SIZE: ${{ inputs.llama_ctx_size }}
           LLAMA_CPP_N_GPU_LAYERS: ${{ inputs.llama_n_gpu_layers }}
           LIVE_SKIP_BROWSER: ${{ inputs.skip_browser }}
+          LIVE_TURN_COUNT: ${{ inputs.turn_count }}
+          LIVE_FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings }}
           LIVE_ARTIFACT_DIR: /tmp/rolerag-live-test
           CLOUD_MODE: off
         run: bash scripts/live-smoke.sh

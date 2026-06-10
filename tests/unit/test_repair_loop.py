@@ -312,11 +312,13 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
             "reason": "cloud mode is off; cloud would have been used: local repair failed",
             "requires_user_confirmation": False,
         },
+        "finish_reason": "stop",
         "memory_written": False,
         "warnings": [
             "cloud actor skipped: cloud mode is off",
             "cloud actor skipped: cloud mode is off (local repair failed)",
         ],
+        "retrieval": None,
     }
     assert turn_repository.count_turns("demo-session") == 0
 

@@ -19,12 +19,13 @@ class ChunkRetrievalDiagnostic(BaseModel):
     original_score: float
     adjusted_score: float
     applied_boosts: dict[str, float] = Field(default_factory=dict)
-    selected_rank: int = Field(ge=1)
+    selected_rank: int | None = Field(default=None, ge=1)
 
 
 class RetrievalDiagnostics(BaseModel):
     query: str
     selected: list[ChunkRetrievalDiagnostic] = Field(default_factory=list)
+    rejected: list[ChunkRetrievalDiagnostic] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)

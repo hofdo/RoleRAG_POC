@@ -59,25 +59,35 @@ def rerank_chunks(
     ]
     deduplicated = _deduplicate_ranked_chunks(ranked)
     selected = deduplicated[:top_k]
+    rejected = deduplicated[top_k:]
     diagnostics = RetrievalDiagnostics(
         query=context.query,
         selected=[
-            ChunkRetrievalDiagnostic(
-                id=ranked_chunk.chunk.id,
-                source=ranked_chunk.chunk.source,
-                source_type=ranked_chunk.chunk.source_type,
-                collection=ranked_chunk.collection,
-                visibility=ranked_chunk.chunk.visibility,
-                tags=ranked_chunk.chunk.tags,
-                original_score=ranked_chunk.original_score,
-                adjusted_score=ranked_chunk.adjusted_score,
-                applied_boosts=ranked_chunk.applied_boosts,
-                selected_rank=index,
-            )
+            _to_chunk_diagnostic(ranked_chunk, selected_rank=index)
             for index, ranked_chunk in enumerate(selected, start=1)
         ],
+        rejected=[_to_chunk_diagnostic(ranked_chunk) for ranked_chunk in rejected],
     )
     return [ranked_chunk.chunk for ranked_chunk in selected], diagnostics
+
+
+def _to_chunk_diagnostic(
+    ranked_chunk: RankedChunk,
+    *,
+    selected_rank: int | None = None,
+) -> ChunkRetrievalDiagnostic:
+    return ChunkRetrievalDiagnostic(
+        id=ranked_chunk.chunk.id,
+        source=ranked_chunk.chunk.source,
+        source_type=ranked_chunk.chunk.source_type,
+        collection=ranked_chunk.collection,
+        visibility=ranked_chunk.chunk.visibility,
+        tags=ranked_chunk.chunk.tags,
+        original_score=ranked_chunk.original_score,
+        adjusted_score=ranked_chunk.adjusted_score,
+        applied_boosts=ranked_chunk.applied_boosts,
+        selected_rank=selected_rank,
+    )
 
 
 def _rank_chunk(

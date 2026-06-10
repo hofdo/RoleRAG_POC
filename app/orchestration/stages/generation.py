@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from app.agents import ActorAgent
 from app.domain import TurnInput
-from app.llm.provider import LlmMessage, LlmProvider
+from app.llm.provider import LlmMessage, LlmProvider, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute, ModelTask
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
@@ -13,10 +13,18 @@ from app.orchestration.stages.routing import RoutingStageResult, TurnRoutingStag
 from app.orchestration.stages.session import LoadedTurnContext
 
 
+class EmptyProviderResponseError(RuntimeError):
+    def __init__(self, *, provider: str, model: str) -> None:
+        super().__init__(f"{provider} provider returned empty text for {model} after one retry")
+        self.provider = provider
+        self.model = model
+
+
 @dataclass(frozen=True)
 class GenerationStageResult:
     text: str
     route: ModelRoute
+    finish_reason: str | None
     messages: tuple[LlmMessage, ...]
     warnings: tuple[str, ...]
 
@@ -56,7 +64,7 @@ class TurnGenerationStage:
             context_budget=self.context_budget,
             recent_dialogue_max_message_chars=self.recent_dialogue_max_message_chars,
         )
-        text, route, warnings = await self.generate_messages(
+        text, route, finish_reason, warnings = await self.generate_messages(
             route=routing.route,
             messages=messages,
             task=ModelTask.ACTOR_RESPONSE,
@@ -66,6 +74,7 @@ class TurnGenerationStage:
         return GenerationStageResult(
             text=text,
             route=route,
+            finish_reason=finish_reason,
             messages=tuple(messages),
             warnings=warnings,
         )
@@ -78,12 +87,19 @@ class TurnGenerationStage:
         task: ModelTask,
         retrieval_confidence: float | None,
         scene_complexity: int,
-    ) -> tuple[str, ModelRoute, tuple[str, ...]]:
+    ) -> tuple[str, ModelRoute, str | None, tuple[str, ...]]:
         if route.requires_user_confirmation:
             raise RuntimeError("confirmation-required route reached provider dispatch")
         try:
-            text = await self._generate(route=route, messages=list(messages))
-            return text, route, ()
+            response, empty_warnings = await self._generate_non_empty(
+                route=route, messages=list(messages)
+            )
+            return (
+                response.text,
+                route,
+                response.finish_reason,
+                (*empty_warnings, *_truncation_warnings(response, route)),
+            )
         except Exception as exc:
             if route.provider != ModelProviderName.LOCAL:
                 raise
@@ -101,10 +117,34 @@ class TurnGenerationStage:
                     f"({fallback_route.reason})"
                 )
                 raise
-            text = await self._generate(route=fallback_route, messages=list(messages))
-            return text, fallback_route, tuple(warnings)
+            response, empty_warnings = await self._generate_non_empty(
+                route=fallback_route, messages=list(messages)
+            )
+            warnings.extend(empty_warnings)
+            warnings.extend(_truncation_warnings(response, fallback_route))
+            return response.text, fallback_route, response.finish_reason, tuple(warnings)
 
-    async def _generate(self, *, route: ModelRoute, messages: list[LlmMessage]) -> str:
+    async def _generate_non_empty(
+        self,
+        *,
+        route: ModelRoute,
+        messages: list[LlmMessage],
+    ) -> tuple[LlmResponse, tuple[str, ...]]:
+        response = await self._generate(route=route, messages=messages)
+        if response.text.strip():
+            return response, ()
+        warnings = (f"empty actor response from {route.model}; retried once",)
+        retry_response = await self._generate(route=route, messages=messages)
+        if retry_response.text.strip():
+            return retry_response, warnings
+        raise EmptyProviderResponseError(provider=route.provider.value, model=route.model)
+
+    async def _generate(
+        self,
+        *,
+        route: ModelRoute,
+        messages: list[LlmMessage],
+    ) -> LlmResponse:
         provider = (
             self.provider
             if route.provider == ModelProviderName.LOCAL
@@ -113,3 +153,9 @@ class TurnGenerationStage:
         if provider is None:
             raise RuntimeError(f"Missing provider for route: {route.provider.value}")
         return await self.actor_agent.generate(provider=provider, route=route, messages=messages)
+
+
+def _truncation_warnings(response: LlmResponse, route: ModelRoute) -> tuple[str, ...]:
+    if response.finish_reason != "length":
+        return ()
+    return (f"actor response truncated: finish_reason=length from {route.model}",)

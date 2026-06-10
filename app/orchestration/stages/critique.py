@@ -6,6 +6,8 @@ from typing import Protocol
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider
 from app.llm.router import ModelRoute
+from app.llm.structured_output import StructuredOutputError
+from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.routing import TurnRoutingStage
 
 
@@ -52,10 +54,12 @@ class TurnCritiqueStage:
         provider: LlmProvider,
         critic_agent: CriticEvaluatingAgent,
         routing_stage: TurnRoutingStage,
+        failure_sink: StructuredFailureRecording | None = None,
     ) -> None:
         self.provider = provider
         self.critic_agent = critic_agent
         self.routing_stage = routing_stage
+        self.failure_sink = failure_sink
 
     async def run(
         self,
@@ -66,10 +70,11 @@ class TurnCritiqueStage:
         draft: str,
         retrieved_chunks: tuple[RetrievedChunk, ...],
     ) -> CritiqueStageResult:
+        route = self.routing_stage.critic()
         try:
             critique = await self.critic_agent.evaluate(
                 provider=self.provider,
-                route=self.routing_stage.critic(),
+                route=route,
                 persona=persona,
                 scene=scene,
                 user_message=user_message,
@@ -77,8 +82,43 @@ class TurnCritiqueStage:
                 retrieved_chunks=list(retrieved_chunks),
             )
             return CritiqueStageResult(critique=critique, warnings=())
+        except StructuredOutputError as exc:
+            warnings = [f"critic skipped: {exc} ({exc.category})"]
+            warnings.extend(
+                record_structured_failure(
+                    sink=self.failure_sink,
+                    task="critic",
+                    error=exc,
+                    model=route.model,
+                )
+            )
+            return CritiqueStageResult(critique=None, warnings=tuple(warnings))
         except Exception as exc:
             return CritiqueStageResult(
                 critique=None,
                 warnings=(f"critic skipped: {exc}",),
             )
+
+
+def record_structured_failure(
+    *,
+    sink: StructuredFailureRecording | None,
+    task: str,
+    error: StructuredOutputError,
+    model: str,
+    session_id: str | None = None,
+) -> tuple[str, ...]:
+    """Record a raw structured-output failure; report sink problems as warnings."""
+    if sink is None:
+        return ()
+    try:
+        sink.record(
+            task=task,
+            category=error.category,
+            raw_text=error.raw_text,
+            model=model,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        return (f"structured failure log skipped: {exc}",)
+    return ()

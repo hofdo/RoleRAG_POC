@@ -42,6 +42,7 @@ def test_retrieval_diagnostics_serialize_without_chunk_text() -> None:
                 "visibility": "player",
             }
         ],
+        "rejected": [],
     }
 
 

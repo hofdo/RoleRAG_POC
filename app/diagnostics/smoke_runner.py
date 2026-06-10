@@ -316,12 +316,12 @@ def _to_retrieval_summary(diagnostics: RetrievalDiagnostics) -> list[RetrievalSe
             source_type=item.source_type,
             collection=item.collection.value,
             visibility=item.visibility.value,
-            selected_rank=item.selected_rank,
+            selected_rank=item.selected_rank if item.selected_rank is not None else rank,
             original_score=item.original_score,
             adjusted_score=item.adjusted_score,
             tags=item.tags,
         )
-        for item in diagnostics.selected
+        for rank, item in enumerate(diagnostics.selected, start=1)
     ]
 
 

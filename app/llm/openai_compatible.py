@@ -2,37 +2,75 @@ from __future__ import annotations
 
 from typing import cast
 
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.llm.provider import LlmProvider, LlmRequest, LlmResponse, ProviderTimeoutError
+
+DEFAULT_TIMEOUT_SECONDS = 180.0
+DEFAULT_MAX_RETRIES = 0
 
 
 class OpenAICompatibleProvider(LlmProvider):
-    def __init__(self, *, provider_name: str, base_url: str, api_key: str) -> None:
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> None:
         self.provider_name = provider_name
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self.timeout_seconds = timeout_seconds
+        self.client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+        )
 
     async def generate(self, request: LlmRequest) -> LlmResponse:
         messages = cast(
             list[ChatCompletionMessageParam],
             [message.model_dump() for message in request.messages],
         )
-        if request.response_format == "json":
-            response = await self.client.chat.completions.create(
+        try:
+            if request.response_schema is not None:
+                response = await self.client.chat.completions.create(
+                    model=request.model,
+                    messages=messages,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": request.metadata.get("task", "structured_output"),
+                            "schema": request.response_schema,
+                        },
+                    },
+                )
+            elif request.response_format == "json":
+                response = await self.client.chat.completions.create(
+                    model=request.model,
+                    messages=messages,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    response_format={"type": "json_object"},
+                )
+            else:
+                response = await self.client.chat.completions.create(
+                    model=request.model,
+                    messages=messages,
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                )
+        except APITimeoutError as exc:
+            raise ProviderTimeoutError(
+                provider=self.provider_name,
                 model=request.model,
-                messages=messages,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-                response_format={"type": "json_object"},
-            )
-        else:
-            response = await self.client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                max_tokens=request.max_tokens,
-                temperature=request.temperature,
-            )
+                timeout_seconds=self.timeout_seconds,
+            ) from exc
 
         choice = response.choices[0]
         content = choice.message.content or ""

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.agents import CriticAgent, MemoryCurator
 from app.config import Settings, is_usable_cloud_api_key
+from app.diagnostics.structured_failures import StructuredOutputFailureSink
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
@@ -52,6 +53,8 @@ def build_local_provider(settings: Settings) -> LlmProvider:
         provider_name="local",
         base_url=settings.local_llm_base_url,
         api_key=settings.local_llm_api_key,
+        timeout_seconds=settings.local_llm_timeout_seconds,
+        max_retries=settings.local_llm_max_retries,
     )
 
 
@@ -62,6 +65,8 @@ def build_cloud_provider(settings: Settings) -> LlmProvider | None:
         provider_name="cloud",
         base_url=settings.cloud_llm_base_url,
         api_key=settings.cloud_llm_api_key,
+        timeout_seconds=settings.cloud_llm_timeout_seconds,
+        max_retries=settings.cloud_llm_max_retries,
     )
 
 
@@ -75,6 +80,12 @@ def build_critic_agent() -> CriticAgent:
 
 def build_memory_curator() -> MemoryCurator:
     return MemoryCurator()
+
+
+def build_structured_failure_sink(settings: Settings) -> StructuredOutputFailureSink | None:
+    if settings.structured_output_failure_log_dir is None:
+        return None
+    return StructuredOutputFailureSink(directory=settings.structured_output_failure_log_dir)
 
 
 def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
@@ -160,6 +171,7 @@ def build_services(
         cloud_temperature=settings.cloud_llm_temperature,
         cloud_mode=settings.cloud_mode,
         recent_dialogue_max_message_chars=settings.recent_dialogue_max_message_chars,
+        structured_failure_sink=build_structured_failure_sink(settings),
     )
     return AppServices(
         connection=connection,

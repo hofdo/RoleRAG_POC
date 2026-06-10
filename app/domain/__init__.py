@@ -4,6 +4,7 @@ from app.domain.models import (
     MemoryCuratorResult,
     MemoryEpisode,
     PersonaCard,
+    RetrievalCandidateDiagnostic,
     RetrievedChunk,
     SceneState,
     SessionState,
@@ -11,6 +12,7 @@ from app.domain.models import (
     TurnInput,
     TurnOutcome,
     TurnResult,
+    TurnRetrievalDiagnostics,
 )
 from app.domain.visibility import Visibility
 
@@ -20,6 +22,7 @@ __all__ = [
     "MemoryCuratorResult",
     "MemoryEpisode",
     "PersonaCard",
+    "RetrievalCandidateDiagnostic",
     "RetrievedChunk",
     "SceneState",
     "SessionState",
@@ -27,5 +30,6 @@ __all__ = [
     "TurnInput",
     "TurnOutcome",
     "TurnResult",
+    "TurnRetrievalDiagnostics",
     "Visibility",
 ]

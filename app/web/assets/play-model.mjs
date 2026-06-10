@@ -168,6 +168,7 @@ export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
     routeProvider: turn.route.provider,
     routeModel: turn.route.model,
     routeReason: turn.route.reason,
+    finishReason: turn.finish_reason ?? null,
     memoryWritten: turn.memory_written,
     warnings: turn.warnings,
   };

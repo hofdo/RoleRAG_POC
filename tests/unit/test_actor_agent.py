@@ -37,9 +37,10 @@ async def test_actor_agent_calls_provider_with_built_messages() -> None:
         LlmMessage(role="user", content="Tell me what you know."),
     ]
 
-    text = await ActorAgent().generate(provider=provider, route=route, messages=messages)
+    response = await ActorAgent().generate(provider=provider, route=route, messages=messages)
 
-    assert text == "The archivist glances aside before answering."
+    assert response.text == "The archivist glances aside before answering."
+    assert response.finish_reason == "stop"
     assert len(provider.requests) == 1
     request = provider.requests[0]
     assert request.messages == messages

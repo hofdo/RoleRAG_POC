@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
-from app.domain import PersonaCard, SceneState, SessionState, Visibility
+from app.domain import (
+    MemoryCuratorResult,
+    PersonaCard,
+    SceneState,
+    SessionState,
+    Visibility,
+)
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
 
@@ -97,6 +103,7 @@ async def test_memory_curator_returns_structured_candidates_from_valid_json() ->
     assert result.write_memory is True
     assert result.memories[0].visibility == Visibility.PLAYER
     assert provider.requests[0].response_format == "json"
+    assert provider.requests[0].response_schema == MemoryCuratorResult.model_json_schema()
 
 
 @pytest.mark.asyncio
@@ -151,3 +158,20 @@ async def test_memory_curator_rejects_schema_invalid_payload() -> None:
             assistant_message="I will remember that.",
         )
     assert exc_info.value.category == "schema"
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_error_carries_raw_response_text() -> None:
+    provider = FakeProvider("not json")
+
+    with pytest.raises(MemoryCuratorOutputError) as exc_info:
+        await MemoryCurator().curate(
+            provider=provider,
+            route=_build_route(),
+            session=_build_session(),
+            scene=_build_scene(),
+            persona=_build_persona(),
+            user_message="Hello there.",
+            assistant_message="Good evening.",
+        )
+    assert exc_info.value.raw_text == "not json"

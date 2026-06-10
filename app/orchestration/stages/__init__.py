@@ -3,7 +3,12 @@ from app.orchestration.stages.critique import (
     CritiqueStageResult,
     TurnCritiqueStage,
 )
-from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
+from app.orchestration.stages.failure_log import StructuredFailureRecording
+from app.orchestration.stages.generation import (
+    EmptyProviderResponseError,
+    GenerationStageResult,
+    TurnGenerationStage,
+)
 from app.orchestration.stages.memory import (
     MemoryCuratingAgent,
     MemoryIndexing,
@@ -37,6 +42,7 @@ __all__ = [
     "CONTROLLED_FAILURE_TEXT",
     "CriticEvaluatingAgent",
     "CritiqueStageResult",
+    "EmptyProviderResponseError",
     "GenerationStageResult",
     "LoadedTurnContext",
     "MemoryCuratingAgent",
@@ -46,6 +52,7 @@ __all__ = [
     "RepairStageResult",
     "RetrievalStageResult",
     "RoutingStageResult",
+    "StructuredFailureRecording",
     "TurnCritiqueStage",
     "TurnDataLoader",
     "TurnDataLoaderFactory",

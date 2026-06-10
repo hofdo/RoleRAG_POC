@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.agents.critic_agent import CriticAgent, CriticAgentOutputError
-from app.domain import PersonaCard, RetrievedChunk, SceneState, Visibility
+from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
 
@@ -94,6 +94,7 @@ async def test_critic_agent_parses_accepted_json() -> None:
     assert result.issues == []
     assert result.repair_instruction is None
     assert provider.requests[0].response_format == "json"
+    assert provider.requests[0].response_schema == CriticResult.model_json_schema()
     assert provider.requests[0].metadata["task"] == "critic"
 
 
@@ -180,6 +181,23 @@ async def test_critic_agent_rejects_schema_invalid_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_critic_agent_error_carries_raw_response_text() -> None:
+    provider = FakeProvider("not json")
+
+    with pytest.raises(CriticAgentOutputError) as exc_info:
+        await CriticAgent().evaluate(
+            provider=provider,
+            route=_build_route(),
+            persona=_build_persona(),
+            scene=_build_scene(),
+            user_message="Hello.",
+            draft="Good evening.",
+            retrieved_chunks=[],
+        )
+    assert exc_info.value.raw_text == "not json"
+
+
+@pytest.mark.asyncio
 async def test_critic_agent_prompt_includes_required_checks_and_context() -> None:
     provider = FakeProvider('{"accepted": true, "issues": [], "repair_instruction": null}')
 
@@ -211,3 +229,23 @@ async def test_critic_agent_prompt_includes_required_checks_and_context() -> Non
     assert "generic assistant tone" in prompt
     assert "ignoring the user's action" in prompt
     assert "The Rose Gallery is lined with mirrors." in context
+
+
+@pytest.mark.asyncio
+async def test_critic_agent_prompt_shows_exact_json_shape() -> None:
+    provider = FakeProvider('{"accepted": true, "issues": [], "repair_instruction": null}')
+
+    await CriticAgent().evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=[],
+    )
+
+    prompt = provider.requests[0].messages[0].content
+    assert '"accepted": true | false' in prompt
+    assert '"issues": ["..."]' in prompt
+    assert '"repair_instruction": "..." | null' in prompt

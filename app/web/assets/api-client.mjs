@@ -111,6 +111,7 @@
  * @typedef {{
  *   text: string,
  *   route: RouteResponse,
+ *   finish_reason: string | null,
  *   memory_written: boolean,
  *   warnings: string[],
  * }} CreateTurnResponse
@@ -237,6 +238,7 @@ function applyEvent(result, eventName, payload) {
       result.text = payload.text;
     }
     result.route = payload.route;
+    result.finish_reason = payload.finish_reason ?? null;
     result.memory_written = payload.memory_written;
     result.warnings = payload.warnings;
     return true;
@@ -264,7 +266,13 @@ async function parseEventStream(response) {
   if (!response.body) {
     throw new ApiError("invalid_stream", "The backend returned an empty event stream.", 502);
   }
-  const result = { text: "", route: null, memory_written: false, warnings: [] };
+  const result = {
+    text: "",
+    route: null,
+    finish_reason: null,
+    memory_written: false,
+    warnings: [],
+  };
   const decoder = new TextDecoder();
   let buffer = "";
   let terminal = false;

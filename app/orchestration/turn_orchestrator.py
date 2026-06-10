@@ -10,8 +10,10 @@ from app.orchestration.stages import (
     CONTROLLED_FAILURE_TEXT,
     ActorContextRetrieving,
     CriticEvaluatingAgent,
+    EmptyProviderResponseError,
     MemoryCuratingAgent,
     MemoryIndexing,
+    StructuredFailureRecording,
     TurnCritiqueStage,
     TurnDataLoader,
     TurnDataLoaderFactory,
@@ -54,6 +56,7 @@ class TurnOrchestrator:
         retrieval_top_k: int = 5,
         max_retrieved_chunk_chars: int = 800,
         recent_dialogue_max_message_chars: int = 900,
+        structured_failure_sink: StructuredFailureRecording | None = None,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -113,6 +116,7 @@ class TurnOrchestrator:
             provider=provider,
             critic_agent=critic_agent,
             routing_stage=self.routing_stage,
+            failure_sink=structured_failure_sink,
         )
         self.repair_stage = TurnRepairStage(
             generation_stage=self.generation_stage,
@@ -129,6 +133,7 @@ class TurnOrchestrator:
             memory_curator=memory_curator,
             memory_indexer=memory_indexer,
             routing_stage=self.routing_stage,
+            failure_sink=structured_failure_sink,
         )
 
     @property
@@ -185,12 +190,27 @@ class TurnOrchestrator:
             scene=context.scene,
             retrieval_confidence=retrieval.confidence,
         )
-        generation = await self.generation_stage.run(
-            turn_input=turn_input,
-            context=context,
-            retrieval=retrieval,
-            routing=routing,
-        )
+        try:
+            generation = await self.generation_stage.run(
+                turn_input=turn_input,
+                context=context,
+                retrieval=retrieval,
+                routing=routing,
+            )
+        except EmptyProviderResponseError as exc:
+            return TurnResult(
+                text=CONTROLLED_FAILURE_TEXT,
+                route=routing.route,
+                finish_reason=None,
+                memory_written=False,
+                warnings=[
+                    *retrieval.warnings,
+                    *routing.warnings,
+                    f"actor failed: {exc}",
+                ],
+                retrieval=retrieval.diagnostics,
+                outcome=TurnOutcome.CONTROLLED_FAILURE,
+            )
         warnings = [
             *retrieval.warnings,
             *routing.warnings,
@@ -207,28 +227,44 @@ class TurnOrchestrator:
 
         final_text = generation.text
         final_route = generation.route
+        final_finish_reason = generation.finish_reason
         if critique.critique is not None and not critique.critique.accepted:
-            repair = await self.repair_stage.run(
-                context=context,
-                user_message=turn_input.message,
-                actor_messages=generation.messages,
-                draft=generation.text,
-                route=generation.route,
-                critique=critique.critique,
-                retrieval=retrieval,
-                routing=routing,
-            )
+            try:
+                repair = await self.repair_stage.run(
+                    context=context,
+                    user_message=turn_input.message,
+                    actor_messages=generation.messages,
+                    draft=generation.text,
+                    route=generation.route,
+                    critique=critique.critique,
+                    retrieval=retrieval,
+                    routing=routing,
+                )
+            except EmptyProviderResponseError as exc:
+                warnings.append(f"repair failed: {exc}")
+                return TurnResult(
+                    text=CONTROLLED_FAILURE_TEXT,
+                    route=generation.route,
+                    finish_reason=generation.finish_reason,
+                    memory_written=False,
+                    warnings=warnings,
+                    retrieval=retrieval.diagnostics,
+                    outcome=TurnOutcome.CONTROLLED_FAILURE,
+                )
             warnings.extend(repair.warnings)
             if repair.outcome == TurnOutcome.CONTROLLED_FAILURE:
                 return TurnResult(
                     text=repair.text,
                     route=repair.route,
+                    finish_reason=repair.finish_reason,
                     memory_written=False,
                     warnings=warnings,
+                    retrieval=retrieval.diagnostics,
                     outcome=repair.outcome,
                 )
             final_text = repair.text
             final_route = repair.route
+            final_finish_reason = repair.finish_reason
 
         self.persistence_stage.run(
             session=context.session,
@@ -249,8 +285,10 @@ class TurnOrchestrator:
         return TurnResult(
             text=final_text,
             route=final_route,
+            finish_reason=final_finish_reason,
             memory_written=memory.memory_written,
             warnings=warnings,
+            retrieval=retrieval.diagnostics,
         )
 
     def loader_for_session(self, session: SessionState) -> TurnDataLoader:

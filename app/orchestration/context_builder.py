@@ -61,6 +61,7 @@ def build_actor_messages(
         [
             "Respond in character using only the provided visible context.",
             "Target 2-4 paragraphs.",
+            "Stay within the response budget and complete your final sentence.",
             "Answer the current action directly.",
             "Avoid broad scene transitions unless the player requests one.",
         ]

@@ -13,6 +13,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
     assert report.total_checks >= 5
     assert {result.name for result in report.results} == {
         "retrieval",
+        "event_key_retrieval",
         "memory_recall",
         "visibility",
         "role_consistency",

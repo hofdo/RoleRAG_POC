@@ -305,8 +305,10 @@ def test_turn_result_accepts_nested_model_route() -> None:
             "reason": "default local route",
             "requires_user_confirmation": False,
         },
+        "finish_reason": None,
         "memory_written": False,
         "warnings": [],
+        "retrieval": None,
     }
 
 

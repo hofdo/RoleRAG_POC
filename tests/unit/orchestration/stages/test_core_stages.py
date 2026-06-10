@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from app.agents.critic_agent import CriticAgentOutputError
+from app.agents.memory_curator import MemoryCuratorOutputError
 from app.domain import (
+    CriticResult,
+    MemoryCuratorResult,
     PersonaCard,
     RetrievedChunk,
     SceneState,
@@ -14,10 +19,14 @@ from app.domain import (
     TurnInput,
     Visibility,
 )
+from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import CloudMode, ModelProviderName, ModelRoute
+from app.memory import MemoryEpisodeStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages import (
     LoadedTurnContext,
+    TurnCritiqueStage,
+    TurnMemoryStage,
     TurnPersistenceStage,
     TurnRetrievalStage,
     TurnRoutingStage,
@@ -185,3 +194,307 @@ def test_persistence_stage_appends_before_updating_session_activity() -> None:
     )
 
     assert calls == [("append", created_at), ("session", created_at)]
+
+
+class RecordingFailureSink:
+    def __init__(self) -> None:
+        self.records: list[dict[str, object]] = []
+
+    def record(
+        self,
+        *,
+        task: str,
+        category: str,
+        raw_text: str,
+        model: str,
+        session_id: str | None = None,
+    ) -> None:
+        self.records.append(
+            {
+                "task": task,
+                "category": category,
+                "raw_text": raw_text,
+                "model": model,
+                "session_id": session_id,
+            }
+        )
+
+
+class UnusedProvider(LlmProvider):
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        raise AssertionError("provider must not be called")
+
+
+class FailingCriticAgent:
+    def __init__(self, error: CriticAgentOutputError) -> None:
+        self.error = error
+
+    async def evaluate(
+        self,
+        *,
+        provider: LlmProvider,
+        route: ModelRoute,
+        persona: PersonaCard,
+        scene: SceneState,
+        user_message: str,
+        draft: str,
+        retrieved_chunks: list[RetrievedChunk],
+    ) -> CriticResult:
+        raise self.error
+
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        return []
+
+    def build_cloud_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        issues: list[str],
+    ) -> list[LlmMessage]:
+        return []
+
+
+class FailingCurator:
+    def __init__(self, error: MemoryCuratorOutputError) -> None:
+        self.error = error
+
+    async def curate(
+        self,
+        *,
+        provider: LlmProvider,
+        route: ModelRoute,
+        session: SessionState,
+        scene: SceneState,
+        persona: PersonaCard,
+        user_message: str,
+        assistant_message: str,
+    ) -> MemoryCuratorResult:
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_categorizes_structured_failure_and_records_raw_text() -> None:
+    sink = RecordingFailureSink()
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=FailingCriticAgent(
+            CriticAgentOutputError(
+                "invalid structured output",
+                category="schema",
+                raw_text='{"accepted": "maybe"}',
+            )
+        ),
+        routing_stage=_routing(),
+        failure_sink=sink,
+    )
+    context = _context()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=(),
+    )
+
+    assert result.critique is None
+    assert result.warnings == ("critic skipped: invalid structured output (schema)",)
+    assert sink.records == [
+        {
+            "task": "critic",
+            "category": "schema",
+            "raw_text": '{"accepted": "maybe"}',
+            "model": "local",
+            "session_id": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_tolerates_failure_sink_errors() -> None:
+    class BrokenSink:
+        def record(
+            self,
+            *,
+            task: str,
+            category: str,
+            raw_text: str,
+            model: str,
+            session_id: str | None = None,
+        ) -> None:
+            raise OSError("disk full")
+
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=FailingCriticAgent(
+            CriticAgentOutputError(
+                "invalid structured output", category="parse", raw_text="not json"
+            )
+        ),
+        routing_stage=_routing(),
+        failure_sink=BrokenSink(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=(),
+    )
+
+    assert result.critique is None
+    assert result.warnings == (
+        "critic skipped: invalid structured output (parse)",
+        "structured failure log skipped: disk full",
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_categorizes_structured_failure_and_records_raw_text() -> None:
+    sink = RecordingFailureSink()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, SimpleNamespace()),
+        memory_curator=FailingCurator(
+            MemoryCuratorOutputError(
+                "invalid structured output", category="parse", raw_text="not json"
+            )
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+        failure_sink=sink,
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="Hello.",
+        assistant_message="Good evening.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is False
+    assert result.warnings == ("memory curation skipped: invalid structured output (parse)",)
+    assert sink.records == [
+        {
+            "task": "memory_extraction",
+            "category": "parse",
+            "raw_text": "not json",
+            "model": "local",
+            "session_id": "session",
+        }
+    ]
+
+
+def test_retrieval_stage_exposes_candidate_diagnostics_when_retriever_supports_them() -> None:
+    from app.rag.diagnostics import (
+        ChunkRetrievalDiagnostic,
+        RetrievalDiagnostics,
+        RetrievalResult,
+    )
+    from app.rag.models import RagCollection
+
+    chunk = RetrievedChunk(
+        id="memory-1",
+        source="memory_episode:memory-1",
+        source_type="session_memory",
+        text="The player promised to return before dawn.",
+        score=0.6,
+        visibility=Visibility.PLAYER,
+    )
+    rag_diagnostics = RetrievalDiagnostics(
+        query="What did I promise?",
+        selected=[
+            ChunkRetrievalDiagnostic(
+                id="memory-1",
+                source="memory_episode:memory-1",
+                source_type="session_memory",
+                collection=RagCollection.SESSION_MEMORY,
+                visibility=Visibility.PLAYER,
+                tags=["promise"],
+                original_score=0.6,
+                adjusted_score=0.7,
+                applied_boosts={"collection": 0.08, "session": 0.02},
+                selected_rank=1,
+            )
+        ],
+        rejected=[
+            ChunkRetrievalDiagnostic(
+                id="lore-1",
+                source="lore.md",
+                source_type="lore",
+                collection=RagCollection.CANON_LORE,
+                visibility=Visibility.PLAYER,
+                tags=[],
+                original_score=0.2,
+                adjusted_score=0.2,
+                applied_boosts={},
+                selected_rank=None,
+            )
+        ],
+    )
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: RetrievalResult(
+            chunks=[chunk], diagnostics=rag_diagnostics
+        )
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=3),
+    )
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message="What did I promise?"),
+        context=_context(),
+    )
+
+    assert result.chunks == (chunk,)
+    assert result.confidence == 0.6
+    assert result.diagnostics is not None
+    assert result.diagnostics.query == "What did I promise?"
+    selected = result.diagnostics.selected[0]
+    assert selected.id == "memory-1"
+    assert selected.collection == "session_memory"
+    assert selected.selected_rank == 1
+    assert selected.applied_boosts == {"collection": 0.08, "session": 0.02}
+    rejected = result.diagnostics.rejected[0]
+    assert rejected.id == "lore-1"
+    assert rejected.collection == "canon_lore"
+    assert rejected.selected_rank is None
+
+
+def test_retrieval_stage_returns_no_diagnostics_for_plain_retriever() -> None:
+    chunks = [
+        RetrievedChunk(
+            id="visible",
+            source="lore.md",
+            source_type="lore",
+            text="Visible",
+            score=0.6,
+            visibility=Visibility.PLAYER,
+        )
+    ]
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor=lambda **_: chunks),
+        context_budget=ContextBudget(retrieved_chunks=3),
+    )
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message="Look around."),
+        context=_context(),
+    )
+
+    assert result.chunks == tuple(chunks)
+    assert result.diagnostics is None

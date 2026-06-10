@@ -244,3 +244,53 @@ def test_actor_context_retriever_exposes_metadata_only_diagnostics_for_selected_
     assert diagnostic.visibility == Visibility.PLAYER
     assert diagnostic.tags == []
     assert not hasattr(diagnostic, "text")
+
+
+def test_actor_context_retriever_exposes_rejected_candidates_in_diagnostics() -> None:
+    retriever = RecordingRetriever(
+        {
+            RagCollection.SESSION_MEMORY: [
+                _chunk(
+                    "memory-1",
+                    score=0.60,
+                    collection=RagCollection.SESSION_MEMORY,
+                    text="The player promised to return before dawn.",
+                    session_id="session-1",
+                ),
+                _chunk(
+                    "memory-2",
+                    score=0.30,
+                    collection=RagCollection.SESSION_MEMORY,
+                    text="The player admired the roses.",
+                    session_id="session-1",
+                ),
+            ],
+            RagCollection.CANON_LORE: [
+                _chunk(
+                    "lore-1",
+                    score=0.20,
+                    collection=RagCollection.CANON_LORE,
+                    text="The archive key is kept near the west stacks.",
+                )
+            ],
+        }
+    )
+
+    result = ActorContextRetriever(retriever=retriever).retrieve_for_actor_with_diagnostics(
+        query="What did I promise?",
+        world_id="demo_world",
+        session_id="session-1",
+        persona_id="archivist",
+        scene_id="rose-gallery",
+        top_k=1,
+    )
+
+    assert [chunk.id for chunk in result.chunks] == ["memory-1"]
+    assert [entry.id for entry in result.diagnostics.selected] == ["memory-1"]
+    assert [entry.id for entry in result.diagnostics.rejected] == ["memory-2", "lore-1"]
+    rejected = result.diagnostics.rejected[0]
+    assert isinstance(rejected, ChunkRetrievalDiagnostic)
+    assert rejected.selected_rank is None
+    assert rejected.original_score == 0.30
+    assert rejected.applied_boosts
+    assert not hasattr(rejected, "text")

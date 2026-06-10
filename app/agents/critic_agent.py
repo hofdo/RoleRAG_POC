@@ -7,13 +7,15 @@ from pydantic import ValidationError
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest
 from app.llm.router import ModelRoute
-from app.llm.structured_output import StructuredOutputParseError, parse_single_json_object
+from app.llm.structured_output import (
+    StructuredOutputError,
+    StructuredOutputParseError,
+    parse_single_json_object,
+)
 
 
-class CriticAgentOutputError(ValueError):
-    def __init__(self, message: str, *, category: str) -> None:
-        super().__init__(message)
-        self.category = category
+class CriticAgentOutputError(StructuredOutputError):
+    pass
 
 
 class CriticAgent:
@@ -46,6 +48,7 @@ class CriticAgent:
             max_tokens=route.max_tokens,
             temperature=route.temperature,
             response_format="json",
+            response_schema=CriticResult.model_json_schema(),
             metadata={"task": "critic"},
         )
         response = await provider.generate(request)
@@ -53,13 +56,13 @@ class CriticAgent:
             payload = parse_single_json_object(response.text)
         except StructuredOutputParseError as exc:
             raise CriticAgentOutputError(
-                "invalid structured output", category="parse"
+                "invalid structured output", category="parse", raw_text=response.text
             ) from exc
         try:
             return CriticResult.model_validate(payload)
         except ValidationError as exc:
             raise CriticAgentOutputError(
-                "invalid structured output", category="schema"
+                "invalid structured output", category="schema", raw_text=response.text
             ) from exc
 
     def build_local_repair_messages(
@@ -121,7 +124,12 @@ class CriticAgent:
                 "Hidden facts are for detection only.",
                 "Do not repeat hidden facts in issues or repair instructions.",
                 "Return exactly one JSON object and no markdown.",
-                "Use only keys accepted, issues, and repair_instruction.",
+                "Use this shape:",
+                "{",
+                '  "accepted": true | false,',
+                '  "issues": ["..."],',
+                '  "repair_instruction": "..." | null',
+                "}",
             ]
         )
 

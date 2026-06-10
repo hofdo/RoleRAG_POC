@@ -218,8 +218,10 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
             "reason": "default local route",
             "requires_user_confirmation": False,
         },
+        "finish_reason": "stop",
         "memory_written": False,
         "warnings": [],
+        "retrieval": None,
     }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
@@ -487,3 +489,160 @@ async def test_turn_orchestrator_continues_when_retrieval_fails(tmp_path: Path) 
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.warnings == ["retrieval skipped: qdrant offline"]
     assert "Retrieved Context:\nNone." in provider.requests[0].messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_retrieval_diagnostics(tmp_path: Path) -> None:
+    from app.domain import RetrievedChunk
+    from app.rag.diagnostics import (
+        ChunkRetrievalDiagnostic,
+        RetrievalDiagnostics,
+        RetrievalResult,
+    )
+    from app.rag.models import RagCollection
+
+    chunk = RetrievedChunk(
+        id="memory-1",
+        source="memory_episode:memory-1",
+        source_type="session_memory",
+        text="The player promised to return before dawn.",
+        score=0.6,
+        visibility=Visibility.PLAYER,
+    )
+
+    class DiagnosticsRetriever:
+        def retrieve_for_actor(self, **_: object) -> list[Any]:
+            raise AssertionError("diagnostics variant should be preferred")
+
+        def retrieve_for_actor_with_diagnostics(self, **kwargs: object) -> RetrievalResult:
+            return RetrievalResult(
+                chunks=[chunk],
+                diagnostics=RetrievalDiagnostics(
+                    query=str(kwargs["query"]),
+                    selected=[
+                        ChunkRetrievalDiagnostic(
+                            id="memory-1",
+                            source="memory_episode:memory-1",
+                            source_type="session_memory",
+                            collection=RagCollection.SESSION_MEMORY,
+                            visibility=Visibility.PLAYER,
+                            tags=["promise"],
+                            original_score=0.6,
+                            adjusted_score=0.7,
+                            applied_boosts={"collection": 0.08, "session": 0.02},
+                            selected_rank=1,
+                        )
+                    ],
+                    rejected=[
+                        ChunkRetrievalDiagnostic(
+                            id="lore-1",
+                            source="lore.md",
+                            source_type="lore",
+                            collection=RagCollection.CANON_LORE,
+                            visibility=Visibility.PLAYER,
+                            tags=[],
+                            original_score=0.2,
+                            adjusted_score=0.2,
+                            applied_boosts={},
+                            selected_rank=None,
+                        )
+                    ],
+                ),
+            )
+
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+    orchestrator.actor_context_retriever = DiagnosticsRetriever()
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What did I promise?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input)
+
+    assert result.retrieval is not None
+    assert [entry.id for entry in result.retrieval.selected] == ["memory-1"]
+    assert result.retrieval.selected[0].collection == "session_memory"
+    assert result.retrieval.selected[0].selected_rank == 1
+    assert [entry.id for entry in result.retrieval.rejected] == ["lore-1"]
+    assert result.retrieval.rejected[0].selected_rank is None
+
+
+class SequencedProvider(LlmProvider):
+    def __init__(self, texts: list[str]) -> None:
+        self.texts = texts
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        index = len(self.requests)
+        self.requests.append(request)
+        return LlmResponse(
+            text=self.texts[index],
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 15},
+            finish_reason="stop",
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_retries_once_after_empty_actor_response(
+    tmp_path: Path,
+) -> None:
+    provider = SequencedProvider(["", "The archive door stays unbarred."])
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What now?")
+    )
+
+    assert result.text == "The archive door stays unbarred."
+    assert len(provider.requests) == 2
+    assert any("empty actor response" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_controlled_failure_for_repeated_empty_responses(
+    tmp_path: Path,
+) -> None:
+    from app.orchestration.turn_orchestrator import CONTROLLED_FAILURE_TEXT
+
+    provider = SequencedProvider(["", ""])
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What now?")
+    )
+
+    assert result.text == CONTROLLED_FAILURE_TEXT
+    assert result.memory_written is False
+    assert len(provider.requests) == 2
+    assert any("empty" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_warns_when_actor_response_is_truncated(tmp_path: Path) -> None:
+    class LengthLimitedProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            return LlmResponse(
+                text="The archivist begins a long story about",
+                provider="fake",
+                model=request.model,
+                usage={"total_tokens": 500},
+                finish_reason="length",
+            )
+
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = LengthLimitedProvider()
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Tell me everything.")
+    )
+
+    assert result.finish_reason == "length"
+    assert any(
+        "actor response truncated: finish_reason=length from local-model" == warning
+        for warning in result.warnings
+    )

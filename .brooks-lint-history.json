@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-06-08",
+    "mode": "Test Quality Review",
+    "score": 74,
+    "findings": {
+      "critical": 1,
+      "warning": 2,
+      "suggestion": 1
+    },
+    "scope": "all tests plus 12-turn live-stack checkpoint"
+  }
+]

@@ -345,28 +345,48 @@ python -m app.cli doctor --check-qdrant --check-local-provider
 python -m app.cli smoke-run --real-runtime
 ```
 
-Run the isolated live stack smoke. It first reuses a local OpenAI-compatible model server if
-`/v1/models` already exposes `chatgpt-onnechan`; otherwise, provide local llama.cpp binary and GGUF
-paths and the script will start `llama-server` for the run:
+Run the isolated live stack checkpoint. It first reuses a local OpenAI-compatible model server if
+`/v1/models` already exposes `chatgpt-onnechan`; otherwise it starts this managed server:
+
+```bash
+llama-server \
+  -hf DavidAU/gemma-4-E4B-it-The-DECKARD-Expresso-Universe-HERETIC-UNCENSORED-Thinking-GGUF:Q8_0 \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --alias chatgpt-onnechan \
+  --jinja \
+  --reasoning off \
+  -ngl all \
+  -c 8192 \
+  -fa on \
+  --cache-type-k q8_0 \
+  --cache-type-v q4_0 \
+  --chat-template-kwargs '{"enable_thinking":false}' \
+  --seed 424242
+```
+
+The primary checkpoint command is:
 
 ```bash
 npm install
 npx playwright install chromium
-LLAMA_CPP_SERVER_PATH=/path/to/llama-server \
-LLAMA_CPP_MODEL_PATH=/path/to/model.gguf \
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1 \
-LOCAL_LLM_API_KEY=local \
 LOCAL_LLM_MODEL=chatgpt-onnechan \
+LIVE_TURN_COUNT=8 \
 PYTHON=.venv/bin/python \
 bash scripts/live-smoke.sh
 ```
 
 That script starts disposable Qdrant on `127.0.0.1:6334`, uses a temporary SQLite database under
 `/tmp/rolerag-live-test`, starts FastAPI on `127.0.0.1:18080`, runs live doctor/smoke/API checks,
-runs a Playwright UI smoke, writes `/tmp/rolerag-live-test/report.md`, and removes its Qdrant
-container on exit. If it starts managed llama.cpp, it writes
+runs an eight-turn Rose Gallery conversation checkpoint and a Playwright UI smoke, writes detailed
+turn, persistence, Qdrant, and retrieval diagnostics to `/tmp/rolerag-live-test/report.md`, and
+removes its Qdrant container on exit. If it starts managed llama.cpp, it writes
 `/tmp/rolerag-live-test/raw/llama-server.log` and kills only that managed process on exit. It leaves
 existing `data/qdrant` and user runtime data untouched.
+
+Managed shutdown sends `SIGTERM`, waits up to `LLAMA_CPP_STOP_TIMEOUT` seconds (default `15`), then
+sends `SIGKILL` only if the process it started did not exit. An already-running matching provider
+is reused and never stopped by the checkpoint.
 
 The equivalent manual FastAPI context for the live stack is:
 
@@ -380,9 +400,20 @@ CLOUD_MODE=off \
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-Managed llama.cpp startup accepts `LLAMA_CPP_HOST` and `LLAMA_CPP_PORT` for binding,
-`LLAMA_CPP_CTX_SIZE` for `-c`, optional `LLAMA_CPP_N_GPU_LAYERS`, and optional
-whitespace-separated `LLAMA_CPP_SERVER_ARGS` appended after the core startup flags.
+Managed llama.cpp startup uses `llama-server` from `PATH` and `LOCAL_MODEL_PROFILE=small` by
+default. `LOCAL_MODEL_PROFILE=26b` selects
+`HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:Q4_K_M`.
+Both named profiles use `--jinja`, disabled reasoning/thinking, full GPU offload, an 8192-token
+context, flash attention, q8_0 K cache, q4_0 V cache, and seed `424242`.
+`LLAMA_CPP_SERVER_PATH` can select another binary. `LLAMA_CPP_MODEL_PATH` switches
+startup from `-hf` to a local `-m` GGUF path. It also accepts `LLAMA_CPP_HOST` and
+`LLAMA_CPP_PORT`, optional `LLAMA_CPP_CTX_SIZE` for `-c`, optional
+`LLAMA_CPP_N_GPU_LAYERS`, and whitespace-separated `LLAMA_CPP_SERVER_ARGS`.
+`LIVE_TURN_COUNT` accepts `5` through `50` and defaults to `8`; the former
+`LIVE_LONG_TURN_COUNT` remains a fallback when `LIVE_TURN_COUNT` is unset.
+`LIVE_FAIL_ON_STRUCTURED_WARNINGS=1` is the default and fails the checkpoint on critic,
+memory-curation, memory-indexing, or retrieval warnings. Set it explicitly to `0` for report-only
+warning handling. Playwright remains enabled unless `LIVE_SKIP_BROWSER=1`.
 
 Operational rules:
 
@@ -390,7 +421,7 @@ Operational rules:
 - `doctor` never mutates the configured runtime database. It verifies SQLite using a temporary file.
 - `smoke-run` uses a temporary SQLite database, deterministic embeddings, in-memory retrieval, and fake provider responses by default.
 - `--real-runtime` adds shallow Qdrant and local-provider reachability checks only. It does not call cloud APIs, real completions, or write to Qdrant.
-- `scripts/live-smoke.sh` is the live local-stack path. It requires Docker, npm, and Playwright browser installation. It reuses an existing local model server exposing the configured model id, or starts managed llama.cpp when `LLAMA_CPP_SERVER_PATH` and `LLAMA_CPP_MODEL_PATH` are set. Structured-output warnings from critic or memory extraction are preserved in the report but are not treated as infrastructure failures when the actor turn succeeds.
+- `scripts/live-smoke.sh` is the live local-stack checkpoint. It requires Docker, npm, Playwright, and `llama-server` on `PATH` when no matching provider is already running. It reuses an existing provider or starts and safely stops the managed Hugging Face model above. Structured-output and retrieval warnings fail by default and can be made report-only with `LIVE_FAIL_ON_STRUCTURED_WARNINGS=0`.
 - cloud placeholder keys such as `replace_me` are treated as unusable and reported clearly.
 
 Failure interpretation:
@@ -608,11 +639,34 @@ python -m app.evals.regression_runner
 
 CI runs those deterministic checks on push and pull request. The separate `Live Smoke` workflow is
 manual and targets self-hosted runners because GitHub-hosted runners do not provide the required
-local GGUF model or llama.cpp binary. Use its optional `llama_server_path`, `llama_model_path`,
-`llama_ctx_size`, and `llama_n_gpu_layers` inputs to start managed llama.cpp on the runner. The live
-workflow uploads `/tmp/rolerag-live-test` as an artifact, including `report.md`, raw command
-outputs, API flow JSON, llama-server logs when managed startup is used, and Playwright traces on
-failure.
+local GGUF model or llama.cpp binary. The workflow defaults to the managed Hugging Face model and
+supports `llama_server_path`, `llama_hf_model`, `llama_model_path`, `llama_ctx_size`, and
+`llama_n_gpu_layers` overrides. The live
+workflow validates `turn_count` from `5` through `50`, defaults to eight turns and strict warning
+handling, and uploads `/tmp/rolerag-live-test` unconditionally. Artifacts include `report.md`, the
+conversation checkpoint JSON, raw command outputs, API flow JSON, llama-server logs when managed
+startup is used, and Playwright traces on failure.
+
+Run the paired local-model comparison manually:
+
+```bash
+PYTHON=.venv/bin/python bash scripts/test-local-model-matrix.sh
+```
+
+It runs deterministic checks once, then the complete live stack sequentially for the small and 26B
+profiles with the same seed and 20-turn story. Outputs are isolated under
+`/tmp/rolerag-model-comparison/{small,26b}` with `comparison.json`, `comparison.md`, and a
+turn-aligned transcript. The 50-turn extension is explicit:
+
+```bash
+MODEL_COMPARE_TURN_COUNT=50 \
+PYTHON=.venv/bin/python \
+bash scripts/test-local-model-matrix.sh
+```
+
+Quality findings are report-only. Deterministic, infrastructure, persistence, indexing, retrieval
+visibility, and other application-invariant failures produce a nonzero exit. The paired run is
+manual and is not part of normal CI.
 
 The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation
 behavior, long-session durable-memory continuity, and cloud-routing policy. The 16-turn
@@ -655,3 +709,5 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - [docs/06_local_cloud_model_strategy.md](docs/06_local_cloud_model_strategy.md)
 - [docs/07_mvp_phases.md](docs/07_mvp_phases.md)
 - [docs/12_api_contract.md](docs/12_api_contract.md)
+- [docs/13_live_model_quality_assessment.md](docs/13_live_model_quality_assessment.md)
+- [docs/14_local_model_comparison_2026-06-08.md](docs/14_local_model_comparison_2026-06-08.md)

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/process-lifecycle.sh"
+source "${SCRIPT_DIR}/lib/local-model-profile.sh"
+
 PYTHON="${PYTHON:-python}"
 ARTIFACT_DIR="${LIVE_ARTIFACT_DIR:-/tmp/rolerag-live-test}"
 RAW_DIR="${ARTIFACT_DIR}/raw"
@@ -19,19 +23,30 @@ LOCAL_LLM_API_KEY="${LOCAL_LLM_API_KEY:-local}"
 LOCAL_LLM_MODEL="${LOCAL_LLM_MODEL:-${LIVE_LLM_MODEL:-chatgpt-onnechan}}"
 CLOUD_MODE="${CLOUD_MODE:-off}"
 
-LLAMA_CPP_SERVER_PATH="${LLAMA_CPP_SERVER_PATH:-}"
+LLAMA_CPP_SERVER_PATH="${LLAMA_CPP_SERVER_PATH:-llama-server}"
 LLAMA_CPP_MODEL_PATH="${LLAMA_CPP_MODEL_PATH:-}"
+LOCAL_MODEL_PROFILE="${LOCAL_MODEL_PROFILE:-small}"
+resolve_local_model_profile
+LLAMA_CPP_HF_MODEL="${LLAMA_CPP_HF_MODEL:-${PROFILE_HF_MODEL}}"
 LLAMA_CPP_HOST="${LLAMA_CPP_HOST:-127.0.0.1}"
 LLAMA_CPP_PORT="${LLAMA_CPP_PORT:-8080}"
-LLAMA_CPP_CTX_SIZE="${LLAMA_CPP_CTX_SIZE:-4096}"
+LLAMA_CPP_CTX_SIZE="${LLAMA_CPP_CTX_SIZE:-}"
 LLAMA_CPP_N_GPU_LAYERS="${LLAMA_CPP_N_GPU_LAYERS:-}"
 LLAMA_CPP_SERVER_ARGS="${LLAMA_CPP_SERVER_ARGS:-}"
+LLAMA_CPP_STOP_TIMEOUT="${LLAMA_CPP_STOP_TIMEOUT:-15}"
 
 DATABASE_PATH="${DATABASE_PATH:-${WORK_DIR}/rolerag-live.db}"
 CONTENT_ROOT="${CONTENT_ROOT:-data}"
 LIVE_SKIP_BROWSER="${LIVE_SKIP_BROWSER:-0}"
 LIVE_LONG_TURN_COUNT="${LIVE_LONG_TURN_COUNT:-0}"
-LIVE_FAIL_ON_STRUCTURED_WARNINGS="${LIVE_FAIL_ON_STRUCTURED_WARNINGS:-0}"
+if [[ -z "${LIVE_TURN_COUNT:-}" ]]; then
+  if [[ "${LIVE_LONG_TURN_COUNT}" == "0" ]]; then
+    LIVE_TURN_COUNT="8"
+  else
+    LIVE_TURN_COUNT="${LIVE_LONG_TURN_COUNT}"
+  fi
+fi
+LIVE_FAIL_ON_STRUCTURED_WARNINGS="${LIVE_FAIL_ON_STRUCTURED_WARNINGS:-1}"
 
 API_PID=""
 LLAMA_CPP_PID=""
@@ -63,7 +78,7 @@ cat > "${REPORT}" <<EOF
 - local_llm_model: ${LOCAL_LLM_MODEL}
 - database_path: ${DATABASE_PATH}
 - cloud_mode: ${CLOUD_MODE}
-- live_long_turn_count: ${LIVE_LONG_TURN_COUNT}
+- live_turn_count: ${LIVE_TURN_COUNT:-8}
 - live_fail_on_structured_warnings: ${LIVE_FAIL_ON_STRUCTURED_WARNINGS}
 
 ## Steps
@@ -72,12 +87,10 @@ EOF
 cleanup() {
   local exit_code=$?
   if [[ -n "${API_PID}" ]]; then
-    kill "${API_PID}" >/dev/null 2>&1 || true
-    wait "${API_PID}" >/dev/null 2>&1 || true
+    stop_managed_process "${API_PID}" "FastAPI" 10
   fi
   if [[ "${LLAMA_CPP_STARTED}" == "1" && -n "${LLAMA_CPP_PID}" ]]; then
-    kill "${LLAMA_CPP_PID}" >/dev/null 2>&1 || true
-    wait "${LLAMA_CPP_PID}" >/dev/null 2>&1 || true
+    stop_managed_process "${LLAMA_CPP_PID}" "llama.cpp" "${LLAMA_CPP_STOP_TIMEOUT}"
   fi
   if [[ "${QDRANT_STARTED}" == "1" ]]; then
     docker rm -f "${QDRANT_CONTAINER}" > "${RAW_DIR}/qdrant-cleanup.out" 2>&1 || true
@@ -263,17 +276,21 @@ print_redacted_command() {
 }
 
 start_managed_llama() {
-  if [[ -z "${LLAMA_CPP_SERVER_PATH}" || -z "${LLAMA_CPP_MODEL_PATH}" ]]; then
+  if [[ -z "${LLAMA_CPP_SERVER_PATH}" ]]; then
     {
       echo "No existing local provider exposed LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL} at ${MODELS_URL}."
-      echo "Set both LLAMA_CPP_SERVER_PATH and LLAMA_CPP_MODEL_PATH to let this script start llama.cpp,"
+      echo "Set LLAMA_CPP_SERVER_PATH to let this script start llama.cpp,"
       echo "or start an OpenAI-compatible local server that exposes the configured model."
     } >&2
     return 1
   fi
 
-  if [[ ! -f "${LLAMA_CPP_MODEL_PATH}" ]]; then
+  if [[ -n "${LLAMA_CPP_MODEL_PATH}" && ! -f "${LLAMA_CPP_MODEL_PATH}" ]]; then
     echo "LLAMA_CPP_MODEL_PATH does not exist: ${LLAMA_CPP_MODEL_PATH}" >&2
+    return 1
+  fi
+  if [[ -z "${LLAMA_CPP_MODEL_PATH}" && -z "${LLAMA_CPP_HF_MODEL}" ]]; then
+    echo "Set LLAMA_CPP_MODEL_PATH or LLAMA_CPP_HF_MODEL for managed startup." >&2
     return 1
   fi
 
@@ -284,23 +301,31 @@ start_managed_llama() {
 
   local cmd=(
     "${server_path}"
-    -m "${LLAMA_CPP_MODEL_PATH}"
+  )
+  if [[ -n "${LLAMA_CPP_MODEL_PATH}" ]]; then
+    cmd+=(-m "${LLAMA_CPP_MODEL_PATH}")
+  else
+    cmd+=(-hf "${LLAMA_CPP_HF_MODEL}")
+  fi
+  cmd+=(
     --host "${LLAMA_CPP_HOST}"
     --port "${LLAMA_CPP_PORT}"
     --alias "${LOCAL_LLM_MODEL}"
-    -c "${LLAMA_CPP_CTX_SIZE}"
   )
 
-  if [[ -n "${LOCAL_LLM_API_KEY}" ]]; then
+  if [[ -n "${LOCAL_LLM_API_KEY}" && "${LOCAL_LLM_API_KEY}" != "local" ]]; then
     cmd+=(--api-key "${LOCAL_LLM_API_KEY}")
+  fi
+  cmd+=("${PROFILE_LLAMA_ARGS[@]}")
+  if [[ -n "${LLAMA_CPP_CTX_SIZE}" ]]; then
+    cmd+=(-c "${LLAMA_CPP_CTX_SIZE}")
   fi
   if [[ -n "${LLAMA_CPP_N_GPU_LAYERS}" ]]; then
     cmd+=(--n-gpu-layers "${LLAMA_CPP_N_GPU_LAYERS}")
   fi
   if [[ -n "${LLAMA_CPP_SERVER_ARGS}" ]]; then
-    local extra_args=()
-    read -r -a extra_args <<< "${LLAMA_CPP_SERVER_ARGS}"
-    cmd+=("${extra_args[@]}")
+    parse_extra_llama_args "${LLAMA_CPP_SERVER_ARGS}"
+    cmd+=("${PARSED_LLAMA_ARGS[@]}")
   fi
 
   {
@@ -345,14 +370,23 @@ export LOCAL_LLM_BASE_URL
 export LOCAL_LLM_API_KEY
 export LOCAL_LLM_MODEL
 export CLOUD_MODE
+export LIVE_TURN_COUNT
 export LIVE_LONG_TURN_COUNT
 export LIVE_FAIL_ON_STRUCTURED_WARNINGS
+export STRUCTURED_OUTPUT_FAILURE_LOG_DIR="${STRUCTURED_OUTPUT_FAILURE_LOG_DIR:-${RAW_DIR}/structured-failures}"
 export PLAYWRIGHT_BASE_URL="${API_BASE_URL}"
 export PLAYWRIGHT_OUTPUT_DIR="${ARTIFACT_DIR}/playwright-results"
 export PLAYWRIGHT_HTML_REPORT="${ARTIFACT_DIR}/playwright-report"
 
 run_step prerequisites "Check required local commands" bash -c \
   'command -v docker && command -v curl && command -v npm && command -v "$1"' _ "${PYTHON}"
+
+run_step turn-count "Validate conversation turn count" \
+  "${PYTHON}" -c \
+  'from app.diagnostics.live_checkpoint import resolve_turn_count; print(resolve_turn_count(__import__("os").environ.get("LIVE_TURN_COUNT"), __import__("os").environ.get("LIVE_LONG_TURN_COUNT")))'
+LIVE_TURN_COUNT="$("${PYTHON}" -c \
+  'from app.diagnostics.live_checkpoint import resolve_turn_count; print(resolve_turn_count(__import__("os").environ.get("LIVE_TURN_COUNT"), __import__("os").environ.get("LIVE_LONG_TURN_COUNT")))')"
+export LIVE_TURN_COUNT
 
 run_step local-provider-startup "Ensure local provider model is available" ensure_local_provider
 
@@ -515,147 +549,17 @@ else
   run_step playwright "Run Playwright UI smoke" npm run test:live-ui -- --reporter=line
 fi
 
-if [[ "${LIVE_LONG_TURN_COUNT}" == "0" ]]; then
-  printf -- "- SKIP Long-session Rose Gallery flow (LIVE_LONG_TURN_COUNT=0)\n" >> "${REPORT}"
-else
-  run_step long-session "Run ${LIVE_LONG_TURN_COUNT}-turn Rose Gallery flow" \
-    "${PYTHON}" - \
-    "${API_BASE_URL}" \
-    "${LOCAL_LLM_MODEL}" \
-    "${DATABASE_PATH}" \
-    "${LIVE_LONG_TURN_COUNT}" \
-    "${LIVE_FAIL_ON_STRUCTURED_WARNINGS}" \
-    "${RAW_DIR}/long-session.json" <<'PY'
-from __future__ import annotations
+run_step conversation-checkpoint "Run ${LIVE_TURN_COUNT}-turn Rose Gallery checkpoint" \
+  "${PYTHON}" -m app.diagnostics.live_checkpoint \
+  --api-base-url "${API_BASE_URL}" \
+  --expected-model "${LOCAL_LLM_MODEL}" \
+  --database-path "${DATABASE_PATH}" \
+  --turn-count "${LIVE_TURN_COUNT}" \
+  --fail-on-structured-warnings "${LIVE_FAIL_ON_STRUCTURED_WARNINGS}" \
+  --json-report "${RAW_DIR}/conversation-checkpoint.json" \
+  --markdown-report "${WORK_DIR}/conversation-checkpoint.md"
 
-import json
-import sqlite3
-import sys
-import time
-from pathlib import Path
-from typing import Any
-
-import httpx
-
-base_url = sys.argv[1]
-expected_model = sys.argv[2]
-database_path = Path(sys.argv[3])
-turn_count = int(sys.argv[4])
-fail_on_structured_warnings = sys.argv[5] == "1"
-output_path = Path(sys.argv[6])
-
-messages = [
-    "I step into the Rose Gallery and ask Iria what first changed tonight.",
-    "I lower my voice and ask which courtier she trusts least in this room.",
-    "I promise to return before dawn if she can keep the archive door unbarred.",
-    "I ask what the mirrors have shown her about the regent's messengers.",
-    "I inspect the nearest rose arrangement and ask whether it hides a signal.",
-    "I ask Iria to describe the safest path from here to the old archive.",
-    "I tell her I noticed the servant by the west door and ask if that matters.",
-    "I ask whether my promise before dawn changes what she is willing to risk.",
-    "I request a private walk with Iria in the Rose Gallery.",
-    "I ask what she has truly been afraid to say aloud tonight.",
-    "I ask her to name the next small action I should take without alarming anyone.",
-    "I thank her and ask what she wants me to remember when I leave.",
-]
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
-
-
-def warning_counts(warnings: list[Any]) -> dict[str, int]:
-    counts = {"critic": 0, "memory": 0, "other": 0}
-    for warning in warnings:
-        text = str(warning)
-        if text.startswith("critic skipped:"):
-            counts["critic"] += 1
-        elif text.startswith("memory curation skipped:"):
-            counts["memory"] += 1
-        else:
-            counts["other"] += 1
-    return counts
-
-
-require(turn_count == 12, "LIVE_LONG_TURN_COUNT currently supports only 0 or 12")
-
-turns: list[dict[str, Any]] = []
-with httpx.Client(base_url=base_url, timeout=240.0) as client:
-    session_response = client.post(
-        "/sessions",
-        json={
-            "world_id": "demo_world",
-            "scene_id": "rose-gallery",
-            "active_persona_id": "archivist",
-            "player_name": "Long Live Smoke",
-        },
-    )
-    session_response.raise_for_status()
-    session = session_response.json()
-    session_id = str(session["session_id"])
-
-    for index, message in enumerate(messages, start=1):
-        started = time.monotonic()
-        turn_response = client.post(
-            f"/sessions/{session_id}/turns",
-            json={"message": message, "request_cloud": False},
-        )
-        duration_seconds = time.monotonic() - started
-        turn_response.raise_for_status()
-        turn = turn_response.json()
-        route = turn.get("route", {})
-        warnings = turn.get("warnings", [])
-        counts = warning_counts(warnings)
-
-        require(isinstance(turn.get("text"), str) and turn["text"].strip(), f"empty actor text on turn {index}")
-        require(route.get("provider") == "local", f"unexpected route provider on turn {index}: {route}")
-        require(route.get("model") == expected_model, f"unexpected route model on turn {index}: {route}")
-        if fail_on_structured_warnings:
-            require(
-                counts["critic"] == 0 and counts["memory"] == 0,
-                f"structured-output warnings on turn {index}: {warnings}",
-            )
-
-        turns.append(
-            {
-                "turn_index": index,
-                "duration_seconds": round(duration_seconds, 3),
-                "response_chars": len(turn.get("text", "")),
-                "route": route,
-                "memory_written": turn.get("memory_written"),
-                "warning_counts": counts,
-                "warnings": warnings,
-            }
-        )
-
-    lookup_response = client.get(f"/sessions/{session_id}")
-    lookup_response.raise_for_status()
-    lookup = lookup_response.json()
-
-with sqlite3.connect(database_path) as connection:
-    persisted_turn_count = connection.execute(
-        "SELECT COUNT(*) FROM turns WHERE session_id = ?",
-        (session_id,),
-    ).fetchone()[0]
-
-require(persisted_turn_count == turn_count, f"persisted-turn count mismatch: {persisted_turn_count} != {turn_count}")
-
-structured_warning_counts = {
-    "critic": sum(turn["warning_counts"]["critic"] for turn in turns),
-    "memory": sum(turn["warning_counts"]["memory"] for turn in turns),
-}
-summary = {
-    "session": session,
-    "turns": turns,
-    "lookup_recent_turn_count": len(lookup.get("recent_turns", [])),
-    "persisted_turn_count": persisted_turn_count,
-    "structured_warning_counts": structured_warning_counts,
-}
-output_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
-print(json.dumps(summary, indent=2, sort_keys=True))
-PY
-fi
+cat "${WORK_DIR}/conversation-checkpoint.md" >> "${REPORT}"
 
 {
   echo

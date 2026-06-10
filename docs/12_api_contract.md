@@ -156,7 +156,8 @@ entries and remain backend-owned.
 
 `active_persona_id` is optional. When provided, it must match the stored session persona.
 
-The success response includes generated text, route metadata, memory-write status, and warnings:
+The success response includes generated text, route metadata, the provider finish reason,
+memory-write status, and warnings:
 
 ```json
 {
@@ -166,13 +167,37 @@ The success response includes generated text, route metadata, memory-write statu
     "model": "local-model",
     "reason": "default local route"
   },
+  "finish_reason": "stop",
   "memory_written": false,
-  "warnings": []
+  "warnings": [],
+  "retrieval": {
+    "query": "<retrieval query>",
+    "selected": [
+      {
+        "id": "public-lore",
+        "source": "demo_lore.md",
+        "source_type": "lore",
+        "collection": "canon_lore",
+        "visibility": "player",
+        "tags": [],
+        "original_score": 0.61,
+        "adjusted_score": 0.61,
+        "applied_boosts": {},
+        "selected_rank": 1
+      }
+    ],
+    "rejected": []
+  }
 }
 ```
 
 `warnings` reports fail-open runtime behavior, such as skipped retrieval or skipped cloud routing.
 A turn can return HTTP `200` with warnings when actor generation still completed.
+
+`retrieval` is a report-only ranking diagnostic. It lists the selected chunks and the rejected
+candidates with their score components, contains metadata only, and never includes chunk text.
+It is `null` when retrieval is not configured or the retriever does not expose diagnostics. The
+same object appears in the streaming `final` and `failure` payloads.
 
 ## Buffered Turn Streaming
 
@@ -192,7 +217,7 @@ event: text
 data: {"text":"<validated final text>"}
 
 event: final
-data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "memory_written":false, "warnings":[]}
+data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "warnings":[]}
 
 ```
 
@@ -205,7 +230,7 @@ stream emits only one `failure` event and never emits rejected draft text:
 
 ```text
 event: failure
-data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "memory_written":false, "warnings":[]}
+data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"length", "memory_written":false, "warnings":[]}
 
 ```
 
@@ -228,13 +253,18 @@ Stable error codes:
 - `invalid_content_catalog`
 - `invalid_session_request`
 - `invalid_turn_request`
+- `provider_timeout`
 - `session_not_found`
 - `validation_error`
 
+A turn whose provider request exceeds the configured provider timeout returns
+`504 provider_timeout` with the same envelope. The message names the provider and model but never
+includes prompt text.
+
 Failures known before streaming starts retain the same JSON envelopes: `400 invalid_turn_request`,
-`404 session_not_found`, and `422 validation_error`. Validation details contain only `loc`, `type`,
-and the fixed sanitized message `Request field validation failed`; reflected input and validator
-context are excluded.
+`404 session_not_found`, `422 validation_error`, and `504 provider_timeout`. Validation details
+contain only `loc`, `type`, and the fixed sanitized message `Request field validation failed`;
+reflected input and validator context are excluded.
 
 ## Exposure Boundaries
 
@@ -248,4 +278,5 @@ provider secrets, SQLite internals, Qdrant internals, provider internals, or Qdr
 The local play UI does not provide authentication, multi-user isolation, browser-local
 authoritative state, or frontend scenario-pack selection. The API does not provide provider token
 streaming, pre-validation token emission, per-request content-root selection, per-request
-scenario-pack selection, hidden-context diagnostics, or raw retrieval/debug payloads.
+scenario-pack selection, hidden-context diagnostics, or retrieval payloads containing chunk text;
+the `retrieval` diagnostic field is metadata-only.

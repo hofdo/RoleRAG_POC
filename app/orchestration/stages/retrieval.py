@@ -3,10 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.domain import RetrievedChunk, TurnInput
+from app.domain import (
+    RetrievalCandidateDiagnostic,
+    RetrievedChunk,
+    TurnInput,
+    TurnRetrievalDiagnostics,
+)
 from app.domain.visibility import Visibility
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages.session import LoadedTurnContext
+from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics, RetrievalResult
 from app.rag.retriever import build_retrieval_query
 
 
@@ -28,6 +34,7 @@ class RetrievalStageResult:
     chunks: tuple[RetrievedChunk, ...]
     confidence: float | None
     warnings: tuple[str, ...]
+    diagnostics: TurnRetrievalDiagnostics | None = None
 
 
 class TurnRetrievalStage:
@@ -56,7 +63,7 @@ class TurnRetrievalStage:
             recent_turns=context.recent_turns,
         )
         try:
-            chunks = self.actor_context_retriever.retrieve_for_actor(
+            chunks, diagnostics = self._retrieve(
                 query=query,
                 world_id=context.session.world_id,
                 session_id=context.session.id,
@@ -72,6 +79,7 @@ class TurnRetrievalStage:
                 chunks=tuple(chunks),
                 confidence=confidence,
                 warnings=(),
+                diagnostics=diagnostics,
             )
         except Exception as exc:
             return RetrievalStageResult(
@@ -79,3 +87,59 @@ class TurnRetrievalStage:
                 confidence=None,
                 warnings=(f"retrieval skipped: {exc}",),
             )
+
+    def _retrieve(
+        self,
+        *,
+        query: str,
+        world_id: str,
+        session_id: str,
+        persona_id: str,
+        scene_id: str | None,
+        top_k: int,
+    ) -> tuple[list[RetrievedChunk], TurnRetrievalDiagnostics | None]:
+        retriever = self.actor_context_retriever
+        assert retriever is not None
+        with_diagnostics = getattr(retriever, "retrieve_for_actor_with_diagnostics", None)
+        if callable(with_diagnostics):
+            result: RetrievalResult = with_diagnostics(
+                query=query,
+                world_id=world_id,
+                session_id=session_id,
+                persona_id=persona_id,
+                scene_id=scene_id,
+                top_k=top_k,
+            )
+            return list(result.chunks), _to_turn_diagnostics(result.diagnostics)
+        chunks = retriever.retrieve_for_actor(
+            query=query,
+            world_id=world_id,
+            session_id=session_id,
+            persona_id=persona_id,
+            scene_id=scene_id,
+            top_k=top_k,
+        )
+        return chunks, None
+
+
+def _to_turn_diagnostics(diagnostics: RetrievalDiagnostics) -> TurnRetrievalDiagnostics:
+    return TurnRetrievalDiagnostics(
+        query=diagnostics.query,
+        selected=[_to_candidate(entry) for entry in diagnostics.selected],
+        rejected=[_to_candidate(entry) for entry in diagnostics.rejected],
+    )
+
+
+def _to_candidate(entry: ChunkRetrievalDiagnostic) -> RetrievalCandidateDiagnostic:
+    return RetrievalCandidateDiagnostic(
+        id=entry.id,
+        source=entry.source,
+        source_type=entry.source_type,
+        collection=entry.collection.value,
+        visibility=entry.visibility,
+        tags=entry.tags,
+        original_score=entry.original_score,
+        adjusted_score=entry.adjusted_score,
+        applied_boosts=entry.applied_boosts,
+        selected_rank=entry.selected_rank,
+    )

@@ -329,8 +329,10 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
             "model": "local-model",
             "reason": "default local route",
         },
+        "finish_reason": "stop",
         "memory_written": False,
         "warnings": [],
+        "retrieval": None,
     }
     assert len(provider.requests) == 1
     assert len(retriever.calls) == 1
@@ -358,6 +360,13 @@ def test_post_turn_uses_in_memory_retrieval_without_live_qdrant(tmp_path: Path) 
     assert "The gallery archive mirror marks the locked west door." in prompt
     assert "Another gallery archive mirror marks a west door." not in prompt
     assert "A spy waits behind the gallery archive mirror." not in prompt
+    retrieval = response.json()["retrieval"]
+    assert retrieval is not None
+    assert [entry["id"] for entry in retrieval["selected"]] == ["public-lore"]
+    assert retrieval["selected"][0]["collection"] == "canon_lore"
+    assert retrieval["selected"][0]["selected_rank"] == 1
+    assert "text" not in retrieval["selected"][0]
+    assert retrieval["rejected"] == []
 
 
 def test_post_turn_returns_404_for_missing_session(tmp_path: Path) -> None:
@@ -496,8 +505,10 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                     "model": "local-model",
                     "reason": "default local route",
                 },
+                "finish_reason": "stop",
                 "memory_written": False,
                 "warnings": [],
+                "retrieval": None,
             },
         ),
     ]
@@ -665,3 +676,32 @@ def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(
     assert isinstance(failure_text, str)
     assert "could not produce a response that passed validation" in failure_text
     assert "hidden context" not in response.text
+
+
+def test_post_turn_returns_504_envelope_when_local_provider_times_out(tmp_path: Path) -> None:
+    from app.llm.provider import ProviderTimeoutError
+
+    class TimeoutProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise ProviderTimeoutError(
+                provider="local",
+                model=request.model,
+                timeout_seconds=180.0,
+            )
+
+    services, _, _ = _build_services(tmp_path)
+    services.orchestrator.generation_stage.provider = TimeoutProvider()
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 504
+    payload = response.json()
+    assert payload["error"]["code"] == "provider_timeout"
+    assert "timed out" in payload["error"]["message"]
+    assert payload["error"]["details"] == []

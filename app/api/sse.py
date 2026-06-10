@@ -10,6 +10,7 @@ from app.api.schemas import (
     StreamFailurePayload,
     StreamFinalPayload,
     StreamTextPayload,
+    to_retrieval_diagnostics_response,
 )
 from app.domain import TurnOutcome, TurnResult
 
@@ -20,6 +21,7 @@ def build_turn_stream_frames(result: TurnResult) -> list[str]:
         model=result.route.model,
         reason=result.route.reason,
     )
+    retrieval = to_retrieval_diagnostics_response(result.retrieval)
     if result.outcome == TurnOutcome.CONTROLLED_FAILURE:
         return [
             _serialize_frame(
@@ -27,8 +29,10 @@ def build_turn_stream_frames(result: TurnResult) -> list[str]:
                 StreamFailurePayload(
                     text=result.text,
                     route=route,
+                    finish_reason=result.finish_reason,
                     memory_written=result.memory_written,
                     warnings=result.warnings,
+                    retrieval=retrieval,
                 ),
             )
         ]
@@ -38,8 +42,10 @@ def build_turn_stream_frames(result: TurnResult) -> list[str]:
             "final",
             StreamFinalPayload(
                 route=route,
+                finish_reason=result.finish_reason,
                 memory_written=result.memory_written,
                 warnings=result.warnings,
+                retrieval=retrieval,
             ),
         ),
     ]

@@ -1,0 +1,84 @@
+{
+  "study": "local-model-comparison-50-turn",
+  "date": "2026-06-08",
+  "prose_quality_winner": null,
+  "exit_codes": {
+    "deterministic": 0,
+    "small": 1,
+    "26b": 0
+  },
+  "small": {
+    "primary": {
+      "status": "failed",
+      "persisted_turns": 37,
+      "failed_request_turn": 38,
+      "failure": "local provider request timed out and surfaced as HTTP 500"
+    },
+    "identical_rerun": {
+      "status": "failed",
+      "persisted_turns": 29,
+      "failed_request_turn": 30,
+      "failure": "checkpoint HTTP client timed out while the turn request remained incomplete"
+    },
+    "attribution": "reproducible model-application/infrastructure timeout under the long-session workload"
+  },
+  "26b": {
+    "status": "pass",
+    "persisted_turns": 50,
+    "persisted_memories": 71,
+    "qdrant_session_memories": 71,
+    "warning_counts": {
+      "critic": 50,
+      "memory_curation": 0,
+      "indexing": 0,
+      "retrieval": 0
+    },
+    "finish_reason_distribution": {
+      "stop": 50
+    },
+    "latency_seconds": {
+      "total": 4152.327,
+      "mean": 83.047,
+      "p50": 85.451,
+      "p95": 102.384
+    },
+    "events": {
+      "before_dawn_promise": {
+        "extracted": true,
+        "indexed": true,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": "partial: remembered a promise and returning, but not the before-dawn condition"
+      },
+      "silver_compass": {
+        "extracted": false,
+        "indexed": false,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": "partial action: returned an unnamed metal item without identifying the silver compass"
+      },
+      "blue_seal_trust_rule": {
+        "extracted": true,
+        "indexed": true,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": "incorrect: invented a three-source verification rule"
+      },
+      "key_hiding_place": {
+        "extracted": true,
+        "indexed": true,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": "incorrect: invented a western urn instead of the third rose pedestal"
+      },
+      "three_tap_signal": {
+        "extracted": true,
+        "indexed": true,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": "incorrect: invented a cuff gesture instead of three soft taps"
+      }
+    }
+  },
+  "full_runtime_artifacts": "/tmp/rolerag-model-comparison-50"
+}

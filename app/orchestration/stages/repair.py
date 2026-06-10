@@ -21,6 +21,7 @@ CONTROLLED_FAILURE_TEXT = (
 class RepairStageResult:
     text: str
     route: ModelRoute
+    finish_reason: str | None
     outcome: TurnOutcome
     warnings: tuple[str, ...]
 
@@ -55,7 +56,7 @@ class TurnRepairStage:
             retrieval_confidence=retrieval.confidence,
             scene_complexity=routing.scene_complexity,
         )
-        repaired_text, repaired_route, generation_warnings = (
+        repaired_text, repaired_route, repaired_finish_reason, generation_warnings = (
             await self.generation_stage.generate_messages(
                 route=local_route,
                 messages=self.critique_stage.critic_agent.build_local_repair_messages(
@@ -82,6 +83,7 @@ class TurnRepairStage:
             return RepairStageResult(
                 text=repaired_text,
                 route=repaired_route,
+                finish_reason=repaired_finish_reason,
                 outcome=TurnOutcome.SUCCESS,
                 warnings=tuple(warnings),
             )
@@ -93,15 +95,23 @@ class TurnRepairStage:
         )
         if cloud_route.provider == ModelProviderName.LOCAL:
             warnings.append(self.routing_stage.warning_for_skipped_cloud(cloud_route.reason))
-            return self._controlled_failure(cloud_route, warnings)
+            return self._controlled_failure(
+                cloud_route,
+                warnings,
+                finish_reason=repaired_finish_reason,
+            )
         if cloud_route.requires_user_confirmation:
             warnings.append(
                 "cloud repair skipped: "
                 f"confirmation required for {cloud_route.model} ({cloud_route.reason})"
             )
-            return self._controlled_failure(cloud_route, warnings)
+            return self._controlled_failure(
+                cloud_route,
+                warnings,
+                finish_reason=repaired_finish_reason,
+            )
 
-        cloud_text, cloud_final_route, generation_warnings = (
+        cloud_text, cloud_final_route, cloud_finish_reason, generation_warnings = (
             await self.generation_stage.generate_messages(
                 route=cloud_route,
                 messages=self.critique_stage.critic_agent.build_cloud_repair_messages(
@@ -126,19 +136,27 @@ class TurnRepairStage:
             return RepairStageResult(
                 text=cloud_text,
                 route=cloud_final_route,
+                finish_reason=cloud_finish_reason,
                 outcome=TurnOutcome.SUCCESS,
                 warnings=tuple(warnings),
             )
-        return self._controlled_failure(cloud_final_route, warnings)
+        return self._controlled_failure(
+            cloud_final_route,
+            warnings,
+            finish_reason=cloud_finish_reason,
+        )
 
     @staticmethod
     def _controlled_failure(
         route: ModelRoute,
         warnings: list[str],
+        *,
+        finish_reason: str | None,
     ) -> RepairStageResult:
         return RepairStageResult(
             text=CONTROLLED_FAILURE_TEXT,
             route=route,
+            finish_reason=finish_reason,
             outcome=TurnOutcome.CONTROLLED_FAILURE,
             warnings=tuple(warnings),
         )

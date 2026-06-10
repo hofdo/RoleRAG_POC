@@ -255,7 +255,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
     "xt\":\"The \"}\n\nevent: text\ndata: {\"text\":\"gallery",
     " is quiet.\"}\n\nevent: final\ndata: {\"route\":{\"provider\":\"local\",",
     "\"model\":\"local-model\",\"reason\":\"default local route\"},\"memory_written\":true,",
-    "\"warnings\":[\"index delayed\"]}\n\n",
+    "\"finish_reason\":\"stop\",\"warnings\":[\"index delayed\"]}\n\n",
   ];
   const fetchImpl = async () => new Response(
     new ReadableStream({
@@ -277,6 +277,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
   assert.deepEqual(turn, {
     text: "The gallery is quiet.",
     route: { provider: "local", model: "local-model", reason: "default local route" },
+    finish_reason: "stop",
     memory_written: true,
     warnings: ["index delayed"],
   });
@@ -285,7 +286,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
 test("createBufferedTurn renders safe failure text without rejected drafts", async () => {
   const safeText = "I cannot continue that turn safely.";
   const fetchImpl = async () => new Response(
-    `event: failure\ndata: {"text":"${safeText}","route":{"provider":"local","model":"local-model","reason":"default local route"},"memory_written":false,"warnings":["critic rejected output"]}\n\n`,
+    `event: failure\ndata: {"text":"${safeText}","route":{"provider":"local","model":"local-model","reason":"default local route"},"finish_reason":"length","memory_written":false,"warnings":["critic rejected output"]}\n\n`,
     { headers: { "content-type": "text/event-stream" } },
   );
 
@@ -295,6 +296,7 @@ test("createBufferedTurn renders safe failure text without rejected drafts", asy
   }, { fetchImpl });
 
   assert.equal(turn.text, safeText);
+  assert.equal(turn.finish_reason, "length");
   assert.deepEqual(turn.warnings, ["critic rejected output"]);
 });
 

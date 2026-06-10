@@ -9,6 +9,15 @@ class StructuredOutputParseError(ValueError):
     pass
 
 
+class StructuredOutputError(ValueError):
+    """Structured-output failure that keeps the model's raw text for diagnostics."""
+
+    def __init__(self, message: str, *, category: str, raw_text: str = "") -> None:
+        super().__init__(message)
+        self.category = category
+        self.raw_text = raw_text
+
+
 def parse_single_json_object(text: str) -> dict[str, Any]:
     """Parse strict JSON, or extract one wrapped top-level JSON object."""
     try:

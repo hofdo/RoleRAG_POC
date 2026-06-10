@@ -265,6 +265,7 @@ function renderDebugState() {
   addDebugRow("Route provider", state.debug.routeProvider);
   addDebugRow("Route model", state.debug.routeModel);
   addDebugRow("Route reason", state.debug.routeReason);
+  addDebugRow("finish_reason", state.debug.finishReason ?? "none");
   addDebugRow("memory_written", state.debug.memoryWritten);
   addDebugRow("Warnings", state.debug.warnings.length ? state.debug.warnings.join("; ") : "none");
 }

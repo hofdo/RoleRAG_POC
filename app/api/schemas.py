@@ -5,6 +5,8 @@ from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.domain import TurnRetrievalDiagnostics
+
 ErrorLocation: TypeAlias = str | int
 
 
@@ -109,11 +111,40 @@ class RouteResponse(BaseModel):
     reason: str
 
 
+class RetrievalCandidateResponse(BaseModel):
+    id: str
+    source: str
+    source_type: str
+    collection: str
+    visibility: str
+    tags: list[str] = Field(default_factory=list)
+    original_score: float
+    adjusted_score: float
+    applied_boosts: dict[str, float] = Field(default_factory=dict)
+    selected_rank: int | None = None
+
+
+class RetrievalDiagnosticsResponse(BaseModel):
+    query: str
+    selected: list[RetrievalCandidateResponse] = Field(default_factory=list)
+    rejected: list[RetrievalCandidateResponse] = Field(default_factory=list)
+
+
+def to_retrieval_diagnostics_response(
+    diagnostics: TurnRetrievalDiagnostics | None,
+) -> RetrievalDiagnosticsResponse | None:
+    if diagnostics is None:
+        return None
+    return RetrievalDiagnosticsResponse.model_validate(diagnostics.model_dump(mode="json"))
+
+
 class CreateTurnResponse(BaseModel):
     text: str
     route: RouteResponse
+    finish_reason: str | None = None
     memory_written: bool
     warnings: list[str]
+    retrieval: RetrievalDiagnosticsResponse | None = None
 
 
 class StreamTextPayload(BaseModel):
@@ -122,8 +153,10 @@ class StreamTextPayload(BaseModel):
 
 class StreamFinalPayload(BaseModel):
     route: RouteResponse
+    finish_reason: str | None = None
     memory_written: bool
     warnings: list[str]
+    retrieval: RetrievalDiagnosticsResponse | None = None
 
 
 class StreamFailurePayload(StreamFinalPayload):

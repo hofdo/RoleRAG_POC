@@ -5,6 +5,7 @@ import asyncio
 from pydantic import BaseModel, Field
 
 from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
+from app.evals.event_key_retrieval import evaluate_event_key_retrieval
 from app.evals.fixtures import EvalFixture, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
 from app.evals.memory_recall import evaluate_memory_recall
@@ -29,6 +30,7 @@ def run_regressions() -> RegressionReport:
     fixture = build_eval_fixture()
     results = [
         _retrieval_result(fixture),
+        _event_key_retrieval_result(fixture),
         _memory_recall_result(fixture),
         _visibility_result(fixture),
         _role_consistency_result(fixture),
@@ -47,6 +49,11 @@ def run_regressions() -> RegressionReport:
 def _retrieval_result(fixture: EvalFixture) -> CategoryResult:
     result = evaluate_retrieval_quality(fixture)
     return CategoryResult(name="retrieval", passed=result.passed, checks=result.checks)
+
+
+def _event_key_retrieval_result(fixture: EvalFixture) -> CategoryResult:
+    result = evaluate_event_key_retrieval(fixture)
+    return CategoryResult(name="event_key_retrieval", passed=result.passed, checks=result.checks)
 
 
 def _visibility_result(fixture: EvalFixture) -> CategoryResult:

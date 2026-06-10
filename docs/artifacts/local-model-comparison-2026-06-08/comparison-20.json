@@ -1,0 +1,113 @@
+{
+  "study": "local-model-comparison-20-turn",
+  "date": "2026-06-08",
+  "prose_quality_winner": null,
+  "application_snapshot": {
+    "git_head": "22f23ffdb30e9da0bc13921a9042b157a45c9493",
+    "tracked_diff_sha256": "be8ab452972d5772419d240b4af97de834319432fd4183cd896f1482d1dd82b8",
+    "untracked_files_aggregate_sha256": "768bcbe02485be0e71358368b3e721f299aebc1c15588d18f6f6699d01070556"
+  },
+  "deterministic_checks": {
+    "exit_code": 0,
+    "ruff": "pass",
+    "mypy": "pass (121 source files)",
+    "pytest": "260 passed, 1 warning",
+    "frontend": "pass",
+    "regression": "45 checks passed"
+  },
+  "primary_exit_codes": {
+    "small": 1,
+    "26b": 0
+  },
+  "small": {
+    "primary": {
+      "status": "failed",
+      "failure": "empty actor response on turn 10",
+      "persisted_checkpoint_turns": 10
+    },
+    "rerun_1": {
+      "status": "pass",
+      "persisted_turns": 20,
+      "persisted_memories": 11,
+      "warning_counts": {
+        "critic": 20,
+        "memory_curation": 10,
+        "indexing": 0,
+        "retrieval": 0
+      },
+      "finish_reason_distribution": {
+        "length": 7,
+        "stop": 13
+      },
+      "latency_seconds": {
+        "total": 1656.938,
+        "mean": 82.847,
+        "p50": 83.379,
+        "p95": 105.091
+      },
+      "before_dawn_promise": {
+        "extracted": false,
+        "indexed": false,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": false
+      }
+    },
+    "tie_breaker": {
+      "status": "pass",
+      "persisted_turns": 20,
+      "persisted_memories": 12,
+      "warning_counts": {
+        "critic": 20,
+        "memory_curation": 10,
+        "indexing": 0,
+        "retrieval": 0
+      },
+      "finish_reason_distribution": {
+        "length": 13,
+        "stop": 7
+      },
+      "latency_seconds": {
+        "total": 1829.06,
+        "mean": 91.453,
+        "p50": 95.758,
+        "p95": 117.858
+      },
+      "before_dawn_promise": {
+        "extracted": false,
+        "indexed": false,
+        "selected": false,
+        "automated_recall": false,
+        "manual_recall": false
+      }
+    }
+  },
+  "26b": {
+    "status": "pass",
+    "persisted_turns": 20,
+    "persisted_memories": 31,
+    "warning_counts": {
+      "critic": 20,
+      "memory_curation": 0,
+      "indexing": 0,
+      "retrieval": 0
+    },
+    "finish_reason_distribution": {
+      "stop": 20
+    },
+    "latency_seconds": {
+      "total": 1525.657,
+      "mean": 76.283,
+      "p50": 82.576,
+      "p95": 92.118
+    },
+    "before_dawn_promise": {
+      "extracted": true,
+      "indexed": true,
+      "selected": false,
+      "automated_recall": false,
+      "manual_recall": "partial: acknowledged a promise but omitted the before-dawn commitment"
+    }
+  },
+  "full_runtime_artifacts": "/tmp/rolerag-model-comparison-20"
+}

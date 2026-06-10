@@ -122,11 +122,34 @@ class TurnOutcome(str, Enum):
     CONTROLLED_FAILURE = "controlled_failure"
 
 
+class RetrievalCandidateDiagnostic(BaseModel):
+    """Metadata-only ranking record for one retrieval candidate; never carries chunk text."""
+
+    id: str
+    source: str
+    source_type: str
+    collection: str
+    visibility: Visibility
+    tags: list[str] = Field(default_factory=list)
+    original_score: float
+    adjusted_score: float
+    applied_boosts: dict[str, float] = Field(default_factory=dict)
+    selected_rank: int | None = Field(default=None, ge=1)
+
+
+class TurnRetrievalDiagnostics(BaseModel):
+    query: str
+    selected: list[RetrievalCandidateDiagnostic] = Field(default_factory=list)
+    rejected: list[RetrievalCandidateDiagnostic] = Field(default_factory=list)
+
+
 class TurnResult(BaseModel):
     text: str
     route: ModelRoute
+    finish_reason: str | None = None
     memory_written: bool = False
     warnings: list[str] = Field(default_factory=list)
+    retrieval: TurnRetrievalDiagnostics | None = None
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
 
 

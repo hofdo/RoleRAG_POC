@@ -334,6 +334,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
     turn: {
       text: "The gallery is quiet.",
       route: { provider: "local", model: "local-model", reason: "default local route" },
+      finish_reason: "stop",
       memory_written: true,
       warnings: ["index delayed"],
     },
@@ -344,6 +345,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
     routeProvider: "local",
     routeModel: "local-model",
     routeReason: "default local route",
+    finishReason: "stop",
     memoryWritten: true,
     warnings: ["index delayed"],
   });

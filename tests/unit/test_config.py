@@ -26,7 +26,8 @@ def test_settings_use_llamacpp_friendly_local_defaults(tmp_path: Path) -> None:
     assert settings.recent_dialogue_turns == 8
     assert settings.recent_dialogue_max_message_chars == 900
     assert settings.live_long_turn_count == 0
-    assert settings.live_fail_on_structured_warnings is False
+    assert settings.live_turn_count == 8
+    assert settings.live_fail_on_structured_warnings is True
     assert "cloud_llm_enabled" not in settings.model_dump()
 
 
@@ -75,6 +76,60 @@ def test_settings_accept_database_path_and_recent_turn_overrides(tmp_path: Path)
     assert settings.recent_dialogue_max_message_chars == 444
     assert settings.rag_chunk_size_chars == 333
     assert settings.local_structured_max_tokens == 123
+
+
+def test_settings_default_provider_timeouts_and_retries(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.local_llm_timeout_seconds == 180.0
+    assert settings.local_llm_max_retries == 0
+    assert settings.cloud_llm_timeout_seconds == 120.0
+    assert settings.cloud_llm_max_retries == 1
+
+
+def test_settings_accept_provider_timeout_overrides(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LOCAL_LLM_TIMEOUT_SECONDS=90\n"
+        "LOCAL_LLM_MAX_RETRIES=2\n"
+        "CLOUD_LLM_TIMEOUT_SECONDS=30\n"
+        "CLOUD_LLM_MAX_RETRIES=0\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.local_llm_timeout_seconds == 90.0
+    assert settings.local_llm_max_retries == 2
+    assert settings.cloud_llm_timeout_seconds == 30.0
+    assert settings.cloud_llm_max_retries == 0
+
+
+def test_settings_default_structured_failure_log_dir_to_disabled(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.structured_output_failure_log_dir is None
+
+
+def test_settings_treat_empty_structured_failure_log_dir_as_disabled(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("STRUCTURED_OUTPUT_FAILURE_LOG_DIR=\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.structured_output_failure_log_dir is None
+
+
+def test_settings_accept_structured_failure_log_dir_override(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "STRUCTURED_OUTPUT_FAILURE_LOG_DIR=/tmp/failures\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.structured_output_failure_log_dir == Path("/tmp/failures")
 
 
 def test_settings_accept_live_smoke_overrides(tmp_path: Path) -> None:

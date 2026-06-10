@@ -24,11 +24,13 @@ from app.api.schemas import (
     RecentTurnResponse,
     RouteResponse,
     RuntimeStatusResponse,
+    to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.domain import SessionState, TurnInput, TurnResult
+from app.llm.provider import ProviderTimeoutError
 from app.persistence import (
     ContentCatalogError,
     DataFileNotFoundError,
@@ -42,6 +44,7 @@ RECENT_SESSIONS_LIMIT = 10
 ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
 ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
 ERROR_422_RESPONSE: dict[int | str, dict[str, Any]] = {422: {"model": ErrorResponse}}
+ERROR_504_RESPONSE: dict[int | str, dict[str, Any]] = {504: {"model": ErrorResponse}}
 SSE_200_RESPONSE: dict[int | str, dict[str, Any]] = {
     200: {
         "description": "Buffered validated turn events",
@@ -202,7 +205,12 @@ def list_recent_sessions(
 @router.post(
     "/sessions/{session_id}/turns",
     response_model=CreateTurnResponse,
-    responses={**ERROR_400_RESPONSE, **ERROR_404_RESPONSE, **ERROR_422_RESPONSE},
+    responses={
+        **ERROR_400_RESPONSE,
+        **ERROR_404_RESPONSE,
+        **ERROR_422_RESPONSE,
+        **ERROR_504_RESPONSE,
+    },
 )
 async def create_turn(
     session_id: str,
@@ -220,6 +228,7 @@ async def create_turn(
         **ERROR_400_RESPONSE,
         **ERROR_404_RESPONSE,
         **ERROR_422_RESPONSE,
+        **ERROR_504_RESPONSE,
     },
 )
 async def stream_turn(
@@ -252,6 +261,12 @@ async def _run_turn(
         raise ApiError(
             status_code=status.HTTP_404_NOT_FOUND,
             code="session_not_found",
+            message=str(exc),
+        ) from exc
+    except ProviderTimeoutError as exc:
+        raise ApiError(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            code="provider_timeout",
             message=str(exc),
         ) from exc
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
@@ -320,8 +335,10 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
             model=result.route.model,
             reason=result.route.reason,
         ),
+        finish_reason=result.finish_reason,
         memory_written=result.memory_written,
         warnings=result.warnings,
+        retrieval=to_retrieval_diagnostics_response(result.retrieval),
     )
 
 
