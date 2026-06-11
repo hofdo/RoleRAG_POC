@@ -122,6 +122,19 @@ class TurnOutcome(str, Enum):
     CONTROLLED_FAILURE = "controlled_failure"
 
 
+class CriticStatus(str, Enum):
+    """How critic validation concluded for the returned text.
+
+    SKIPPED means the text was never successfully validated: the critic errored,
+    or the turn failed before critique ran.
+    """
+
+    ACCEPTED = "accepted"
+    REPAIRED = "repaired"
+    REJECTED = "rejected"
+    SKIPPED = "skipped"
+
+
 class RetrievalCandidateDiagnostic(BaseModel):
     """Metadata-only ranking record for one retrieval candidate; never carries chunk text."""
 
@@ -148,6 +161,7 @@ class TurnResult(BaseModel):
     route: ModelRoute
     finish_reason: str | None = None
     memory_written: bool = False
+    critic_status: CriticStatus = CriticStatus.SKIPPED
     warnings: list[str] = Field(default_factory=list)
     retrieval: TurnRetrievalDiagnostics | None = None
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)

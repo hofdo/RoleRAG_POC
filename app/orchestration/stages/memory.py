@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.domain import (
+    MemoryCandidate,
     MemoryCuratorResult,
     MemoryEpisode,
     PersonaCard,
@@ -14,6 +15,10 @@ from app.llm.provider import LlmProvider
 from app.llm.router import ModelRoute
 from app.llm.structured_output import StructuredOutputError
 from app.memory import MemoryEpisodeStore
+from app.memory.deterministic_extractor import (
+    extract_explicit_durable_events,
+    is_covered_by_summaries,
+)
 from app.orchestration.stages.critique import record_structured_failure
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.routing import TurnRoutingStage
@@ -76,6 +81,11 @@ class TurnMemoryStage:
             return MemoryStageResult(memory_written=False, warnings=())
 
         warnings: list[str] = []
+        fallback_candidates = extract_explicit_durable_events(
+            user_message=user_message,
+            scene_id=scene.id,
+            actor_id=persona.id,
+        )
         route = self.routing_stage.memory(
             retrieval_confidence=retrieval_confidence,
             scene_complexity=scene_complexity,
@@ -90,18 +100,22 @@ class TurnMemoryStage:
                 user_message=user_message,
                 assistant_message=assistant_message,
             )
-            if not memory_result.write_memory:
-                return MemoryStageResult(memory_written=False, warnings=())
-            persisted = self.memory_store.persist_memories(
+            curated = list(memory_result.memories) if memory_result.write_memory else []
+            curated_summaries = [candidate.summary for candidate in curated]
+            extras = [
+                candidate
+                for candidate in fallback_candidates
+                if not is_covered_by_summaries(candidate.summary, curated_summaries)
+            ]
+            if extras:
+                warnings.append(
+                    f"deterministic memory fallback added {len(extras)} explicit durable event(s)"
+                )
+            memory_written = self._persist_and_index(
                 session_id=session.id,
-                memories=memory_result.memories,
+                candidates=[*curated, *extras],
+                warnings=warnings,
             )
-            memory_written = len(persisted) > 0
-            if self.memory_indexer is not None:
-                try:
-                    self.memory_indexer.index_memories(persisted)
-                except Exception as exc:
-                    warnings.append(f"memory indexing skipped: {exc}")
             return MemoryStageResult(
                 memory_written=memory_written,
                 warnings=tuple(warnings),
@@ -117,12 +131,65 @@ class TurnMemoryStage:
                     session_id=session.id,
                 )
             )
+            memory_written = self._fallback_after_curator_failure(
+                session_id=session.id,
+                candidates=fallback_candidates,
+                warnings=failure_warnings,
+            )
             return MemoryStageResult(
-                memory_written=False,
+                memory_written=memory_written,
                 warnings=tuple(failure_warnings),
             )
         except Exception as exc:
-            return MemoryStageResult(
-                memory_written=False,
-                warnings=(f"memory curation skipped: {exc}",),
+            failure_warnings = [f"memory curation skipped: {exc}"]
+            memory_written = self._fallback_after_curator_failure(
+                session_id=session.id,
+                candidates=fallback_candidates,
+                warnings=failure_warnings,
             )
+            return MemoryStageResult(
+                memory_written=memory_written,
+                warnings=tuple(failure_warnings),
+            )
+
+    def _fallback_after_curator_failure(
+        self,
+        *,
+        session_id: str,
+        candidates: list[MemoryCandidate],
+        warnings: list[str],
+    ) -> bool:
+        if not candidates:
+            return False
+        warnings.append(
+            f"deterministic memory fallback added {len(candidates)} explicit durable event(s)"
+        )
+        try:
+            return self._persist_and_index(
+                session_id=session_id,
+                candidates=candidates,
+                warnings=warnings,
+            )
+        except Exception as exc:
+            warnings.append(f"deterministic memory fallback skipped: {exc}")
+            return False
+
+    def _persist_and_index(
+        self,
+        *,
+        session_id: str,
+        candidates: list[MemoryCandidate],
+        warnings: list[str],
+    ) -> bool:
+        if not candidates or self.memory_store is None:
+            return False
+        persisted = self.memory_store.persist_memories(
+            session_id=session_id,
+            memories=candidates,
+        )
+        if self.memory_indexer is not None:
+            try:
+                self.memory_indexer.index_memories(persisted)
+            except Exception as exc:
+                warnings.append(f"memory indexing skipped: {exc}")
+        return len(persisted) > 0

@@ -26,6 +26,7 @@ class ActorContextRetrieving(Protocol):
         persona_id: str,
         scene_id: str | None = None,
         top_k: int,
+        lexical_query: str | None = None,
     ) -> list[RetrievedChunk]: ...
 
 
@@ -65,6 +66,7 @@ class TurnRetrievalStage:
         try:
             chunks, diagnostics = self._retrieve(
                 query=query,
+                lexical_query=turn_input.message,
                 world_id=context.session.world_id,
                 session_id=context.session.id,
                 persona_id=context.persona.id,
@@ -92,6 +94,7 @@ class TurnRetrievalStage:
         self,
         *,
         query: str,
+        lexical_query: str,
         world_id: str,
         session_id: str,
         persona_id: str,
@@ -104,6 +107,7 @@ class TurnRetrievalStage:
         if callable(with_diagnostics):
             result: RetrievalResult = with_diagnostics(
                 query=query,
+                lexical_query=lexical_query,
                 world_id=world_id,
                 session_id=session_id,
                 persona_id=persona_id,
@@ -113,6 +117,7 @@ class TurnRetrievalStage:
             return list(result.chunks), _to_turn_diagnostics(result.diagnostics)
         chunks = retriever.retrieve_for_actor(
             query=query,
+            lexical_query=lexical_query,
             world_id=world_id,
             session_id=session_id,
             persona_id=persona_id,

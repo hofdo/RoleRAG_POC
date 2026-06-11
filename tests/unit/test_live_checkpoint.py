@@ -206,16 +206,28 @@ def test_build_event_attribution_tracks_exact_memory_ids() -> None:
     assert result.selected_memory_ids == ("match",)
 
 
-def test_extraction_miss_is_report_only() -> None:
+def test_extraction_miss_is_report_only_when_not_strict() -> None:
     summary = _run(
+        strict=False,
         attribution=_attribution(
             matching_memory_ids=(),
             indexed_memory_ids=(),
             selected_memory_ids=(),
-        )
+        ),
     )
     assert summary["events"][0]["extracted"] is False
     assert summary["quality_metrics"]["memory_extraction_misses"] == 1
+
+
+def test_extraction_miss_fails_strict_checkpoint() -> None:
+    with pytest.raises(CheckpointError, match="no persisted matching memory"):
+        _run(
+            attribution=_attribution(
+                matching_memory_ids=(),
+                indexed_memory_ids=(),
+                selected_memory_ids=(),
+            )
+        )
 
 
 def test_indexing_miss_is_application_failure() -> None:
@@ -223,9 +235,14 @@ def test_indexing_miss_is_application_failure() -> None:
         _run(attribution=_attribution(indexed_memory_ids=()))
 
 
-def test_retrieval_miss_is_report_only() -> None:
-    summary = _run(attribution=_attribution(selected_memory_ids=()))
+def test_retrieval_miss_is_report_only_when_not_strict() -> None:
+    summary = _run(strict=False, attribution=_attribution(selected_memory_ids=()))
     assert summary["events"][0]["selected"] is False
+
+
+def test_retrieval_miss_fails_strict_checkpoint() -> None:
+    with pytest.raises(CheckpointError, match="not selected by callback retrieval"):
+        _run(attribution=_attribution(selected_memory_ids=()))
 
 
 def test_successful_callback_recall_is_reported() -> None:

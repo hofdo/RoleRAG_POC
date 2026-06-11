@@ -267,6 +267,7 @@ function renderDebugState() {
   addDebugRow("Route reason", state.debug.routeReason);
   addDebugRow("finish_reason", state.debug.finishReason ?? "none");
   addDebugRow("memory_written", state.debug.memoryWritten);
+  addDebugRow("critic_status", state.debug.criticStatus);
   addDebugRow("Warnings", state.debug.warnings.length ? state.debug.warnings.join("; ") : "none");
 }
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.agents import ActorAgent
-from app.domain import SessionState, TurnInput, TurnOutcome, TurnResult
+from app.domain import CriticStatus, SessionState, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode, ModelRoute
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
@@ -14,6 +14,7 @@ from app.orchestration.stages import (
     MemoryCuratingAgent,
     MemoryIndexing,
     StructuredFailureRecording,
+    TruncatedProviderResponseError,
     TurnCritiqueStage,
     TurnDataLoader,
     TurnDataLoaderFactory,
@@ -197,12 +198,13 @@ class TurnOrchestrator:
                 retrieval=retrieval,
                 routing=routing,
             )
-        except EmptyProviderResponseError as exc:
+        except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
             return TurnResult(
                 text=CONTROLLED_FAILURE_TEXT,
                 route=routing.route,
                 finish_reason=None,
                 memory_written=False,
+                critic_status=CriticStatus.SKIPPED,
                 warnings=[
                     *retrieval.warnings,
                     *routing.warnings,
@@ -228,6 +230,9 @@ class TurnOrchestrator:
         final_text = generation.text
         final_route = generation.route
         final_finish_reason = generation.finish_reason
+        critic_status = (
+            CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
+        )
         if critique.critique is not None and not critique.critique.accepted:
             try:
                 repair = await self.repair_stage.run(
@@ -240,13 +245,14 @@ class TurnOrchestrator:
                     retrieval=retrieval,
                     routing=routing,
                 )
-            except EmptyProviderResponseError as exc:
+            except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
                 warnings.append(f"repair failed: {exc}")
                 return TurnResult(
                     text=CONTROLLED_FAILURE_TEXT,
                     route=generation.route,
                     finish_reason=generation.finish_reason,
                     memory_written=False,
+                    critic_status=CriticStatus.REJECTED,
                     warnings=warnings,
                     retrieval=retrieval.diagnostics,
                     outcome=TurnOutcome.CONTROLLED_FAILURE,
@@ -258,6 +264,7 @@ class TurnOrchestrator:
                     route=repair.route,
                     finish_reason=repair.finish_reason,
                     memory_written=False,
+                    critic_status=CriticStatus.REJECTED,
                     warnings=warnings,
                     retrieval=retrieval.diagnostics,
                     outcome=repair.outcome,
@@ -265,6 +272,7 @@ class TurnOrchestrator:
             final_text = repair.text
             final_route = repair.route
             final_finish_reason = repair.finish_reason
+            critic_status = CriticStatus.REPAIRED
 
         self.persistence_stage.run(
             session=context.session,
@@ -287,6 +295,7 @@ class TurnOrchestrator:
             route=final_route,
             finish_reason=final_finish_reason,
             memory_written=memory.memory_written,
+            critic_status=critic_status,
             warnings=warnings,
             retrieval=retrieval.diagnostics,
         )

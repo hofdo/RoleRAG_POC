@@ -337,6 +337,7 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         ),
         finish_reason=result.finish_reason,
         memory_written=result.memory_written,
+        critic_status=result.critic_status.value,
         warnings=result.warnings,
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
     )

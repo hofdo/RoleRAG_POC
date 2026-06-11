@@ -143,6 +143,7 @@ class CreateTurnResponse(BaseModel):
     route: RouteResponse
     finish_reason: str | None = None
     memory_written: bool
+    critic_status: str
     warnings: list[str]
     retrieval: RetrievalDiagnosticsResponse | None = None
 
@@ -155,6 +156,7 @@ class StreamFinalPayload(BaseModel):
     route: RouteResponse
     finish_reason: str | None = None
     memory_written: bool
+    critic_status: str
     warnings: list[str]
     retrieval: RetrievalDiagnosticsResponse | None = None
 

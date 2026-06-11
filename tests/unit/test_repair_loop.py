@@ -7,6 +7,7 @@ import pytest
 
 from app.domain import (
     CriticResult,
+    CriticStatus,
     MemoryCandidate,
     PersonaCard,
     SceneState,
@@ -314,6 +315,7 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
         },
         "finish_reason": "stop",
         "memory_written": False,
+        "critic_status": CriticStatus.REJECTED,
         "warnings": [
             "cloud actor skipped: cloud mode is off",
             "cloud actor skipped: cloud mode is off (local repair failed)",
@@ -342,3 +344,84 @@ async def test_orchestrator_returns_warning_and_persists_latest_draft_when_criti
     assert result.warnings == ["critic skipped: invalid critic output"]
     assert len(turns) == 1
     assert turns[0].assistant_message == "Draft survives critic failure"
+
+
+@pytest.mark.asyncio
+async def test_critic_status_is_accepted_for_accepted_initial_draft(tmp_path: Path) -> None:
+    from app.domain import CriticStatus
+
+    orchestrator, _, _ = _build_orchestrator(
+        tmp_path,
+        provider=SequencedFakeProvider(["A clean draft."]),
+        critic=FakeCritic([CriticResult(accepted=True)]),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Hello.")
+    )
+
+    assert result.critic_status == CriticStatus.ACCEPTED
+
+
+@pytest.mark.asyncio
+async def test_critic_status_is_repaired_after_successful_local_repair(tmp_path: Path) -> None:
+    from app.domain import CriticStatus
+
+    orchestrator, _, _ = _build_orchestrator(
+        tmp_path,
+        provider=SequencedFakeProvider(["A leaky draft.", "A repaired draft."]),
+        critic=FakeCritic(
+            [
+                CriticResult(accepted=False, issues=["leak"], repair_instruction="Remove leak."),
+                CriticResult(accepted=True),
+            ]
+        ),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Hello.")
+    )
+
+    assert result.text == "A repaired draft."
+    assert result.critic_status == CriticStatus.REPAIRED
+
+
+@pytest.mark.asyncio
+async def test_critic_status_is_rejected_when_repair_is_exhausted(tmp_path: Path) -> None:
+    from app.domain import CriticStatus, TurnOutcome
+
+    orchestrator, _, _ = _build_orchestrator(
+        tmp_path,
+        provider=SequencedFakeProvider(["A leaky draft.", "Still leaky."]),
+        critic=FakeCritic(
+            [
+                CriticResult(accepted=False, issues=["leak"]),
+                CriticResult(accepted=False, issues=["leak"]),
+            ]
+        ),
+        cloud_mode=CloudMode.OFF,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Hello.")
+    )
+
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert result.critic_status == CriticStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_critic_status_is_skipped_when_critic_fails(tmp_path: Path) -> None:
+    from app.domain import CriticStatus
+
+    orchestrator, _, _ = _build_orchestrator(
+        tmp_path,
+        provider=SequencedFakeProvider(["Draft survives critic failure"]),
+        critic=FakeCritic(error=ValueError("invalid critic output")),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Hello.")
+    )
+
+    assert result.critic_status == CriticStatus.SKIPPED

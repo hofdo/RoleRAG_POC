@@ -346,7 +346,7 @@ def run_checkpoint(
             event = event_by_callback.get(turn_index)
             if event is not None:
                 attribution = event_inspector(session_id, event)
-                _validate_attribution(attribution)
+                _validate_attribution(attribution, strict=fail_on_structured_warnings)
                 attributions[event.key] = attribution
                 write_progress()
 
@@ -495,12 +495,22 @@ def run_checkpoint(
     }
 
 
-def _validate_attribution(attribution: EventAttribution) -> None:
+def _validate_attribution(attribution: EventAttribution, *, strict: bool) -> None:
+    if strict:
+        _require(
+            bool(attribution.matching_memory_ids),
+            f"event {attribution.event_key} has no persisted matching memory",
+        )
     if attribution.matching_memory_ids:
         _require(
             attribution.indexed_memory_ids == attribution.matching_memory_ids,
             f"event {attribution.event_key} has extracted memories missing from Qdrant",
         )
+        if strict:
+            _require(
+                bool(attribution.selected_memory_ids),
+                f"event {attribution.event_key} was not selected by callback retrieval",
+            )
     _require(
         all(
             visibility == Visibility.PLAYER.value
@@ -568,6 +578,7 @@ def inspect_story_event(
     )
     retrieval = build_actor_context_retriever(settings).retrieve_for_actor_with_diagnostics(
         query=query,
+        lexical_query=ROSE_GALLERY_MESSAGES[event.callback_turn - 1],
         world_id="demo_world",
         session_id=session_id,
         persona_id="archivist",

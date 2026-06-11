@@ -1,5 +1,6 @@
 from app.domain.models import (
     CriticResult,
+    CriticStatus,
     MemoryCandidate,
     MemoryCuratorResult,
     MemoryEpisode,
@@ -18,6 +19,7 @@ from app.domain.visibility import Visibility
 
 __all__ = [
     "CriticResult",
+    "CriticStatus",
     "MemoryCandidate",
     "MemoryCuratorResult",
     "MemoryEpisode",

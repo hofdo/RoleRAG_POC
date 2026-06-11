@@ -112,7 +112,7 @@ For actor or repair tasks, cloud may be selected when:
 - no interactive cloud approval step
 - no API-level confirmation workflow
 - no structured cloud-call audit log exposed outside route metadata and warnings
-- `MAX_LOCAL_RETRIES` exists in settings but current retry bounds remain explicit in code
+- retry bounds are explicit in code; there is no configurable retry-count setting
 
 ## Invariants to Preserve
 

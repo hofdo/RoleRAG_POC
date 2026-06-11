@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -498,3 +498,162 @@ def test_retrieval_stage_returns_no_diagnostics_for_plain_retriever() -> None:
 
     assert result.chunks == tuple(chunks)
     assert result.diagnostics is None
+
+
+def test_retrieval_stage_passes_player_message_as_lexical_query() -> None:
+    captured: dict[str, object] = {}
+
+    def capture(**kwargs: object) -> list[RetrievedChunk]:
+        captured.update(kwargs)
+        return []
+
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor=capture),
+        context_budget=ContextBudget(retrieved_chunks=3),
+    )
+
+    stage.run(
+        turn_input=TurnInput(session_id="session", message="What did I promise?"),
+        context=_context(),
+    )
+
+    assert captured["lexical_query"] == "What did I promise?"
+    assert "What did I promise?" in str(captured["query"])
+
+
+class RecordingMemoryStore:
+    def __init__(self) -> None:
+        self.persisted: list[Any] = []
+
+    def persist_memories(self, *, session_id: str, memories: list[Any]) -> list[Any]:
+        from app.domain import MemoryEpisode
+
+        episodes = [
+            MemoryEpisode(
+                id=f"memory-{len(self.persisted) + index + 1}",
+                session_id=session_id,
+                scene_id=candidate.scene_id or "scene",
+                actor_id=candidate.actor_id,
+                summary=candidate.summary,
+                importance=candidate.importance,
+                visibility=candidate.visibility,
+                tags=list(candidate.tags),
+            )
+            for index, candidate in enumerate(memories)
+        ]
+        self.persisted.extend(episodes)
+        return episodes
+
+
+class DecliningCurator:
+    async def curate(self, **_: object) -> Any:
+        from app.domain import MemoryCuratorResult
+
+        return MemoryCuratorResult(write_memory=False, memories=[], reason="nothing durable")
+
+
+class CoveringCurator:
+    async def curate(self, **_: object) -> Any:
+        from app.domain import MemoryCandidate, MemoryCuratorResult, Visibility
+
+        return MemoryCuratorResult(
+            write_memory=True,
+            memories=[
+                MemoryCandidate(
+                    summary="The player promised to return before dawn.",
+                    visibility=Visibility.PLAYER,
+                    importance=4,
+                    tags=["promise"],
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ],
+            reason="explicit promise",
+        )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_falls_back_to_deterministic_extraction_when_curator_fails() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=FailingCurator(
+            MemoryCuratorOutputError(
+                "invalid structured output", category="parse", raw_text="not json"
+            )
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+        failure_sink=None,
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to return before dawn.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 1
+    assert "return before dawn" in store.persisted[0].summary
+    assert any("deterministic" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_adds_explicit_event_when_curator_declines_to_write() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=DecliningCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to return before dawn.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 1
+    assert "return before dawn" in store.persisted[0].summary
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_does_not_duplicate_event_already_curated() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=CoveringCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to return before dawn.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 1
+    assert store.persisted[0].summary == "The player promised to return before dawn."

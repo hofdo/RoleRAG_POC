@@ -7,6 +7,7 @@ import pytest
 
 from app.domain import (
     CriticResult,
+    CriticStatus,
     MemoryCandidate,
     PersonaCard,
     SceneState,
@@ -220,6 +221,7 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
         },
         "finish_reason": "stop",
         "memory_written": False,
+        "critic_status": CriticStatus.ACCEPTED,
         "warnings": [],
         "retrieval": None,
     }
@@ -365,8 +367,11 @@ async def test_turn_orchestrator_returns_warning_when_memory_curation_fails(
     )
 
     assert result.text == "I have heard enough to know the regent fears open daylight."
-    assert result.memory_written is False
-    assert result.warnings == ["memory curation skipped: bad memory output"]
+    assert result.memory_written is True
+    assert result.warnings == [
+        "memory curation skipped: bad memory output",
+        "deterministic memory fallback added 1 explicit durable event(s)",
+    ]
 
 
 @pytest.mark.asyncio
@@ -622,27 +627,70 @@ async def test_turn_orchestrator_returns_controlled_failure_for_repeated_empty_r
     assert any("empty" in warning for warning in result.warnings)
 
 
-@pytest.mark.asyncio
-async def test_turn_orchestrator_warns_when_actor_response_is_truncated(tmp_path: Path) -> None:
-    class LengthLimitedProvider(LlmProvider):
-        async def generate(self, request: LlmRequest) -> LlmResponse:
-            return LlmResponse(
-                text="The archivist begins a long story about",
-                provider="fake",
-                model=request.model,
-                usage={"total_tokens": 500},
-                finish_reason="length",
-            )
+class FinishReasonScriptedProvider(LlmProvider):
+    def __init__(self, responses: list[tuple[str, str]]) -> None:
+        self.responses = responses
+        self.requests: list[LlmRequest] = []
 
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        index = min(len(self.requests), len(self.responses) - 1)
+        self.requests.append(request)
+        text, finish_reason = self.responses[index]
+        return LlmResponse(
+            text=text,
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 500},
+            finish_reason=finish_reason,
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_retries_truncated_actor_response_with_larger_budget(
+    tmp_path: Path,
+) -> None:
+    provider = FinishReasonScriptedProvider(
+        [
+            ("The archivist begins a long story about", "length"),
+            ("The archivist finishes the story about the regent.", "stop"),
+        ]
+    )
     orchestrator = _build_orchestrator(tmp_path, FakeProvider())
-    orchestrator.generation_stage.provider = LengthLimitedProvider()
+    orchestrator.generation_stage.provider = provider
 
     result = await orchestrator.run_turn(
         turn_input=TurnInput(session_id="demo-session", message="Tell me everything.")
     )
 
-    assert result.finish_reason == "length"
+    assert result.text == "The archivist finishes the story about the regent."
+    assert result.finish_reason == "stop"
+    assert len(provider.requests) == 2
+    assert provider.requests[1].max_tokens == provider.requests[0].max_tokens * 2
     assert any(
-        "actor response truncated: finish_reason=length from local-model" == warning
+        "actor response truncated: finish_reason=length from local-model" in warning
         for warning in result.warnings
     )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_returns_controlled_failure_for_repeated_truncation(
+    tmp_path: Path,
+) -> None:
+    from app.domain import TurnOutcome
+    from app.orchestration.turn_orchestrator import CONTROLLED_FAILURE_TEXT
+
+    provider = FinishReasonScriptedProvider(
+        [("The archivist begins a long story about", "length")]
+    )
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Tell me everything.")
+    )
+
+    assert result.text == CONTROLLED_FAILURE_TEXT
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert result.memory_written is False
+    assert len(provider.requests) == 2
+    assert any("truncated" in warning for warning in result.warnings)

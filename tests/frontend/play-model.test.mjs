@@ -336,6 +336,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
       route: { provider: "local", model: "local-model", reason: "default local route" },
       finish_reason: "stop",
       memory_written: true,
+      critic_status: "repaired",
       warnings: ["index delayed"],
     },
   }), {
@@ -347,6 +348,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
     routeReason: "default local route",
     finishReason: "stop",
     memoryWritten: true,
+    criticStatus: "repaired",
     warnings: ["index delayed"],
   });
 });

@@ -255,7 +255,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
     "xt\":\"The \"}\n\nevent: text\ndata: {\"text\":\"gallery",
     " is quiet.\"}\n\nevent: final\ndata: {\"route\":{\"provider\":\"local\",",
     "\"model\":\"local-model\",\"reason\":\"default local route\"},\"memory_written\":true,",
-    "\"finish_reason\":\"stop\",\"warnings\":[\"index delayed\"]}\n\n",
+    "\"finish_reason\":\"stop\",\"critic_status\":\"accepted\",\"warnings\":[\"index delayed\"]}\n\n",
   ];
   const fetchImpl = async () => new Response(
     new ReadableStream({
@@ -279,6 +279,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
     route: { provider: "local", model: "local-model", reason: "default local route" },
     finish_reason: "stop",
     memory_written: true,
+    critic_status: "accepted",
     warnings: ["index delayed"],
   });
 });
@@ -286,7 +287,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
 test("createBufferedTurn renders safe failure text without rejected drafts", async () => {
   const safeText = "I cannot continue that turn safely.";
   const fetchImpl = async () => new Response(
-    `event: failure\ndata: {"text":"${safeText}","route":{"provider":"local","model":"local-model","reason":"default local route"},"finish_reason":"length","memory_written":false,"warnings":["critic rejected output"]}\n\n`,
+    `event: failure\ndata: {"text":"${safeText}","route":{"provider":"local","model":"local-model","reason":"default local route"},"finish_reason":"length","memory_written":false,"critic_status":"rejected","warnings":["critic rejected output"]}\n\n`,
     { headers: { "content-type": "text/event-stream" } },
   );
 
@@ -297,6 +298,7 @@ test("createBufferedTurn renders safe failure text without rejected drafts", asy
 
   assert.equal(turn.text, safeText);
   assert.equal(turn.finish_reason, "length");
+  assert.equal(turn.critic_status, "rejected");
   assert.deepEqual(turn.warnings, ["critic rejected output"]);
 });
 
@@ -318,4 +320,20 @@ test("structured API errors become visible safe API errors", async () => {
       return true;
     },
   );
+});
+
+test("createBufferedTurn attaches an abort signal so hung streams time out", async () => {
+  let receivedSignal;
+  const fetchImpl = async (url, options) => {
+    receivedSignal = options.signal;
+    return new Response(
+      'event: text\ndata: {"text":"Done."}\n\nevent: final\ndata: {"route":{"provider":"local","model":"local-model","reason":"default local route"},"finish_reason":"stop","memory_written":false,"critic_status":"accepted","warnings":[]}\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  };
+
+  await createBufferedTurn("session-1", { message: "Hi.", request_cloud: false }, { fetchImpl });
+
+  assert.ok(receivedSignal instanceof AbortSignal);
+  assert.equal(receivedSignal.aborted, false);
 });

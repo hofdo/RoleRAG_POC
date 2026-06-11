@@ -20,6 +20,7 @@ def test_event_key_retrieval_selects_each_seeded_memory_at_callback() -> None:
     assert result.passed is True
     for event in SEEDED_EVENTS:
         assert result.checks[f"{event.key}_selected"] is True
+        assert result.checks[f"{event.key}_top_ranked"] is True
     assert result.checks["diagnostics_record_rejected_candidates"] is True
 
 

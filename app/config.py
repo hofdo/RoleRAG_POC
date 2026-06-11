@@ -50,7 +50,6 @@ class Settings(BaseSettings):
 
     structured_output_failure_log_dir: Path | None = None
 
-    max_local_retries: int = Field(default=1, ge=0)
     recent_dialogue_turns: int = Field(default=8, ge=0)
     recent_dialogue_max_message_chars: int = Field(default=900, ge=1)
     live_turn_count: int = Field(default=8, ge=5, le=50)

@@ -7,6 +7,7 @@ from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.generation import (
     EmptyProviderResponseError,
     GenerationStageResult,
+    TruncatedProviderResponseError,
     TurnGenerationStage,
 )
 from app.orchestration.stages.memory import (
@@ -53,6 +54,7 @@ __all__ = [
     "RetrievalStageResult",
     "RoutingStageResult",
     "StructuredFailureRecording",
+    "TruncatedProviderResponseError",
     "TurnCritiqueStage",
     "TurnDataLoader",
     "TurnDataLoaderFactory",

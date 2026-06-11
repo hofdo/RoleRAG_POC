@@ -212,6 +212,7 @@ def evaluate_event_key_retrieval(fixture: EvalFixture) -> EventKeyRetrievalResul
                 persona=fixture.primary_persona,
                 recent_turns=(),
             ),
+            lexical_query=event.callback_message,
             world_id=fixture.world.id,
             session_id=fixture.session.id,
             persona_id=fixture.primary_persona.id,
@@ -221,6 +222,9 @@ def evaluate_event_key_retrieval(fixture: EvalFixture) -> EventKeyRetrievalResul
         ids = [chunk.id for chunk in result.chunks]
         selected_ids[event.key] = ids
         checks[f"{event.key}_selected"] = event_memory_ids[event.key] in ids
+        checks[f"{event.key}_top_ranked"] = (
+            bool(ids) and ids[0] == event_memory_ids[event.key]
+        )
         any_rejected = any_rejected or bool(result.diagnostics.rejected)
     checks["diagnostics_record_rejected_candidates"] = any_rejected
     connection.close()

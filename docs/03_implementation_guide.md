@@ -137,10 +137,9 @@ The active settings fields are defined in [app/config.py](../app/config.py). The
 - `RAG_CHUNK_SIZE_CHARS`
 - `RAG_CHUNK_OVERLAP_CHARS`
 - `RAG_MAX_RETRIEVED_CHUNK_CHARS`
-- `MAX_LOCAL_RETRIES`
 - `RECENT_DIALOGUE_TURNS`
 
-Current implementation note: `MAX_LOCAL_RETRIES` is part of settings, but the repair loop remains fixed and bounded in code.
+Current implementation note: the repair loop is fixed and bounded in code; there is no configurable retry-count setting.
 
 ## Runtime Safety Rules
 

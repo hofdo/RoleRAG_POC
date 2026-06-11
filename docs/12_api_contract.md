@@ -157,7 +157,7 @@ entries and remain backend-owned.
 `active_persona_id` is optional. When provided, it must match the stored session persona.
 
 The success response includes generated text, route metadata, the provider finish reason,
-memory-write status, and warnings:
+memory-write status, critic validation status, and warnings:
 
 ```json
 {
@@ -169,6 +169,7 @@ memory-write status, and warnings:
   },
   "finish_reason": "stop",
   "memory_written": false,
+  "critic_status": "accepted",
   "warnings": [],
   "retrieval": {
     "query": "<retrieval query>",
@@ -194,6 +195,15 @@ memory-write status, and warnings:
 `warnings` reports fail-open runtime behavior, such as skipped retrieval or skipped cloud routing.
 A turn can return HTTP `200` with warnings when actor generation still completed.
 
+`critic_status` reports how critic validation concluded for the returned text:
+
+- `accepted`: the critic validated the initial draft.
+- `repaired`: the critic rejected the draft and the returned text is a validated repair.
+- `rejected`: the critic rejected the draft and repair was exhausted; the text is a controlled
+  failure message.
+- `skipped`: the returned text was never successfully validated, either because the critic
+  errored (see `warnings`) or because the turn failed before critique ran.
+
 `retrieval` is a report-only ranking diagnostic. It lists the selected chunks and the rejected
 candidates with their score components, contains metadata only, and never includes chunk text.
 It is `null` when retrieval is not configured or the retriever does not expose diagnostics. The
@@ -217,7 +227,7 @@ event: text
 data: {"text":"<validated final text>"}
 
 event: final
-data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "warnings":[]}
+data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "critic_status":"accepted", "warnings":[]}
 
 ```
 
@@ -230,7 +240,7 @@ stream emits only one `failure` event and never emits rejected draft text:
 
 ```text
 event: failure
-data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"length", "memory_written":false, "warnings":[]}
+data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"length", "memory_written":false, "critic_status":"rejected", "warnings":[]}
 
 ```
 

@@ -527,6 +527,7 @@ def retrieve_debug(
             vector_store=_build_vector_store(settings),
         ).retrieve_for_actor_with_diagnostics(
             query=retrieval_query,
+            lexical_query=query,
             world_id=session.world_id,
             session_id=session.id,
             persona_id=persona.id,

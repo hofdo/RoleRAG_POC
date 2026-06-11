@@ -12,10 +12,22 @@ from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult, TurnRoutingStage
 from app.orchestration.stages.session import LoadedTurnContext
 
+TRUNCATION_RETRY_BUDGET_MULTIPLIER = 2
+
 
 class EmptyProviderResponseError(RuntimeError):
     def __init__(self, *, provider: str, model: str) -> None:
         super().__init__(f"{provider} provider returned empty text for {model} after one retry")
+        self.provider = provider
+        self.model = model
+
+
+class TruncatedProviderResponseError(RuntimeError):
+    def __init__(self, *, provider: str, model: str) -> None:
+        super().__init__(
+            f"{provider} provider returned truncated text for {model} "
+            "after one retry with a larger budget"
+        )
         self.provider = provider
         self.model = model
 
@@ -91,15 +103,10 @@ class TurnGenerationStage:
         if route.requires_user_confirmation:
             raise RuntimeError("confirmation-required route reached provider dispatch")
         try:
-            response, empty_warnings = await self._generate_non_empty(
+            response, used_route, complete_warnings = await self._generate_complete(
                 route=route, messages=list(messages)
             )
-            return (
-                response.text,
-                route,
-                response.finish_reason,
-                (*empty_warnings, *_truncation_warnings(response, route)),
-            )
+            return response.text, used_route, response.finish_reason, complete_warnings
         except Exception as exc:
             if route.provider != ModelProviderName.LOCAL:
                 raise
@@ -117,12 +124,38 @@ class TurnGenerationStage:
                     f"({fallback_route.reason})"
                 )
                 raise
-            response, empty_warnings = await self._generate_non_empty(
+            response, used_route, complete_warnings = await self._generate_complete(
                 route=fallback_route, messages=list(messages)
             )
-            warnings.extend(empty_warnings)
-            warnings.extend(_truncation_warnings(response, fallback_route))
-            return response.text, fallback_route, response.finish_reason, tuple(warnings)
+            warnings.extend(complete_warnings)
+            return response.text, used_route, response.finish_reason, tuple(warnings)
+
+    async def _generate_complete(
+        self,
+        *,
+        route: ModelRoute,
+        messages: list[LlmMessage],
+    ) -> tuple[LlmResponse, ModelRoute, tuple[str, ...]]:
+        response, warnings = await self._generate_non_empty(route=route, messages=messages)
+        if response.finish_reason != "length":
+            return response, route, warnings
+        retry_route = route.model_copy(
+            update={"max_tokens": route.max_tokens * TRUNCATION_RETRY_BUDGET_MULTIPLIER}
+        )
+        warnings = (
+            *warnings,
+            f"actor response truncated: finish_reason=length from {route.model}; "
+            f"retried with max_tokens={retry_route.max_tokens}",
+        )
+        retry_response, retry_warnings = await self._generate_non_empty(
+            route=retry_route, messages=messages
+        )
+        warnings = (*warnings, *retry_warnings)
+        if retry_response.finish_reason == "length":
+            raise TruncatedProviderResponseError(
+                provider=route.provider.value, model=route.model
+            )
+        return retry_response, retry_route, warnings
 
     async def _generate_non_empty(
         self,
@@ -153,9 +186,3 @@ class TurnGenerationStage:
         if provider is None:
             raise RuntimeError(f"Missing provider for route: {route.provider.value}")
         return await self.actor_agent.generate(provider=provider, route=route, messages=messages)
-
-
-def _truncation_warnings(response: LlmResponse, route: ModelRoute) -> tuple[str, ...]:
-    if response.finish_reason != "length":
-        return ()
-    return (f"actor response truncated: finish_reason=length from {route.model}",)

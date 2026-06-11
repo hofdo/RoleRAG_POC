@@ -14,6 +14,23 @@ SESSION_ID_MATCH_BOOST: Final[float] = 0.02
 SCENE_ID_MATCH_BOOST: Final[float] = 0.04
 PERSONA_ID_MATCH_BOOST: Final[float] = 0.03
 IMPORTANCE_STEP_BOOST: Final[float] = 0.015
+LEXICAL_MATCH_STEP_BOOST: Final[float] = 0.05
+LEXICAL_MATCH_MAX_BOOST: Final[float] = 0.25
+
+# Function words excluded from lexical overlap so that conversational framing
+# ("I ask whether she...") does not boost unrelated chunks.
+_LEXICAL_STOPWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "the", "and", "for", "are", "was", "were", "with", "that", "this",
+        "what", "which", "who", "whom", "whether", "about", "into", "onto",
+        "from", "they", "them", "their", "she", "her", "hers", "him", "his",
+        "you", "your", "yours", "our", "ours", "have", "has", "had", "does",
+        "did", "will", "would", "should", "could", "can", "may", "might",
+        "not", "all", "any", "some", "one", "two", "where", "when", "how",
+        "why", "ask", "asks", "asked", "tell", "tells", "told", "say", "says",
+        "said",
+    }
+)
 COLLECTION_PRIORITY: Final[dict[RagCollection, int]] = {
     RagCollection.SESSION_MEMORY: 0,
     RagCollection.PERSONA_MEMORY: 1,
@@ -32,6 +49,10 @@ class RetrievalRankingContext:
     session_id: str
     persona_id: str
     scene_id: str | None = None
+    # Player-message-only text for lexical overlap; falls back to `query`,
+    # which also contains scene/persona framing that would otherwise boost
+    # any chunk sharing scene vocabulary.
+    lexical_query: str | None = None
 
 
 @dataclass(frozen=True)
@@ -44,7 +65,8 @@ class RankedChunk:
 
 
 def candidate_limit(top_k: int) -> int:
-    return max(top_k, top_k * 2)
+    """Oversample each collection so reranking can promote boosted candidates."""
+    return top_k * 2
 
 
 def rerank_chunks(
@@ -108,6 +130,12 @@ def _rank_chunk(
         applied_boosts["persona"] = PERSONA_ID_MATCH_BOOST
     if chunk.importance is not None and chunk.importance > 1:
         applied_boosts["importance"] = (chunk.importance - 1) * IMPORTANCE_STEP_BOOST
+    lexical_boost = _lexical_overlap_boost(
+        query_text=context.lexical_query or context.query,
+        chunk=chunk,
+    )
+    if lexical_boost > 0.0:
+        applied_boosts["lexical"] = lexical_boost
     adjusted_score = chunk.score + sum(applied_boosts.values())
     return RankedChunk(
         chunk=chunk,
@@ -116,6 +144,40 @@ def _rank_chunk(
         adjusted_score=adjusted_score,
         applied_boosts=applied_boosts,
     )
+
+
+def _lexical_overlap_boost(*, query_text: str, chunk: RetrievedChunk) -> float:
+    query_terms = content_terms(query_text)
+    if not query_terms:
+        return 0.0
+    chunk_terms = content_terms(chunk.text) | content_terms(" ".join(chunk.tags))
+    matches = len(query_terms & chunk_terms)
+    return min(matches * LEXICAL_MATCH_STEP_BOOST, LEXICAL_MATCH_MAX_BOOST)
+
+
+def content_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for raw_token in text.lower().split():
+        token = "".join(char for char in raw_token if char.isalpha())
+        if len(token) < 3 or token in _LEXICAL_STOPWORDS:
+            continue
+        terms.add(_stem(token))
+    return terms
+
+
+def _stem(token: str) -> str:
+    """Light deterministic suffix stripping so 'promised' matches 'promise'."""
+    if token.endswith("ing") and len(token) > 5:
+        token = token[:-3]
+    elif token.endswith("ed") and len(token) > 4:
+        token = token[:-2]
+    elif token.endswith("es") and len(token) > 4:
+        token = token[:-2]
+    elif token.endswith("s") and len(token) > 3:
+        token = token[:-1]
+    if token.endswith("e") and len(token) > 4:
+        token = token[:-1]
+    return token
 
 
 def _deduplicate_ranked_chunks(chunks: list[RankedChunk]) -> list[RankedChunk]:

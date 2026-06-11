@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.domain import (
     CriticResult,
+    CriticStatus,
     MemoryCandidate,
     MemoryCuratorResult,
     MemoryEpisode,
@@ -307,6 +308,7 @@ def test_turn_result_accepts_nested_model_route() -> None:
         },
         "finish_reason": None,
         "memory_written": False,
+        "critic_status": CriticStatus.SKIPPED,
         "warnings": [],
         "retrieval": None,
     }

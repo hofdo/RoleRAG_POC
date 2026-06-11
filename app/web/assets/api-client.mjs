@@ -113,6 +113,7 @@
  *   route: RouteResponse,
  *   finish_reason: string | null,
  *   memory_written: boolean,
+ *   critic_status: string,
  *   warnings: string[],
  * }} CreateTurnResponse
  */
@@ -240,6 +241,7 @@ function applyEvent(result, eventName, payload) {
     result.route = payload.route;
     result.finish_reason = payload.finish_reason ?? null;
     result.memory_written = payload.memory_written;
+    result.critic_status = payload.critic_status;
     result.warnings = payload.warnings;
     return true;
   }
@@ -271,6 +273,7 @@ async function parseEventStream(response) {
     route: null,
     finish_reason: null,
     memory_written: false,
+    critic_status: "skipped",
     warnings: [],
   };
   const decoder = new TextDecoder();
@@ -296,16 +299,25 @@ async function parseEventStream(response) {
   return result;
 }
 
+// Long local turns can take minutes (generation + critic + repair + memory),
+// but a hung backend must not leave the stream consumer waiting forever.
+const STREAM_TIMEOUT_MS = 600000;
+
 /**
  * @param {string} sessionId
  * @param {CreateTurnRequest} request
- * @param {{ fetchImpl?: typeof fetch }} options
+ * @param {{ fetchImpl?: typeof fetch, timeoutMs?: number }} options
  * @returns {Promise<CreateTurnResponse>}
  */
-export async function createBufferedTurn(sessionId, request, { fetchImpl = fetch } = {}) {
+export async function createBufferedTurn(
+  sessionId,
+  request,
+  { fetchImpl = fetch, timeoutMs = STREAM_TIMEOUT_MS } = {},
+) {
   const response = await fetchImpl(`/sessions/${encodeURIComponent(sessionId)}/turns/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       message: request.message,
       request_cloud: request.request_cloud,

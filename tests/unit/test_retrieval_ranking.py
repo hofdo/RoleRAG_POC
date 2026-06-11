@@ -294,3 +294,91 @@ def test_actor_context_retriever_exposes_rejected_candidates_in_diagnostics() ->
     assert rejected.original_score == 0.30
     assert rejected.applied_boosts
     assert not hasattr(rejected, "text")
+
+
+def test_lexical_overlap_boost_rescues_paraphrased_event_memory() -> None:
+    retriever = RecordingRetriever(
+        {
+            RagCollection.SESSION_MEMORY: [
+                _chunk(
+                    "event-memory",
+                    score=0.50,
+                    collection=RagCollection.SESSION_MEMORY,
+                    text="The player promised to return before dawn.",
+                    session_id="session-1",
+                ),
+                _chunk(
+                    "distractor-memory",
+                    score=0.55,
+                    collection=RagCollection.SESSION_MEMORY,
+                    text="Courtiers exchanged routine pleasantries near the mirrors.",
+                    session_id="session-1",
+                ),
+            ]
+        }
+    )
+
+    result = ActorContextRetriever(retriever=retriever).retrieve_for_actor_with_diagnostics(
+        query=(
+            "Scene: Rose Gallery\n"
+            "User message: I ask whether she remembers the promise I made about returning."
+        ),
+        lexical_query="I ask whether she remembers the promise I made about returning.",
+        world_id="world-1",
+        session_id="session-1",
+        persona_id="archivist",
+        top_k=1,
+    )
+
+    assert [chunk.id for chunk in result.chunks] == ["event-memory"]
+    selected = result.diagnostics.selected[0]
+    assert selected.applied_boosts["lexical"] > 0.0
+
+
+def test_lexical_boost_uses_player_message_not_scene_boilerplate() -> None:
+    retriever = RecordingRetriever(
+        {
+            RagCollection.CANON_LORE: [
+                _chunk(
+                    "lore-1",
+                    score=0.40,
+                    collection=RagCollection.CANON_LORE,
+                    text="The Rose Gallery archive sits behind the locked west door.",
+                )
+            ]
+        }
+    )
+
+    result = ActorContextRetriever(retriever=retriever).retrieve_for_actor_with_diagnostics(
+        query="Scene: Rose Gallery\nLocation: Winter Palace\nUser message: I greet her warmly.",
+        lexical_query="I greet her warmly.",
+        world_id="world-1",
+        session_id="session-1",
+        persona_id="archivist",
+        top_k=1,
+    )
+
+    assert "lexical" not in result.diagnostics.selected[0].applied_boosts
+
+
+def test_lexical_boost_counts_tag_matches_and_is_capped() -> None:
+    chunk = _chunk(
+        "event-memory",
+        score=0.10,
+        collection=RagCollection.SESSION_MEMORY,
+        text="The promise, the compass, the seal, the key, and the signal all return at dawn.",
+        session_id="session-1",
+    )
+    chunk = chunk.model_copy(update={"tags": ["promise", "dawn"]})
+    retriever = RecordingRetriever({RagCollection.SESSION_MEMORY: [chunk]})
+
+    result = ActorContextRetriever(retriever=retriever).retrieve_for_actor_with_diagnostics(
+        query="promise compass seal key signal return dawn",
+        lexical_query="promise compass seal key signal return dawn",
+        world_id="world-1",
+        session_id="session-1",
+        persona_id="archivist",
+        top_k=1,
+    )
+
+    assert result.diagnostics.selected[0].applied_boosts["lexical"] == 0.25

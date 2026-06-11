@@ -66,6 +66,7 @@ class ActorContextRetriever:
         persona_id: str,
         scene_id: str | None = None,
         top_k: int,
+        lexical_query: str | None = None,
     ) -> list[RetrievedChunk]:
         return self.retrieve_for_actor_with_diagnostics(
             query=query,
@@ -74,6 +75,7 @@ class ActorContextRetriever:
             persona_id=persona_id,
             scene_id=scene_id,
             top_k=top_k,
+            lexical_query=lexical_query,
         ).chunks
 
     def retrieve_for_actor_with_diagnostics(
@@ -85,6 +87,7 @@ class ActorContextRetriever:
         persona_id: str,
         scene_id: str | None = None,
         top_k: int,
+        lexical_query: str | None = None,
     ) -> RetrievalResult:
         per_collection_limit = candidate_limit(top_k)
         searches = [
@@ -108,6 +111,7 @@ class ActorContextRetriever:
                 session_id=session_id,
                 persona_id=persona_id,
                 scene_id=scene_id,
+                lexical_query=lexical_query,
             ),
             candidates=candidates,
             top_k=top_k,

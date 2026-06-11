@@ -25,7 +25,9 @@ Implemented in this repository:
 - deterministic end-to-end runtime smoke verification through `smoke-run`
 - deterministic content validation through `validate-content`
 - standalone scenario pack scaffolding through `create-scenario-template`
-- bounded critic and repair flow
+- bounded critic and repair flow with a first-class `critic_status` in turn responses
+- truncation-aware generation that retries `finish_reason=length` once with a larger budget
+- conservative deterministic fallback extraction for explicit player promises and handovers
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
 
@@ -181,7 +183,6 @@ RAG_DEFAULT_TOP_K=5
 RAG_CHUNK_SIZE_CHARS=1000
 RAG_CHUNK_OVERLAP_CHARS=120
 RAG_MAX_RETRIEVED_CHUNK_CHARS=800
-MAX_LOCAL_RETRIES=1
 RECENT_DIALOGUE_TURNS=8
 RECENT_DIALOGUE_MAX_MESSAGE_CHARS=900
 ```
@@ -564,7 +565,7 @@ framework-free browser surface is a thin client over the same-origin API:
 - recent sessions load from `GET /sessions`; `Resume selected` restores through backend session lookup
 - `Resume session` accepts an existing `session_id` fallback and renders backend `recent_turns`
 - turn execution uses JSON by default
-- the developer panel can opt into buffered SSE and displays safe route, memory, and warning data
+- the developer panel can opt into buffered SSE and displays safe route, memory, critic-status, and warning data
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
   the desired `CONTENT_ROOT` to use a different scenario pack
 
@@ -606,7 +607,7 @@ Important current behavior:
 - retrieval is fail-open; if Qdrant or embeddings are unavailable during a turn, generation continues without retrieved context
 - actor retrieval gathers candidates from `session_memory`, `persona_memory`, and `canon_lore`, then applies a deterministic reranking pass
 - actor retrieval filters to player-visible chunks and scopes lore, session memory, and persona memory by stored session metadata
-- reranking preserves vector score and adds transparent boosts for collection, matching session/scene/persona metadata, and memory importance
+- reranking preserves vector score and adds transparent boosts for collection, matching session/scene/persona metadata, memory importance, and lexical overlap with the player message
 - curated SQLite memory episodes are indexed into `session_memory` after persistence
 - memory indexing is fail-open during turns; use `reindex-memories` to backfill after an outage
 - `retrieve-debug` prints metadata-only diagnostics for selected chunks and does not expose hidden text
@@ -687,7 +688,6 @@ embedding quality, Qdrant quality, or generated prose quality.
 - local/cloud behavior depends on the configured providers actually being available
 - Qdrant is required for real retrieval behavior
 - memory vector indexing is derived from SQLite and may require `reindex-memories` after an outage
-- `MAX_LOCAL_RETRIES` is a settings field, but the current repair loop still uses fixed bounded retry behavior in code
 
 ## Safe Next Steps
 

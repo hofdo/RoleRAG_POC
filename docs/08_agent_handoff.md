@@ -76,7 +76,7 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
   the turn remains valid and `reindex-memories` can repair the derived Qdrant index.
 - Retrieval ranking is intentionally deterministic and transparent. Keep boost policy in `app/rag`,
   preserve the original vector score, and avoid player-facing hidden-text diagnostics.
-- `MAX_LOCAL_RETRIES` is present in settings but is not the sole source of retry truth yet.
+- Retry bounds are fixed in code; the former `MAX_LOCAL_RETRIES` setting was removed as unused.
 
 ## Verification Before Claiming Success
 

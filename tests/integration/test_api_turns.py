@@ -331,6 +331,7 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         },
         "finish_reason": "stop",
         "memory_written": False,
+        "critic_status": "accepted",
         "warnings": [],
         "retrieval": None,
     }
@@ -507,6 +508,7 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 },
                 "finish_reason": "stop",
                 "memory_written": False,
+                "critic_status": "accepted",
                 "warnings": [],
                 "retrieval": None,
             },

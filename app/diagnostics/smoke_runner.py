@@ -254,6 +254,7 @@ def run_smoke(*, settings: Settings | None = None, real_runtime: bool = False) -
         )
         retrieval_result = retriever.retrieve_for_actor_with_diagnostics(
             query=query,
+            lexical_query="What did I promise the archivist?",
             world_id="demo_world",
             session_id=session.id,
             persona_id="archivist",

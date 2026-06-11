@@ -170,6 +170,7 @@ export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
     routeReason: turn.route.reason,
     finishReason: turn.finish_reason ?? null,
     memoryWritten: turn.memory_written,
+    criticStatus: turn.critic_status,
     warnings: turn.warnings,
   };
 }
