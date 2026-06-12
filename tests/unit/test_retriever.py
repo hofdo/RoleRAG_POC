@@ -307,6 +307,53 @@ def test_actor_context_retriever_aggregates_collections_by_score_and_scope() -> 
     assert all(call[3] == 4 for call in retriever.calls)
 
 
+def test_actor_context_retriever_searches_with_bare_message_query_as_second_pass() -> None:
+    chunk = RetrievedChunk(
+        id="memory-1",
+        source="memory",
+        source_type="memory",
+        text="The player promised to return before dawn.",
+        score=0.8,
+        visibility=Visibility.PLAYER,
+    )
+    retriever = RecordingRetriever({RagCollection.SESSION_MEMORY: [chunk]})
+
+    chunks = ActorContextRetriever(retriever=retriever).retrieve_for_actor(
+        query="Scene: Rose Gallery\nUser message: the promise I made",
+        lexical_query="the promise I made",
+        world_id="demo_world",
+        session_id="session-1",
+        persona_id="archivist",
+        top_k=2,
+    )
+
+    queries_per_collection: dict[RagCollection, list[str]] = {}
+    for query, collection, _, _ in retriever.calls:
+        queries_per_collection.setdefault(collection, []).append(query)
+    assert all(
+        queries == ["Scene: Rose Gallery\nUser message: the promise I made", "the promise I made"]
+        for queries in queries_per_collection.values()
+    )
+    assert [chunk.id for chunk in chunks] == ["memory-1"]
+
+
+def test_actor_context_retriever_skips_second_pass_without_distinct_lexical_query() -> None:
+    retriever = RecordingRetriever({})
+    actor_retriever = ActorContextRetriever(retriever=retriever)
+
+    for lexical_query in (None, "", "gallery"):
+        retriever.calls.clear()
+        actor_retriever.retrieve_for_actor(
+            query="gallery",
+            lexical_query=lexical_query,
+            world_id="demo_world",
+            session_id="session-1",
+            persona_id="archivist",
+            top_k=2,
+        )
+        assert len(retriever.calls) == 3
+
+
 def test_build_retrieval_query_uses_visible_context_and_latest_two_turns() -> None:
     route = ModelRoute(
         provider=ModelProviderName.LOCAL,

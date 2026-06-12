@@ -576,6 +576,9 @@ class RecordingMemoryStore:
         self.persisted.extend(episodes)
         return episodes
 
+    def list_memories_for_session(self, session_id: str) -> list[Any]:
+        return [episode for episode in self.persisted if episode.session_id == session_id]
+
 
 class DecliningCurator:
     async def curate(self, **_: object) -> Any:
@@ -662,6 +665,39 @@ async def test_memory_stage_adds_explicit_event_when_curator_declines_to_write()
     assert result.memory_written is True
     assert len(store.persisted) == 1
     assert "return before dawn" in store.persisted[0].summary
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_drops_candidates_covered_by_persisted_memories() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=CoveringCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    async def run_turn() -> Any:
+        return await stage.run(
+            session=context.session,
+            scene=context.scene,
+            persona=context.persona,
+            user_message="I promise to return before dawn.",
+            assistant_message="Iria nods once.",
+            retrieval_confidence=None,
+            scene_complexity=1,
+        )
+
+    first = await run_turn()
+    assert first.memory_written is True
+    assert len(store.persisted) == 1
+
+    second = await run_turn()
+    assert second.memory_written is False
+    assert len(store.persisted) == 1
+    assert any("memory dedup dropped" in warning for warning in second.warnings)
 
 
 @pytest.mark.asyncio

@@ -95,11 +95,19 @@ class ActorContextRetriever:
             (RagCollection.PERSONA_MEMORY, RetrievalFilter.player_visible(persona_id=persona_id)),
             (RagCollection.CANON_LORE, RetrievalFilter.player_visible(world_id=world_id)),
         ]
+        # The context query anchors scene/lore relevance, but its framing buries
+        # indirect callbacks ("what rule did we agree...") in long sessions. A
+        # second pass with the bare player message keeps those retrievable;
+        # reranking deduplicates the union by chunk id.
+        queries = [query]
+        if lexical_query and lexical_query != query:
+            queries.append(lexical_query)
         candidates = [
             (collection, chunk)
             for collection, filters in searches
+            for search_query in queries
             for chunk in self.retriever.retrieve(
-                query=query,
+                query=search_query,
                 collection=collection,
                 filters=filters,
                 top_k=per_collection_limit,

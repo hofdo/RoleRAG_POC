@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     local_structured_max_tokens: int = Field(default=350, ge=1)
     local_llm_temperature: float = 0.75
     local_llm_timeout_seconds: float = Field(default=180.0, gt=0)
-    local_llm_max_retries: int = Field(default=0, ge=0)
+    # One retry absorbs transient request stalls that otherwise kill a whole
+    # session via a single 504 (2026-06-12 live acceptance, run #2).
+    local_llm_max_retries: int = Field(default=1, ge=0)
 
     critic_gating: Literal["always", "auto"] = "always"
     curator_gating: Literal["always", "auto"] = "always"

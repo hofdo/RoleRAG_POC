@@ -196,6 +196,13 @@ class TurnMemoryStage:
     ) -> bool:
         if not candidates or self.memory_store is None:
             return False
+        candidates = self._drop_duplicate_candidates(
+            session_id=session_id,
+            candidates=candidates,
+            warnings=warnings,
+        )
+        if not candidates:
+            return False
         persisted = self.memory_store.persist_memories(
             session_id=session_id,
             memories=candidates,
@@ -206,3 +213,38 @@ class TurnMemoryStage:
             except Exception as exc:
                 warnings.append(f"memory indexing skipped: {exc}")
         return len(persisted) > 0
+
+    def _drop_duplicate_candidates(
+        self,
+        *,
+        session_id: str,
+        candidates: list[MemoryCandidate],
+        warnings: list[str],
+    ) -> list[MemoryCandidate]:
+        """Skip candidates already covered by persisted session memories.
+
+        Always-on curation writes ~1.7 memories per turn; without this cap the
+        store fills with near-duplicates that crowd real events out of
+        retrieval in long sessions.
+        """
+        assert self.memory_store is not None
+        try:
+            existing = [
+                episode.summary
+                for episode in self.memory_store.list_memories_for_session(session_id)
+            ]
+        except Exception as exc:
+            warnings.append(f"memory dedup skipped: {exc}")
+            return candidates
+        if not existing:
+            return candidates
+        kept: list[MemoryCandidate] = []
+        for candidate in candidates:
+            if is_covered_by_summaries(candidate.summary, existing):
+                continue
+            kept.append(candidate)
+            existing.append(candidate.summary)
+        dropped = len(candidates) - len(kept)
+        if dropped:
+            warnings.append(f"memory dedup dropped {dropped} duplicate candidate(s)")
+        return kept

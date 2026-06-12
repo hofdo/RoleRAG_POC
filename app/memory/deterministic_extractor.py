@@ -31,7 +31,8 @@ _DEADLINE_PATTERN = re.compile(
 )
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 _DURABLE_TERM_PATTERN = re.compile(
-    r"\b(?:promise[sd]?|swear[s]?|swore|vow[sed]*|pledge[sd]?|oath|entrust[sed]*)\b",
+    r"\b(?:promise[sd]?|swear[s]?|swore|vow[sed]*|pledge[sd]?|oath|entrust[sed]*"
+    r"|agree[sd]?|agreement|rule[s]?|signal[s]?|code[s]?|arrange[sd]?|protocol[s]?)\b",
     re.IGNORECASE,
 )
 
