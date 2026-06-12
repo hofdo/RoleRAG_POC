@@ -1,18 +1,32 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from time import perf_counter
+
 from app.agents import ActorAgent
-from app.domain import CriticStatus, SessionState, TurnInput, TurnOutcome, TurnResult
+from app.domain import (
+    CriticResult,
+    CriticStatus,
+    SessionState,
+    TurnInput,
+    TurnOutcome,
+    TurnResult,
+)
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode, ModelRoute
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
+from app.orchestration.draft_validator import DraftValidationResult, validate_draft
 from app.orchestration.stages import (
     CONTROLLED_FAILURE_TEXT,
     ActorContextRetrieving,
     CriticEvaluatingAgent,
     EmptyProviderResponseError,
+    LoadedTurnContext,
     MemoryCuratingAgent,
     MemoryIndexing,
+    RetrievalStageResult,
     StructuredFailureRecording,
     TruncatedProviderResponseError,
     TurnCritiqueStage,
@@ -27,6 +41,45 @@ from app.orchestration.stages import (
     TurnSessionLoader,
 )
 from app.persistence.repositories import SessionRepository, TurnRepository
+
+
+def _visible_texts(
+    *,
+    context: LoadedTurnContext,
+    retrieval: RetrievalStageResult,
+) -> list[str]:
+    texts = [
+        context.scene.title,
+        context.scene.location,
+        context.scene.player_visible_summary,
+        context.persona.name,
+        context.persona.public_description,
+        context.persona.speaking_style,
+    ]
+    texts.extend(chunk.text for chunk in retrieval.chunks)
+    for turn in context.recent_turns:
+        texts.append(turn.user_message)
+        texts.append(turn.assistant_message)
+    return texts
+
+
+def _validation_repair_instruction(validation: DraftValidationResult) -> str:
+    parts = []
+    if validation.unsupported_entities:
+        names = ", ".join(validation.unsupported_entities)
+        parts.append(f"Remove or replace details not present in the scene: {names}.")
+    if validation.evaded_action:
+        parts.append("Directly address the player's question or action.")
+    return " ".join(parts)
+
+
+@contextmanager
+def _stage_timer(timings: dict[str, float], stage: str) -> Iterator[None]:
+    started = perf_counter()
+    try:
+        yield
+    finally:
+        timings[stage] = perf_counter() - started
 
 
 class TurnOrchestrator:
@@ -58,6 +111,8 @@ class TurnOrchestrator:
         max_retrieved_chunk_chars: int = 800,
         recent_dialogue_max_message_chars: int = 900,
         structured_failure_sink: StructuredFailureRecording | None = None,
+        critic_gating: str = "always",
+        curator_gating: str = "always",
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -118,6 +173,7 @@ class TurnOrchestrator:
             critic_agent=critic_agent,
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
+            gating=critic_gating,
         )
         self.repair_stage = TurnRepairStage(
             generation_stage=self.generation_stage,
@@ -135,6 +191,7 @@ class TurnOrchestrator:
             memory_indexer=memory_indexer,
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
+            gating=curator_gating,
         )
 
     @property
@@ -184,20 +241,37 @@ class TurnOrchestrator:
         return self.session_stage.resume_session(session_id)
 
     async def run_turn(self, *, turn_input: TurnInput) -> TurnResult:
-        context = self.session_stage.load(turn_input)
-        retrieval = self.retrieval_stage.run(turn_input=turn_input, context=context)
-        routing = self.routing_stage.actor(
-            turn_input=turn_input,
-            scene=context.scene,
-            retrieval_confidence=retrieval.confidence,
-        )
-        try:
-            generation = await self.generation_stage.run(
+        timings: dict[str, float] = {}
+        with _stage_timer(timings, "session"):
+            context = self.session_stage.load(turn_input)
+        with _stage_timer(timings, "retrieval"):
+            retrieval = self.retrieval_stage.run(turn_input=turn_input, context=context)
+        with _stage_timer(timings, "routing"):
+            routing = self.routing_stage.actor(
                 turn_input=turn_input,
-                context=context,
-                retrieval=retrieval,
-                routing=routing,
+                scene=context.scene,
+                retrieval_confidence=retrieval.confidence,
             )
+        if routing.route.requires_user_confirmation:
+            return TurnResult(
+                text="",
+                route=routing.route,
+                finish_reason=None,
+                memory_written=False,
+                critic_status=CriticStatus.SKIPPED,
+                warnings=[*retrieval.warnings, *routing.warnings],
+                retrieval=retrieval.diagnostics,
+                stage_timings=timings,
+                outcome=TurnOutcome.CONFIRMATION_REQUIRED,
+            )
+        try:
+            with _stage_timer(timings, "generation"):
+                generation = await self.generation_stage.run(
+                    turn_input=turn_input,
+                    context=context,
+                    retrieval=retrieval,
+                    routing=routing,
+                )
         except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
             return TurnResult(
                 text=CONTROLLED_FAILURE_TEXT,
@@ -211,6 +285,7 @@ class TurnOrchestrator:
                     f"actor failed: {exc}",
                 ],
                 retrieval=retrieval.diagnostics,
+                stage_timings=timings,
                 outcome=TurnOutcome.CONTROLLED_FAILURE,
             )
         warnings = [
@@ -218,13 +293,25 @@ class TurnOrchestrator:
             *routing.warnings,
             *generation.warnings,
         ]
-        critique = await self.critique_stage.run(
-            persona=context.persona,
-            scene=context.scene,
-            user_message=turn_input.message,
-            draft=generation.text,
-            retrieved_chunks=retrieval.chunks,
-        )
+        with _stage_timer(timings, "validation"):
+            validation = validate_draft(
+                draft=generation.text,
+                player_message=turn_input.message,
+                visible_texts=_visible_texts(context=context, retrieval=retrieval),
+            )
+        warnings.extend(validation.flags)
+        with _stage_timer(timings, "critique"):
+            critique = await self.critique_stage.run(
+                persona=context.persona,
+                scene=context.scene,
+                user_message=turn_input.message,
+                draft=generation.text,
+                retrieved_chunks=retrieval.chunks,
+                validator_flagged=bool(validation.flags),
+                retrieval_confidence=retrieval.confidence,
+                scene_complexity=routing.scene_complexity,
+                route_provider=generation.route.provider,
+            )
         warnings.extend(critique.warnings)
 
         final_text = generation.text
@@ -233,62 +320,90 @@ class TurnOrchestrator:
         critic_status = (
             CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
         )
-        if critique.critique is not None and not critique.critique.accepted:
+        effective_critique = critique.critique
+        validator_forced_repair = False
+        if validation.flags and (effective_critique is None or effective_critique.accepted):
+            validator_forced_repair = True
+            effective_critique = CriticResult(
+                accepted=False,
+                issues=list(validation.flags),
+                repair_instruction=_validation_repair_instruction(validation),
+            )
+        if effective_critique is not None and not effective_critique.accepted:
+            repair_failure: str | None = None
+            repair = None
             try:
-                repair = await self.repair_stage.run(
-                    context=context,
-                    user_message=turn_input.message,
-                    actor_messages=generation.messages,
-                    draft=generation.text,
-                    route=generation.route,
-                    critique=critique.critique,
-                    retrieval=retrieval,
-                    routing=routing,
-                )
+                with _stage_timer(timings, "repair"):
+                    repair = await self.repair_stage.run(
+                        context=context,
+                        user_message=turn_input.message,
+                        actor_messages=generation.messages,
+                        draft=generation.text,
+                        route=generation.route,
+                        critique=effective_critique,
+                        retrieval=retrieval,
+                        routing=routing,
+                    )
             except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
-                warnings.append(f"repair failed: {exc}")
-                return TurnResult(
-                    text=CONTROLLED_FAILURE_TEXT,
-                    route=generation.route,
-                    finish_reason=generation.finish_reason,
-                    memory_written=False,
-                    critic_status=CriticStatus.REJECTED,
-                    warnings=warnings,
-                    retrieval=retrieval.diagnostics,
-                    outcome=TurnOutcome.CONTROLLED_FAILURE,
-                )
-            warnings.extend(repair.warnings)
-            if repair.outcome == TurnOutcome.CONTROLLED_FAILURE:
-                return TurnResult(
-                    text=repair.text,
-                    route=repair.route,
-                    finish_reason=repair.finish_reason,
-                    memory_written=False,
-                    critic_status=CriticStatus.REJECTED,
-                    warnings=warnings,
-                    retrieval=retrieval.diagnostics,
-                    outcome=repair.outcome,
-                )
-            final_text = repair.text
-            final_route = repair.route
-            final_finish_reason = repair.finish_reason
-            critic_status = CriticStatus.REPAIRED
+                repair_failure = str(exc)
+            if repair is not None:
+                warnings.extend(repair.warnings)
+            if repair_failure is not None or (
+                repair is not None and repair.outcome == TurnOutcome.CONTROLLED_FAILURE
+            ):
+                # The validator is heuristic; when it alone forced the repair,
+                # an imperfect original draft beats a controlled failure.
+                if validator_forced_repair:
+                    warnings.append(
+                        "draft validation repair failed; returning original draft"
+                        + (f": {repair_failure}" if repair_failure else "")
+                    )
+                else:
+                    if repair_failure is not None:
+                        warnings.append(f"repair failed: {repair_failure}")
+                    failure_text = (
+                        repair.text if repair is not None else CONTROLLED_FAILURE_TEXT
+                    )
+                    failure_route = repair.route if repair is not None else generation.route
+                    failure_finish = (
+                        repair.finish_reason
+                        if repair is not None
+                        else generation.finish_reason
+                    )
+                    return TurnResult(
+                        text=failure_text,
+                        route=failure_route,
+                        finish_reason=failure_finish,
+                        memory_written=False,
+                        critic_status=CriticStatus.REJECTED,
+                        warnings=warnings,
+                        retrieval=retrieval.diagnostics,
+                        stage_timings=timings,
+                        outcome=TurnOutcome.CONTROLLED_FAILURE,
+                    )
+            elif repair is not None:
+                final_text = repair.text
+                final_route = repair.route
+                final_finish_reason = repair.finish_reason
+                critic_status = CriticStatus.REPAIRED
 
-        self.persistence_stage.run(
-            session=context.session,
-            user_message=turn_input.message,
-            assistant_message=final_text,
-            route=final_route,
-        )
-        memory = await self.memory_stage.run(
-            session=context.session,
-            scene=context.scene,
-            persona=context.persona,
-            user_message=turn_input.message,
-            assistant_message=final_text,
-            retrieval_confidence=retrieval.confidence,
-            scene_complexity=routing.scene_complexity,
-        )
+        with _stage_timer(timings, "persistence"):
+            self.persistence_stage.run(
+                session=context.session,
+                user_message=turn_input.message,
+                assistant_message=final_text,
+                route=final_route,
+            )
+        with _stage_timer(timings, "memory"):
+            memory = await self.memory_stage.run(
+                session=context.session,
+                scene=context.scene,
+                persona=context.persona,
+                user_message=turn_input.message,
+                assistant_message=final_text,
+                retrieval_confidence=retrieval.confidence,
+                scene_complexity=routing.scene_complexity,
+            )
         warnings.extend(memory.warnings)
         return TurnResult(
             text=final_text,
@@ -298,6 +413,7 @@ class TurnOrchestrator:
             critic_status=critic_status,
             warnings=warnings,
             retrieval=retrieval.diagnostics,
+            stage_timings=timings,
         )
 
     def loader_for_session(self, session: SessionState) -> TurnDataLoader:

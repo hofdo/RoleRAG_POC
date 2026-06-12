@@ -209,7 +209,16 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
     assert result.route.reason == "default local route"
     assert result.memory_written is False
     assert result.warnings == []
-    assert result.model_dump() == {
+    dump = result.model_dump()
+    assert set(dump.pop("stage_timings")) >= {
+        "retrieval",
+        "routing",
+        "generation",
+        "critique",
+        "persistence",
+        "memory",
+    }
+    assert dump == {
         "text": "I have heard enough to know the regent fears open daylight.",
         "route": {
             "provider": ModelProviderName.LOCAL,
@@ -340,7 +349,7 @@ async def test_turn_orchestrator_sets_memory_written_when_curator_persists_memor
     result = await orchestrator.run_turn(
         turn_input=TurnInput(
             session_id="demo-session",
-            message="I promise I will return before dawn.",
+            message="I promise I will return before dawn to face the regent.",
         )
     )
 
@@ -362,7 +371,7 @@ async def test_turn_orchestrator_returns_warning_when_memory_curation_fails(
     result = await orchestrator.run_turn(
         turn_input=TurnInput(
             session_id="demo-session",
-            message="I promise I will return before dawn.",
+            message="I promise I will return before dawn to face the regent.",
         )
     )
 
@@ -405,7 +414,7 @@ async def test_turn_orchestrator_returns_response_when_memory_indexing_fails(
     result = await orchestrator.run_turn(
         turn_input=TurnInput(
             session_id="demo-session",
-            message="I promise I will return before dawn.",
+            message="I promise I will return before dawn to face the regent.",
         )
     )
 
@@ -672,6 +681,102 @@ async def test_turn_orchestrator_retries_truncated_actor_response_with_larger_bu
     )
 
 
+class RepairFriendlyCritic(StubCritic):
+    def build_local_repair_messages(
+        self,
+        *,
+        actor_messages: list[LlmMessage],
+        rejected_draft: str,
+        issues: list[str],
+        repair_instruction: str | None,
+    ) -> list[LlmMessage]:
+        return [LlmMessage(role="user", content=f"repair: {'; '.join(issues)}")]
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_repairs_draft_with_unsupported_entity(
+    tmp_path: Path,
+) -> None:
+    provider = SequencedProvider(
+        [
+            "Duke Erran handed me a silver map this morning.",
+            "I have heard enough to know the regent fears open daylight.",
+        ]
+    )
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider(), critic=RepairFriendlyCritic())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.critic_status == CriticStatus.REPAIRED
+    assert result.text == "I have heard enough to know the regent fears open daylight."
+    assert any("unsupported entity Duke Erran" in warning for warning in result.warnings)
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_does_not_repair_clean_draft(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.critic_status == CriticStatus.ACCEPTED
+    assert all("draft validation" not in warning for warning in result.warnings)
+    assert len(provider.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_records_stage_timings_for_successful_turn(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What news?")
+    )
+
+    expected_stages = {
+        "retrieval",
+        "routing",
+        "generation",
+        "critique",
+        "persistence",
+        "memory",
+    }
+    assert expected_stages.issubset(result.stage_timings.keys())
+    assert all(value >= 0.0 for value in result.stage_timings.values())
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_records_stage_timings_for_controlled_failure(
+    tmp_path: Path,
+) -> None:
+    provider = FinishReasonScriptedProvider(
+        [("The archivist begins a long story about", "length")]
+    )
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Tell me everything.")
+    )
+
+    assert {"retrieval", "routing", "generation"}.issubset(result.stage_timings.keys())
+    assert all(value >= 0.0 for value in result.stage_timings.values())
+
+
 @pytest.mark.asyncio
 async def test_turn_orchestrator_returns_controlled_failure_for_repeated_truncation(
     tmp_path: Path,
@@ -694,3 +799,210 @@ async def test_turn_orchestrator_returns_controlled_failure_for_repeated_truncat
     assert result.memory_written is False
     assert len(provider.requests) == 2
     assert any("truncated" in warning for warning in result.warnings)
+
+
+class CountingCritic(StubCritic):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def evaluate(self, **_: object) -> CriticResult:
+        self.calls += 1
+        return self.result
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_auto_gating_skips_critic_and_curator_on_low_risk_turn(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    critic = CountingCritic()
+    curator = StubMemoryCurator()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        critic=critic,
+        memory_curator=curator,
+    )
+    orchestrator.critique_stage.gating = "auto"
+    orchestrator.memory_stage.gating = "auto"
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert critic.calls == 1  # no retrieval confidence -> risky -> critic runs
+    assert curator.calls == 0
+    assert result.critic_status == CriticStatus.ACCEPTED
+    assert "memory curation gated: no durable-event signals" in result.warnings
+
+
+def test_turn_orchestrator_constructor_forwards_gating_modes(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "gating.db")
+    initialize_database(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    orchestrator = TurnOrchestrator(
+        loader=FakeLoader(),
+        provider=FakeProvider(),
+        critic_agent=StubCritic(),
+        session_repository=SQLiteSessionRepository(connection),
+        turn_repository=turn_repository,
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=turn_repository,
+            recent_turns=8,
+        ),
+        local_model="local-model",
+        cloud_model="cloud-model",
+        local_max_tokens=700,
+        cloud_max_tokens=1000,
+        local_temperature=0.75,
+        cloud_temperature=0.65,
+        cloud_mode="off",
+        critic_gating="auto",
+        curator_gating="auto",
+    )
+
+    assert orchestrator.critique_stage.gating == "auto"
+    assert orchestrator.memory_stage.gating == "auto"
+
+
+class CloudCapableProvider(LlmProvider):
+    def __init__(self) -> None:
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        return LlmResponse(
+            text="I have heard enough to know the regent fears open daylight.",
+            provider="cloud",
+            model=request.model,
+            usage={"total_tokens": 20},
+            finish_reason="stop",
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_ask_mode_returns_confirmation_required_without_generation(
+    tmp_path: Path,
+) -> None:
+    from app.domain import TurnOutcome
+
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+            user_requested_cloud=True,
+        )
+    )
+
+    assert result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
+    assert result.text == ""
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert result.route.requires_user_confirmation is True
+    assert result.memory_written is False
+    assert provider.requests == []
+    assert orchestrator.turn_repository.count_turns("demo-session") == 0
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_cloud_confirmed_turn_routes_to_cloud(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    cloud_provider = CloudCapableProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+    orchestrator.cloud_provider = cloud_provider
+    orchestrator.generation_stage.cloud_provider = cloud_provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+            user_requested_cloud=True,
+            cloud_confirmed=True,
+        )
+    )
+
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert result.route.requires_user_confirmation is False
+    assert len(cloud_provider.requests) == 1
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_force_local_declines_cloud_route(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+            user_requested_cloud=True,
+            force_local=True,
+        )
+    )
+
+    assert result.route.provider == ModelProviderName.LOCAL
+    assert result.route.reason == "user declined cloud"
+    assert len(provider.requests) == 1
+
+
+class FirstOnlyProvider(LlmProvider):
+    """Returns one draft, then fails — exercises repair failure paths."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        if len(self.requests) > 1:
+            return LlmResponse(
+                text="",
+                provider="fake",
+                model=request.model,
+                usage={"total_tokens": 0},
+                finish_reason="stop",
+            )
+        return LlmResponse(
+            text=self.text,
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 15},
+            finish_reason="stop",
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_keeps_original_draft_when_validator_only_repair_fails(
+    tmp_path: Path,
+) -> None:
+    from app.domain import TurnOutcome
+
+    provider = FirstOnlyProvider("Duke Erran handed me a silver map this morning.")
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider(), critic=RepairFriendlyCritic())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    assert result.text == "Duke Erran handed me a silver map this morning."
+    assert result.critic_status == CriticStatus.ACCEPTED
+    assert any("unsupported entity" in warning for warning in result.warnings)
+    assert any("draft validation repair failed" in warning for warning in result.warnings)
+    assert result.memory_written is False
+    assert orchestrator.turn_repository.count_turns("demo-session") == 1

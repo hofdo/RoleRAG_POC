@@ -183,17 +183,31 @@ async def test_ask_mode_never_silently_calls_cloud_for_initial_actor_route(tmp_p
         cloud_mode=CloudMode.ASK,
     )
 
+    from app.domain import TurnOutcome
+
     result = await orchestrator.run_turn(
         turn_input=TurnInput(session_id="demo-session", message="What do I notice?")
     )
 
-    assert result.text == "Local answer"
-    assert result.route.provider == ModelProviderName.LOCAL
-    assert "confirmation required" in result.route.reason
-    assert result.warnings == [
-        "cloud actor skipped: confirmation required for cloud-model (low retrieval confidence)"
-    ]
-    assert len(local_provider.requests) == 1
+    assert result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
+    assert result.text == ""
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert result.route.requires_user_confirmation is True
+    assert result.route.reason == "low retrieval confidence"
+    assert len(local_provider.requests) == 0
+    assert len(cloud_provider.requests) == 0
+
+    declined = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What do I notice?",
+            force_local=True,
+        )
+    )
+
+    assert declined.text == "Local answer"
+    assert declined.route.provider == ModelProviderName.LOCAL
+    assert declined.route.reason == "user declined cloud"
     assert len(cloud_provider.requests) == 0
 
 

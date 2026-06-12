@@ -77,8 +77,12 @@ class MemoryCuratorResult(BaseModel):
 
     @model_validator(mode="after")
     def validate_write_memory_has_candidates(self) -> "MemoryCuratorResult":
+        # A grammar-constrained local model can claim write_memory=true while
+        # emitting no candidates; treat that contradiction as a decline rather
+        # than failing the whole curation (the deterministic extractor still
+        # preserves explicit player commitments).
         if self.write_memory and not self.memories:
-            raise ValueError("write_memory=true requires at least one memory candidate")
+            object.__setattr__(self, "write_memory", False)
         return self
 
 
@@ -103,6 +107,8 @@ class TurnInput(BaseModel):
     message: str
     active_persona_id: str | None = None
     user_requested_cloud: bool = False
+    cloud_confirmed: bool = False
+    force_local: bool = False
 
 
 class StoredTurn(BaseModel):
@@ -120,6 +126,7 @@ class StoredTurn(BaseModel):
 class TurnOutcome(str, Enum):
     SUCCESS = "success"
     CONTROLLED_FAILURE = "controlled_failure"
+    CONFIRMATION_REQUIRED = "confirmation_required"
 
 
 class CriticStatus(str, Enum):
@@ -164,6 +171,7 @@ class TurnResult(BaseModel):
     critic_status: CriticStatus = CriticStatus.SKIPPED
     warnings: list[str] = Field(default_factory=list)
     retrieval: TurnRetrievalDiagnostics | None = None
+    stage_timings: dict[str, float] = Field(default_factory=dict)
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
 
 

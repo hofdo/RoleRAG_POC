@@ -63,17 +63,19 @@ async def test_memory_curator_rejects_invalid_memory_visibility() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_curator_rejects_write_without_candidates() -> None:
+async def test_memory_curator_treats_write_without_candidates_as_decline() -> None:
     fixture = build_eval_fixture()
     provider = fixture.build_memory_provider(kind="write_without_candidates")
 
-    with pytest.raises(MemoryCuratorOutputError):
-        await MemoryCurator().curate(
-            provider=provider,
-            route=fixture.memory_route,
-            session=fixture.session,
-            scene=fixture.scene,
-            persona=fixture.primary_persona,
-            user_message=fixture.important_turn_user_message,
-            assistant_message=fixture.important_turn_assistant_message,
-        )
+    result = await MemoryCurator().curate(
+        provider=provider,
+        route=fixture.memory_route,
+        session=fixture.session,
+        scene=fixture.scene,
+        persona=fixture.primary_persona,
+        user_message=fixture.important_turn_user_message,
+        assistant_message=fixture.important_turn_assistant_message,
+    )
+
+    assert result.write_memory is False
+    assert result.memories == []

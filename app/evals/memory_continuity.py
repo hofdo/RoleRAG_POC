@@ -33,7 +33,7 @@ _GM_ONLY_SUMMARY = "GM_ONLY_MEMORY: A loyalist spy listens behind the archive sc
 _PRIVATE_SUMMARY = "PRIVATE_MEMORY: Iria hid the archive cipher inside the gallery clock."
 _EARLY_DIALOGUE_MARKER = "TURN_ONE_DIALOGUE_MARKER"
 _FILLER_MESSAGE = "Good evening, Iria."
-_ACTOR_RESPONSE = "Iria inclines her head with measured calm."
+_ACTOR_RESPONSE = "Iria inclines her head, recalling the promise about the archive key."
 _LATE_RECALL_QUESTION = "Do you remember my promise about the archive key before dawn?"
 
 

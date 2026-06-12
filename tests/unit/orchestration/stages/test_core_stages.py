@@ -128,7 +128,7 @@ def test_retrieval_stage_degrades_to_warning() -> None:
     assert result.warnings == ("retrieval skipped: offline",)
 
 
-def test_routing_stage_normalizes_confirmation_required_actor_route() -> None:
+def test_routing_stage_keeps_confirmation_required_cloud_route() -> None:
     result = _routing().actor(
         turn_input=TurnInput(
             session_id="session",
@@ -139,11 +139,43 @@ def test_routing_stage_normalizes_confirmation_required_actor_route() -> None:
         retrieval_confidence=None,
     )
 
-    assert result.route.provider == ModelProviderName.LOCAL
-    assert result.route.reason == "confirmation required before cloud route: user requested cloud"
-    assert result.warnings == (
-        "cloud actor skipped: confirmation required for cloud (user requested cloud)",
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert result.route.requires_user_confirmation is True
+    assert result.route.reason == "user requested cloud"
+    assert result.warnings == ()
+
+
+def test_routing_stage_cloud_confirmed_clears_confirmation_flag() -> None:
+    result = _routing().actor(
+        turn_input=TurnInput(
+            session_id="session",
+            message="Use cloud.",
+            user_requested_cloud=True,
+            cloud_confirmed=True,
+        ),
+        scene=_context().scene,
+        retrieval_confidence=None,
     )
+
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert result.route.requires_user_confirmation is False
+
+
+def test_routing_stage_force_local_overrides_cloud_request() -> None:
+    result = _routing().actor(
+        turn_input=TurnInput(
+            session_id="session",
+            message="Use cloud.",
+            user_requested_cloud=True,
+            force_local=True,
+        ),
+        scene=_context().scene,
+        retrieval_confidence=None,
+    )
+
+    assert result.route.provider == ModelProviderName.LOCAL
+    assert result.route.reason == "user declined cloud"
+    assert result.warnings == ()
 
 
 def test_persistence_stage_appends_before_updating_session_activity() -> None:
@@ -657,3 +689,205 @@ async def test_memory_stage_does_not_duplicate_event_already_curated() -> None:
     assert result.memory_written is True
     assert len(store.persisted) == 1
     assert store.persisted[0].summary == "The player promised to return before dawn."
+
+
+class AcceptingCriticAgent(FailingCriticAgent):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def evaluate(self, **_: object) -> CriticResult:
+        self.calls += 1
+        return CriticResult(accepted=True)
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_auto_gating_skips_low_risk_turn() -> None:
+    critic = AcceptingCriticAgent()
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+        gating="auto",
+    )
+    context = _context()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=(),
+        validator_flagged=False,
+        retrieval_confidence=0.9,
+        scene_complexity=1,
+        route_provider=ModelProviderName.LOCAL,
+    )
+
+    assert result.critique is None
+    assert result.warnings == ("critic gated: low-risk turn",)
+    assert critic.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "signals",
+    [
+        {"validator_flagged": True},
+        {"retrieval_confidence": 0.2},
+        {"retrieval_confidence": None},
+        {"scene_complexity": 4},
+        {"route_provider": ModelProviderName.CLOUD},
+    ],
+)
+async def test_critique_stage_auto_gating_runs_critic_on_risk_signals(
+    signals: dict[str, object],
+) -> None:
+    critic = AcceptingCriticAgent()
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+        gating="auto",
+    )
+    context = _context()
+    arguments: dict[str, Any] = {
+        "validator_flagged": False,
+        "retrieval_confidence": 0.9,
+        "scene_complexity": 1,
+        "route_provider": ModelProviderName.LOCAL,
+    }
+    arguments.update(signals)
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=(),
+        **arguments,
+    )
+
+    assert result.critique is not None
+    assert critic.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_always_mode_runs_critic_without_signals() -> None:
+    critic = AcceptingCriticAgent()
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=(),
+        validator_flagged=False,
+        retrieval_confidence=0.9,
+        scene_complexity=1,
+        route_provider=ModelProviderName.LOCAL,
+    )
+
+    assert result.critique is not None
+    assert critic.calls == 1
+
+
+class CountingCurator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def curate(self, **_: object) -> Any:
+        from app.domain import MemoryCuratorResult
+
+        self.calls += 1
+        return MemoryCuratorResult(write_memory=False, memories=[], reason="nothing durable")
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_auto_gating_skips_curator_without_durable_signals() -> None:
+    store = RecordingMemoryStore()
+    curator = CountingCurator()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=curator,
+        memory_indexer=None,
+        routing_stage=_routing(),
+        gating="auto",
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="Good evening, Iria.",
+        assistant_message="Good evening to you as well.",
+        retrieval_confidence=0.9,
+        scene_complexity=1,
+    )
+
+    assert curator.calls == 0
+    assert result.memory_written is False
+    assert result.warnings == ("memory curation gated: no durable-event signals",)
+    assert store.persisted == []
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_auto_gating_runs_curator_for_explicit_promise() -> None:
+    store = RecordingMemoryStore()
+    curator = CountingCurator()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=curator,
+        memory_indexer=None,
+        routing_stage=_routing(),
+        gating="auto",
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise I will return before dawn.",
+        assistant_message="I will hold you to it.",
+        retrieval_confidence=0.9,
+        scene_complexity=1,
+    )
+
+    assert curator.calls == 1
+    assert result.memory_written is True
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_auto_gating_runs_curator_for_assistant_durable_terms() -> None:
+    store = RecordingMemoryStore()
+    curator = CountingCurator()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=curator,
+        memory_indexer=None,
+        routing_stage=_routing(),
+        gating="auto",
+    )
+    context = _context()
+
+    await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="And then?",
+        assistant_message="I swear on the archive that the ledger stays sealed.",
+        retrieval_confidence=0.9,
+        scene_complexity=1,
+    )
+
+    assert curator.calls == 1

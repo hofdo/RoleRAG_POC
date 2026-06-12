@@ -245,6 +245,25 @@ def test_retrieval_miss_fails_strict_checkpoint() -> None:
         _run(attribution=_attribution(selected_memory_ids=()))
 
 
+def test_stage_latency_means_are_reported_from_turn_stage_timings() -> None:
+    overrides = {
+        1: {"stage_timings": {"generation": 10.0, "critique": 4.0, "memory": 2.0}},
+        2: {"stage_timings": {"generation": 20.0, "critique": 6.0, "memory": 4.0}},
+    }
+    summary = _run(turn_overrides=overrides)
+
+    means = summary["quality_metrics"]["stage_latency_means"]
+    assert means["generation"] == 15.0
+    assert means["critique"] == 5.0
+    assert means["memory"] == 3.0
+
+
+def test_stage_latency_means_are_empty_without_stage_timings() -> None:
+    summary = _run(turn_overrides={})
+
+    assert summary["quality_metrics"]["stage_latency_means"] == {}
+
+
 def test_successful_callback_recall_is_reported() -> None:
     summary = _run()
     assert summary["events"][0]["recalled"] is True

@@ -144,8 +144,29 @@ async def test_memory_curator_accepts_recoverable_wrapped_json() -> None:
 
 
 @pytest.mark.asyncio
-async def test_memory_curator_rejects_schema_invalid_payload() -> None:
+async def test_memory_curator_treats_contradictory_write_flag_as_decline() -> None:
     provider = FakeProvider('{"write_memory": true, "memories": [], "reason": "missing memory"}')
+
+    result = await MemoryCurator().curate(
+        provider=provider,
+        route=_build_route(),
+        session=_build_session(),
+        scene=_build_scene(),
+        persona=_build_persona(),
+        user_message="I promise to return.",
+        assistant_message="I will remember that.",
+    )
+
+    assert result.write_memory is False
+    assert result.memories == []
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_rejects_schema_invalid_payload() -> None:
+    provider = FakeProvider(
+        '{"write_memory": true, "memories": [{"summary": "x", "visibility": "world",'
+        ' "importance": 2}], "reason": "bad visibility"}'
+    )
 
     with pytest.raises(MemoryCuratorOutputError) as exc_info:
         await MemoryCurator().curate(

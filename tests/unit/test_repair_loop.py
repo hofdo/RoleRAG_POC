@@ -300,7 +300,9 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
 
     assert result.route.provider == ModelProviderName.LOCAL
     assert "could not produce a response" in result.text.lower()
-    assert result.model_dump() == {
+    dump = result.model_dump()
+    assert dump.pop("stage_timings")
+    assert dump == {
         "text": (
             "The system could not produce a response that passed validation. "
             "No memory or world state was changed."

@@ -143,3 +143,31 @@ def test_settings_accept_live_smoke_overrides(tmp_path: Path) -> None:
 
     assert settings.live_long_turn_count == 12
     assert settings.live_fail_on_structured_warnings is True
+
+
+def test_settings_default_gating_to_always(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.critic_gating == "always"
+    assert settings.curator_gating == "always"
+
+
+def test_settings_accept_auto_gating_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRITIC_GATING", "auto")
+    monkeypatch.setenv("CURATOR_GATING", "auto")
+
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.critic_gating == "auto"
+    assert settings.curator_gating == "auto"
+
+
+def test_settings_reject_invalid_gating_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRITIC_GATING", "sometimes")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]

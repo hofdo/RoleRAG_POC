@@ -392,6 +392,7 @@ def run_checkpoint(
                     "route": route,
                     "finish_reason": turn.get("finish_reason"),
                     "memory_written": bool(turn.get("memory_written")),
+                    "stage_timings": dict(turn.get("stage_timings") or {}),
                     "retrieval": turn.get("retrieval"),
                     "warning_counts": counts,
                     "warnings": list(warnings),
@@ -438,6 +439,14 @@ def run_checkpoint(
         for category in (*STRICT_WARNING_PREFIXES, "other")
     }
     durations = [float(turn["duration_seconds"]) for turn in turns]
+    stage_samples: dict[str, list[float]] = {}
+    for turn in turns:
+        for stage, seconds in turn["stage_timings"].items():
+            stage_samples.setdefault(str(stage), []).append(float(seconds))
+    stage_latency_means = {
+        stage: round(statistics.mean(samples), 3)
+        for stage, samples in sorted(stage_samples.items())
+    }
     finish_reasons = Counter(
         str(turn["finish_reason"] or "unknown")
         for turn in turns
@@ -490,6 +499,7 @@ def run_checkpoint(
                 "p50_seconds": round(statistics.median(durations), 3),
                 "p95_seconds": round(_percentile(durations, 0.95), 3),
             },
+            "stage_latency_means": stage_latency_means,
             "finish_reason_distribution": dict(sorted(finish_reasons.items())),
         },
     }
@@ -667,6 +677,7 @@ def write_reports(
                 f"#### Turn {turn['turn_index']}",
                 "",
                 f"- duration_seconds: {turn['duration_seconds']}",
+                f"- stage_timings: `{json.dumps(turn['stage_timings'], sort_keys=True)}`",
                 f"- finish_reason: {turn['finish_reason']}",
                 f"- route: `{json.dumps(turn['route'], sort_keys=True)}`",
                 f"- memory_written: {str(turn['memory_written']).lower()}",

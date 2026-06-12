@@ -4,6 +4,9 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+LOW_RETRIEVAL_CONFIDENCE = 0.45
+HIGH_SCENE_COMPLEXITY = 4
+
 
 class CloudMode(str, Enum):
     OFF = "off"
@@ -81,13 +84,13 @@ def choose_route(
     elif task == ModelTask.REPAIR and failed_local_attempts > 1:
         should_use_cloud = True
         reason = "local repair failed"
-    elif task == ModelTask.ACTOR_RESPONSE and scene_complexity >= 4:
+    elif task == ModelTask.ACTOR_RESPONSE and scene_complexity >= HIGH_SCENE_COMPLEXITY:
         should_use_cloud = True
         reason = "high scene complexity"
     elif (
         task == ModelTask.ACTOR_RESPONSE
         and retrieval_confidence is not None
-        and retrieval_confidence < 0.45
+        and retrieval_confidence < LOW_RETRIEVAL_CONFIDENCE
     ):
         should_use_cloud = True
         reason = "low retrieval confidence"

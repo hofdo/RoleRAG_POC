@@ -12,6 +12,7 @@ from app.evals.memory_recall import evaluate_memory_recall
 from app.evals.retrieval_quality import evaluate_retrieval_quality
 from app.evals.role_consistency import evaluate_role_consistency
 from app.llm.router import CloudMode, ModelProviderName, ModelTask, choose_route
+from app.orchestration.draft_validator import validate_draft
 
 
 class CategoryResult(BaseModel):
@@ -36,6 +37,7 @@ def run_regressions() -> RegressionReport:
         _role_consistency_result(fixture),
         asyncio.run(_memory_result(fixture)),
         _memory_continuity_result(),
+        _draft_validation_result(),
         _cloud_routing_result(fixture),
     ]
     total_checks = sum(len(result.checks) for result in results)
@@ -111,16 +113,23 @@ async def _memory_result(fixture: EvalFixture) -> CategoryResult:
         fixture=fixture,
         kind="invalid_visibility",
     )
-    invalid_write_rejected = await _expects_curator_failure(
-        fixture=fixture,
-        kind="write_without_candidates",
+    contradictory_write = await MemoryCurator().curate(
+        provider=fixture.build_memory_provider(kind="write_without_candidates"),
+        route=fixture.memory_route,
+        session=fixture.session,
+        scene=fixture.scene,
+        persona=fixture.primary_persona,
+        user_message=fixture.important_turn_user_message,
+        assistant_message=fixture.important_turn_assistant_message,
     )
     checks = {
         "important_turn_creates_memory": important.write_memory and len(important.memories) == 1,
         "trivial_turn_skips_memory": trivial.write_memory is False and trivial.memories == [],
         "memory_visibility_required": important.memories[0].visibility.value == "player",
         "invalid_memory_visibility_rejected": invalid_visibility_rejected,
-        "write_without_candidates_rejected": invalid_write_rejected,
+        "write_without_candidates_becomes_decline": (
+            contradictory_write.write_memory is False and contradictory_write.memories == []
+        ),
     }
     return CategoryResult(name="memory", passed=all(checks.values()), checks=checks)
 
@@ -139,6 +148,41 @@ async def _expects_curator_failure(*, fixture: EvalFixture, kind: str) -> bool:
     except MemoryCuratorOutputError:
         return True
     return False
+
+
+def _draft_validation_result() -> CategoryResult:
+    visible_texts = [
+        "The Rose Gallery sits inside the Winter Palace.",
+        "Iria the archivist guards the winter ledgers.",
+        "The regent fears open daylight.",
+    ]
+    invented = validate_draft(
+        draft="Duke Erran left a silver map with Iria before vanishing.",
+        player_message="What happened here?",
+        visible_texts=visible_texts,
+    )
+    harmless = validate_draft(
+        draft="Iria gestures at the Rose Gallery while the regent stays unnamed.",
+        player_message="I study the regent's portrait in the gallery.",
+        visible_texts=visible_texts,
+    )
+    evaded = validate_draft(
+        draft="The chandeliers glitter softly above the marble floor.",
+        player_message="What did the regent promise you before dawn?",
+        visible_texts=visible_texts,
+    )
+    answered = validate_draft(
+        draft="The regent promised nothing; promises mean little before dawn.",
+        player_message="What did the regent promise you before dawn?",
+        visible_texts=visible_texts,
+    )
+    checks = {
+        "invented_entity_flagged": "Duke Erran" in invented.unsupported_entities,
+        "harmless_description_clean": harmless.flags == [],
+        "evaded_question_flagged": evaded.evaded_action,
+        "answered_question_clean": answered.evaded_action is False,
+    }
+    return CategoryResult(name="draft_validation", passed=all(checks.values()), checks=checks)
 
 
 def _cloud_routing_result(fixture: EvalFixture) -> CategoryResult:

@@ -30,6 +30,15 @@ _DEADLINE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_DURABLE_TERM_PATTERN = re.compile(
+    r"\b(?:promise[sd]?|swear[s]?|swore|vow[sed]*|pledge[sd]?|oath|entrust[sed]*)\b",
+    re.IGNORECASE,
+)
+
+
+def contains_durable_event_terms(text: str) -> bool:
+    """Cheap lexical check whether a message hints at a durable commitment."""
+    return bool(_DURABLE_TERM_PATTERN.search(text))
 
 
 def extract_explicit_durable_events(

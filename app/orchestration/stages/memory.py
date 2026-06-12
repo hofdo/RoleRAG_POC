@@ -16,6 +16,7 @@ from app.llm.router import ModelRoute
 from app.llm.structured_output import StructuredOutputError
 from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import (
+    contains_durable_event_terms,
     extract_explicit_durable_events,
     is_covered_by_summaries,
 )
@@ -58,6 +59,7 @@ class TurnMemoryStage:
         memory_indexer: MemoryIndexing | None,
         routing_stage: TurnRoutingStage,
         failure_sink: StructuredFailureRecording | None = None,
+        gating: str = "always",
     ) -> None:
         self.provider = provider
         self.memory_store = memory_store
@@ -65,6 +67,7 @@ class TurnMemoryStage:
         self.memory_indexer = memory_indexer
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
+        self.gating = gating
 
     async def run(
         self,
@@ -86,6 +89,16 @@ class TurnMemoryStage:
             scene_id=scene.id,
             actor_id=persona.id,
         )
+        if (
+            self.gating == "auto"
+            and not fallback_candidates
+            and not contains_durable_event_terms(user_message)
+            and not contains_durable_event_terms(assistant_message)
+        ):
+            return MemoryStageResult(
+                memory_written=False,
+                warnings=("memory curation gated: no durable-event signals",),
+            )
         route = self.routing_stage.memory(
             retrieval_confidence=retrieval_confidence,
             scene_complexity=scene_complexity,

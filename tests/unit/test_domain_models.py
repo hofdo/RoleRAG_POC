@@ -192,13 +192,14 @@ def test_memory_candidate_requires_visibility_and_constrained_importance() -> No
     assert candidate.importance == 4
 
 
-def test_memory_curator_result_rejects_write_without_memories() -> None:
-    with pytest.raises(ValidationError):
-        MemoryCuratorResult(
-            write_memory=True,
-            memories=[],
-            reason="This matters later.",
-        )
+def test_memory_curator_result_write_without_memories_becomes_decline() -> None:
+    result = MemoryCuratorResult(
+        write_memory=True,
+        memories=[],
+        reason="This matters later.",
+    )
+
+    assert result.write_memory is False
 
 
 @pytest.mark.parametrize("visibility", ["wrong", "internal"])
@@ -311,6 +312,7 @@ def test_turn_result_accepts_nested_model_route() -> None:
         "critic_status": CriticStatus.SKIPPED,
         "warnings": [],
         "retrieval": None,
+        "stage_timings": {},
     }
 
 

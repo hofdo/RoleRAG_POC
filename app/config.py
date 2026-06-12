@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +32,9 @@ class Settings(BaseSettings):
     local_llm_temperature: float = 0.75
     local_llm_timeout_seconds: float = Field(default=180.0, gt=0)
     local_llm_max_retries: int = Field(default=0, ge=0)
+
+    critic_gating: Literal["always", "auto"] = "always"
+    curator_gating: Literal["always", "auto"] = "always"
 
     cloud_mode: CloudMode = CloudMode.ASK
     cloud_llm_base_url: str = "https://api.openai.com/v1"

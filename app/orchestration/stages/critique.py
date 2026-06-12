@@ -5,7 +5,12 @@ from typing import Protocol
 
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider
-from app.llm.router import ModelRoute
+from app.llm.router import (
+    HIGH_SCENE_COMPLEXITY,
+    LOW_RETRIEVAL_CONFIDENCE,
+    ModelProviderName,
+    ModelRoute,
+)
 from app.llm.structured_output import StructuredOutputError
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.routing import TurnRoutingStage
@@ -55,11 +60,13 @@ class TurnCritiqueStage:
         critic_agent: CriticEvaluatingAgent,
         routing_stage: TurnRoutingStage,
         failure_sink: StructuredFailureRecording | None = None,
+        gating: str = "always",
     ) -> None:
         self.provider = provider
         self.critic_agent = critic_agent
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
+        self.gating = gating
 
     async def run(
         self,
@@ -69,7 +76,21 @@ class TurnCritiqueStage:
         user_message: str,
         draft: str,
         retrieved_chunks: tuple[RetrievedChunk, ...],
+        validator_flagged: bool = False,
+        retrieval_confidence: float | None = None,
+        scene_complexity: int = 0,
+        route_provider: ModelProviderName = ModelProviderName.LOCAL,
     ) -> CritiqueStageResult:
+        if self.gating == "auto" and not self._is_risky_turn(
+            validator_flagged=validator_flagged,
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+            route_provider=route_provider,
+        ):
+            return CritiqueStageResult(
+                critique=None,
+                warnings=("critic gated: low-risk turn",),
+            )
         route = self.routing_stage.critic()
         try:
             critique = await self.critic_agent.evaluate(
@@ -98,6 +119,22 @@ class TurnCritiqueStage:
                 critique=None,
                 warnings=(f"critic skipped: {exc}",),
             )
+
+    @staticmethod
+    def _is_risky_turn(
+        *,
+        validator_flagged: bool,
+        retrieval_confidence: float | None,
+        scene_complexity: int,
+        route_provider: ModelProviderName,
+    ) -> bool:
+        return (
+            validator_flagged
+            or retrieval_confidence is None
+            or retrieval_confidence < LOW_RETRIEVAL_CONFIDENCE
+            or scene_complexity >= HIGH_SCENE_COMPLEXITY
+            or route_provider == ModelProviderName.CLOUD
+        )
 
 
 def record_structured_failure(

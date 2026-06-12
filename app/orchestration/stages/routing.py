@@ -43,6 +43,12 @@ class TurnRoutingStage:
         retrieval_confidence: float | None,
     ) -> RoutingStageResult:
         scene_complexity = self.compute_scene_complexity(scene)
+        if turn_input.force_local:
+            return RoutingStageResult(
+                route=self.build_local_route(reason="user declined cloud"),
+                scene_complexity=scene_complexity,
+                warnings=(),
+            )
         route = self.choose(
             task=ModelTask.ACTOR_RESPONSE,
             failed_local_attempts=0,
@@ -51,13 +57,8 @@ class TurnRoutingStage:
             user_requested_cloud=turn_input.user_requested_cloud,
         )
         warnings: list[str] = []
-        if route.provider == ModelProviderName.CLOUD and route.requires_user_confirmation:
-            warnings.append(
-                f"cloud actor skipped: confirmation required for {route.model} ({route.reason})"
-            )
-            route = self.build_local_route(
-                reason=f"confirmation required before cloud route: {route.reason}"
-            )
+        if route.requires_user_confirmation and turn_input.cloud_confirmed:
+            route = route.model_copy(update={"requires_user_confirmation": False})
         elif route.provider == ModelProviderName.LOCAL and route.reason != "default local route":
             warnings.append(self.warning_for_skipped_cloud(route.reason))
         return RoutingStageResult(

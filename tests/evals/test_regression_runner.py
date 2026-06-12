@@ -19,6 +19,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "role_consistency",
         "memory",
         "memory_continuity",
+        "draft_validation",
         "cloud_routing",
     }
     assert all(result.passed for result in report.results)
