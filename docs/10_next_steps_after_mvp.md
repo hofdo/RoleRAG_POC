@@ -1,8 +1,15 @@
-# 10 — Next Steps After MVP
+# 10 — Next Steps After 1.0
 
 ## Purpose
 
-This document lists the safest next development steps after the current MVP. It is intentionally limited to follow-on work that fits the existing architecture.
+This document lists the safest next development steps after the 1.0 release
+(see `docs/15_v1_acceptance_report.md`). It is intentionally limited to
+follow-on work that fits the existing architecture.
+
+1.0 closed the former top items: per-stage timings, conditional critic/curator
+gating, deterministic draft validation, the `CLOUD_MODE=ask` confirmation flow,
+session management CLI (list/delete/export/import/reset), the memory viewer,
+and one-command startup (`scripts/dev-up.sh`). Remaining candidates below.
 
 ## Highest-Value Next Steps
 

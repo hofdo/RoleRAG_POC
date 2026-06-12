@@ -28,6 +28,18 @@ Implemented in this repository:
 - bounded critic and repair flow with a first-class `critic_status` in turn responses
 - truncation-aware generation that retries `finish_reason=length` once with a larger budget
 - conservative deterministic fallback extraction for explicit player promises and handovers
+- deterministic draft validation that flags unsupported entities and unaddressed player
+  actions and routes flagged drafts through the repair loop
+- per-stage wall-clock timings (`stage_timings`) on every turn response, in the dev panel,
+  and in live checkpoint reports
+- conditional critic/curator gating (`CRITIC_GATING` / `CURATOR_GATING` = `always|auto`);
+  the deterministic promise extractor always runs
+- interactive `CLOUD_MODE=ask` confirmation in the play UI, the CLI, and the API
+  (`status: confirmation_required` two-phase turns)
+- session management CLI: `list-sessions`, `delete-session`, `export-session`,
+  `import-session`, `inspect-memories`, `reset-db`
+- read-only memory viewer in the play UI and `GET /sessions/{id}/memories`
+- one-command startup and teardown via `scripts/dev-up.sh` and `scripts/dev-down.sh`
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
 
@@ -39,6 +51,16 @@ Not implemented:
 - production deployment hardening
 
 ## Quickstart
+
+### Daily Use (one command)
+
+With Docker running and a `.venv` installed:
+
+```bash
+bash scripts/dev-up.sh
+# opens Qdrant + llama-server + API, then play at http://127.0.0.1:8000/play
+bash scripts/dev-down.sh   # stop everything dev-up started
+```
 
 ### Prerequisites
 
@@ -691,10 +713,9 @@ embedding quality, Qdrant quality, or generated prose quality.
 
 ## Safe Next Steps
 
-The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_next_steps_after_mvp.md). The short version:
+Post-1.0 candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_next_steps_after_mvp.md). The short version:
 
-- improve integration coverage
-- tune retrieval heuristics from eval evidence
+- tune gating thresholds and retrieval heuristics from live eval evidence
 - expand retrieval observability if another surface needs it
 - consider validated fragmentation only if it preserves the current exposure boundary
 - add auth only if the project becomes multi-user
@@ -710,4 +731,5 @@ The next implementation candidates are tracked in [docs/10_next_steps_after_mvp.
 - [docs/07_mvp_phases.md](docs/07_mvp_phases.md)
 - [docs/12_api_contract.md](docs/12_api_contract.md)
 - [docs/13_live_model_quality_assessment.md](docs/13_live_model_quality_assessment.md)
+- [docs/15_v1_acceptance_report.md](docs/15_v1_acceptance_report.md)
 - [docs/14_local_model_comparison_2026-06-08.md](docs/14_local_model_comparison_2026-06-08.md)
