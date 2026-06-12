@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 
 class StructuredOutputParseError(ValueError):
@@ -16,6 +16,29 @@ class StructuredOutputError(ValueError):
         super().__init__(message)
         self.category = category
         self.raw_text = raw_text
+
+
+def inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Resolve local ``#/$defs/...`` references into an inline, $ref-free schema.
+
+    llama.cpp's json_schema-to-grammar conversion does not follow ``$ref`` into
+    nested definitions, leaving nested objects unconstrained.
+    """
+    definitions = schema.get("$defs", {})
+    if not definitions:
+        return schema
+
+    def resolve(node: Any) -> Any:
+        if isinstance(node, dict):
+            reference = node.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                return resolve(definitions[reference.removeprefix("#/$defs/")])
+            return {key: resolve(value) for key, value in node.items() if key != "$defs"}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return cast(dict[str, Any], resolve(schema))
 
 
 def parse_single_json_object(text: str) -> dict[str, Any]:

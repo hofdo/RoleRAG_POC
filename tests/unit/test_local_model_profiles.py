@@ -48,7 +48,7 @@ def test_named_profiles_use_identical_inference_arguments(
     model, args = _profile(profile)
 
     assert model == expected_model
-    assert args == [
+    shared_args = [
         "--jinja",
         "--reasoning",
         "off",
@@ -67,8 +67,25 @@ def test_named_profiles_use_identical_inference_arguments(
         "--seed",
         "424242",
     ]
+    assert args[: len(shared_args)] == shared_args
     kwargs_index = args.index("--chat-template-kwargs") + 1
     assert json.loads(args[kwargs_index]) == {"enable_thinking": False}
+
+
+def test_small_profile_uses_patched_no_think_chat_template() -> None:
+    _, args = _profile("small")
+
+    template_index = args.index("--chat-template-file") + 1
+    template_path = Path(args[template_index]).resolve()
+    assert template_path == (ROOT / "scripts/templates/small-model.jinja").resolve()
+    first_line = template_path.read_text(encoding="utf-8").splitlines()[0]
+    assert "enable_thinking is not defined" in first_line
+
+
+def test_26b_profile_keeps_stock_chat_template() -> None:
+    _, args = _profile("26b")
+
+    assert "--chat-template-file" not in args
 
 
 def test_unknown_profile_is_rejected() -> None:

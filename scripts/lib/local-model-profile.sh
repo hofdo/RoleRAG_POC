@@ -6,9 +6,16 @@ LOCAL_MODEL_SEED_DEFAULT="424242"
 
 resolve_local_model_profile() {
   local profile="${LOCAL_MODEL_PROFILE:-small}"
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PROFILE_TEMPLATE_ARGS=()
   case "${profile}" in
     small)
       PROFILE_HF_MODEL="${SMALL_MODEL_HF}"
+      # The stock template hardcodes enable_thinking=true, which floods the
+      # token budget with thought-channel output and starves grammar-constrained
+      # JSON responses. The patched copy lets --chat-template-kwargs win.
+      PROFILE_TEMPLATE_ARGS=(--chat-template-file "${lib_dir}/../templates/small-model.jinja")
       ;;
     26b)
       PROFILE_HF_MODEL="${MODEL_26B_HF}"
@@ -29,6 +36,7 @@ resolve_local_model_profile() {
     --cache-type-v q4_0
     --chat-template-kwargs '{"enable_thinking":false}'
     --seed "${LOCAL_MODEL_SEED:-${LOCAL_MODEL_SEED_DEFAULT}}"
+    "${PROFILE_TEMPLATE_ARGS[@]}"
   )
 }
 

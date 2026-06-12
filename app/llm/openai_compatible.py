@@ -6,6 +6,7 @@ from openai import APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse, ProviderTimeoutError
+from app.llm.structured_output import inline_schema_refs
 
 DEFAULT_TIMEOUT_SECONDS = 180.0
 DEFAULT_MAX_RETRIES = 0
@@ -46,7 +47,7 @@ class OpenAICompatibleProvider(LlmProvider):
                         "type": "json_schema",
                         "json_schema": {
                             "name": request.metadata.get("task", "structured_output"),
-                            "schema": request.response_schema,
+                            "schema": inline_schema_refs(request.response_schema),
                         },
                     },
                 )
