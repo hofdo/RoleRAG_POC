@@ -45,6 +45,9 @@ class FakeVectorStore:
     ) -> None:
         raise AssertionError("upsert_chunks should not be called during retrieval")
 
+    def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
+        raise AssertionError("delete_session_points should not be called during retrieval")
+
     def search(
         self,
         collection: RagCollection,

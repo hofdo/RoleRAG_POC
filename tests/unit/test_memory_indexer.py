@@ -56,6 +56,9 @@ class RecordingVectorStore:
             (collection, list(chunks), [list(vector) for vector in vectors])
         )
 
+    def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
+        raise AssertionError("delete_session_points should not be used for memory indexing")
+
     def search(
         self,
         collection: RagCollection,
