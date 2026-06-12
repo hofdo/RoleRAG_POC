@@ -36,7 +36,9 @@ resolve_local_model_profile() {
     --cache-type-v q4_0
     --chat-template-kwargs '{"enable_thinking":false}'
     --seed "${LOCAL_MODEL_SEED:-${LOCAL_MODEL_SEED_DEFAULT}}"
-    "${PROFILE_TEMPLATE_ARGS[@]}"
+    # Guarded expansion: bash 3.2 with `set -u` treats expanding an empty
+    # array as an unbound-variable error.
+    ${PROFILE_TEMPLATE_ARGS[@]+"${PROFILE_TEMPLATE_ARGS[@]}"}
   )
 }
 
