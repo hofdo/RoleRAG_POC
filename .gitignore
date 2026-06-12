@@ -26,3 +26,4 @@ data/*
 !data/documents/
 !data/documents/.gitkeep
 !data/documents/*.md
+.dev-run/
