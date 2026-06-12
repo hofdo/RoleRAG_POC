@@ -173,6 +173,14 @@ class SQLiteSessionRepository:
         if cursor.rowcount == 0:
             raise SessionNotFoundError(session_id)
 
+    def delete_session(self, session_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
 
 class SQLiteTurnRepository:
     def __init__(self, connection: sqlite3.Connection) -> None:
@@ -268,6 +276,32 @@ class SQLiteTurnRepository:
             (session_id, limit),
         ).fetchall()
         return [self._row_to_turn(row) for row in reversed(rows)]
+
+    def list_all_turns(self, session_id: str) -> list[StoredTurn]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                id,
+                session_id,
+                turn_index,
+                scene_id,
+                persona_id,
+                user_message,
+                assistant_message,
+                route_provider,
+                route_model,
+                route_reason,
+                route_max_tokens,
+                route_temperature,
+                route_requires_user_confirmation,
+                created_at
+            FROM turns
+            WHERE session_id = ?
+            ORDER BY turn_index ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [self._row_to_turn(row) for row in rows]
 
     def count_turns(self, session_id: str) -> int:
         row = self.connection.execute(

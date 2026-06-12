@@ -103,6 +103,8 @@ class CreateTurnRequest(BaseModel):
     message: str = Field(min_length=1)
     active_persona_id: str | None = Field(default=None, min_length=1)
     request_cloud: bool = False
+    cloud_confirmed: bool = False
+    force_local: bool = False
 
 
 class RouteResponse(BaseModel):
@@ -139,6 +141,7 @@ def to_retrieval_diagnostics_response(
 
 
 class CreateTurnResponse(BaseModel):
+    status: str = "completed"
     text: str
     route: RouteResponse
     finish_reason: str | None = None
@@ -146,6 +149,7 @@ class CreateTurnResponse(BaseModel):
     critic_status: str
     warnings: list[str]
     retrieval: RetrievalDiagnosticsResponse | None = None
+    stage_timings: dict[str, float] = Field(default_factory=dict)
 
 
 class StreamTextPayload(BaseModel):
@@ -159,10 +163,17 @@ class StreamFinalPayload(BaseModel):
     critic_status: str
     warnings: list[str]
     retrieval: RetrievalDiagnosticsResponse | None = None
+    stage_timings: dict[str, float] = Field(default_factory=dict)
 
 
 class StreamFailurePayload(StreamFinalPayload):
     text: str
+
+
+class StreamConfirmationPayload(BaseModel):
+    status: str = "confirmation_required"
+    route: RouteResponse
+    warnings: list[str]
 
 
 class RecentTurnResponse(BaseModel):
@@ -170,6 +181,21 @@ class RecentTurnResponse(BaseModel):
     user_message: str
     assistant_message: str
     created_at: datetime
+
+
+class MemoryEpisodeResponse(BaseModel):
+    id: str
+    scene_id: str
+    actor_id: str | None = None
+    summary: str
+    importance: int
+    visibility: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class SessionMemoriesResponse(BaseModel):
+    session_id: str
+    memories: list[MemoryEpisodeResponse]
 
 
 class GetSessionResponse(BaseModel):

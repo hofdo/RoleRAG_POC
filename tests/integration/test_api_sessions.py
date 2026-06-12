@@ -754,3 +754,62 @@ def test_post_sessions_rejects_invalid_request_with_422(tmp_path: Path) -> None:
     assert payload["error"]["code"] == "validation_error"
     assert payload["error"]["message"] == "Request validation failed"
     assert payload["error"]["details"]
+
+
+def test_get_session_memories_returns_episode_metadata(tmp_path: Path) -> None:
+    from app.api.routes import get_read_services
+    from app.domain import MemoryCandidate, Visibility
+    from app.persistence import SQLiteMemoryRepository
+
+    services = _build_services(tmp_path)
+    services.session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    memory_repository = SQLiteMemoryRepository(services.connection)
+    memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="The player promised to return before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    services.memory_repository = memory_repository
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.get("/sessions/session-1/memories")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["memories"]) == 1
+    memory = payload["memories"][0]
+    assert memory["summary"] == "The player promised to return before dawn."
+    assert memory["visibility"] == "player"
+    assert memory["importance"] == 4
+    assert memory["tags"] == ["promise"]
+
+
+def test_get_session_memories_returns_404_for_unknown_session(tmp_path: Path) -> None:
+    from app.api.routes import get_read_services
+
+    services = _build_services(tmp_path)
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.get("/sessions/missing/memories")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 404

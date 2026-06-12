@@ -243,3 +243,75 @@ def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) ->
     assert len(episodes) == 1
     assert loaded == episodes
     assert loaded[0].tags == ["promise", "deadline"]
+
+
+def _seed_session_with_data(tmp_path: Path) -> tuple[
+    SQLiteSessionRepository, SQLiteTurnRepository, SQLiteMemoryRepository
+]:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    sessions = SQLiteSessionRepository(connection)
+    turns = SQLiteTurnRepository(connection)
+    memories = SQLiteMemoryRepository(connection)
+    sessions.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    for index in range(3):
+        turns.append_turn(
+            session_id="session-1",
+            scene_id="rose-gallery",
+            persona_id="archivist",
+            user_message=f"player message {index + 1}",
+            assistant_message=f"actor message {index + 1}",
+            route=_build_route(),
+        )
+    memories.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="The player promised to return before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    return sessions, turns, memories
+
+
+def test_session_repository_delete_removes_session_turns_and_memories(
+    tmp_path: Path,
+) -> None:
+    sessions, turns, memories = _seed_session_with_data(tmp_path)
+
+    assert sessions.delete_session("session-1") is True
+
+    assert sessions.get_session("session-1") is None
+    assert turns.count_turns("session-1") == 0
+    assert memories.list_memories_for_session("session-1") == []
+
+
+def test_session_repository_delete_returns_false_for_unknown_session(
+    tmp_path: Path,
+) -> None:
+    sessions, _, _ = _seed_session_with_data(tmp_path)
+
+    assert sessions.delete_session("missing") is False
+    assert sessions.get_session("session-1") is not None
+
+
+def test_turn_repository_lists_all_turns_in_order(tmp_path: Path) -> None:
+    _, turns, _ = _seed_session_with_data(tmp_path)
+
+    listed = turns.list_all_turns("session-1")
+
+    assert [turn.turn_index for turn in listed] == [1, 2, 3]
+    assert listed[0].user_message == "player message 1"

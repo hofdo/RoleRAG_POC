@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -34,8 +34,8 @@ from app.diagnostics import (
     build_runtime_diagnostics,
     run_smoke,
 )
-from app.domain import TurnInput, TurnResult, Visibility
-from app.llm.router import ModelTask, choose_route
+from app.domain import TurnInput, TurnOutcome, TurnResult, Visibility
+from app.llm.router import ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
@@ -562,6 +562,14 @@ def turn(
         bool,
         typer.Option(help="Request cloud quality for this turn"),
     ] = False,
+    confirm_cloud: Annotated[
+        bool,
+        typer.Option(help="Pre-approve a confirmation-required cloud route"),
+    ] = False,
+    force_local: Annotated[
+        bool,
+        typer.Option(help="Decline cloud routing and answer locally"),
+    ] = False,
 ) -> None:
     settings = get_settings()
     services = _build_services(settings, enable_retrieval=True)
@@ -569,6 +577,8 @@ def turn(
         session_id=session_id,
         message=message,
         user_requested_cloud=request_cloud,
+        cloud_confirmed=confirm_cloud,
+        force_local=force_local,
     )
     try:
         result = asyncio.run(
@@ -577,6 +587,24 @@ def turn(
                 turn_input=turn_input,
             )
         )
+        if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED:
+            approved = typer.confirm(
+                f"Route this turn to cloud model {result.route.model}? "
+                f"Reason: {result.route.reason}",
+                default=False,
+            )
+            result = asyncio.run(
+                _run_turn(
+                    services=services,
+                    turn_input=turn_input.model_copy(
+                        update=(
+                            {"cloud_confirmed": True}
+                            if approved
+                            else {"force_local": True}
+                        )
+                    ),
+                )
+            )
     except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
         services.close()
         typer.echo(str(exc))
@@ -585,6 +613,216 @@ def turn(
     for warning in result.warnings:
         typer.echo(f"Warning: {warning}", err=True)
     typer.echo(result.text)
+
+
+def _open_repositories() -> tuple[
+    Any, SQLiteSessionRepository, SQLiteTurnRepository, SQLiteMemoryRepository
+]:
+    settings = get_settings()
+    connection = connect_sqlite(settings.database_path)
+    initialize_database(connection)
+    return (
+        connection,
+        SQLiteSessionRepository(connection),
+        SQLiteTurnRepository(connection),
+        SQLiteMemoryRepository(connection),
+    )
+
+
+def _delete_session_vectors(session_id: str) -> None:
+    settings = get_settings()
+    try:
+        vector_store = _build_vector_store(settings)
+        vector_store.delete_session_points(RagCollection.SESSION_MEMORY, session_id)
+    except Exception as exc:
+        typer.echo(f"Warning: session vector cleanup skipped: {exc}", err=True)
+
+
+@app.command("list-sessions")
+def list_sessions(
+    limit: Annotated[int, typer.Option(help="Maximum sessions to list")] = 50,
+) -> None:
+    connection, sessions, turns, _ = _open_repositories()
+    payload = {
+        "sessions": [
+            {
+                "session_id": session.id,
+                "world_id": session.world_id,
+                "active_scene_id": session.active_scene_id,
+                "active_persona_id": session.active_persona_id,
+                "player_name": session.player_name,
+                "turn_count": turns.count_turns(session.id),
+                "updated_at": (
+                    session.updated_at.isoformat() if session.updated_at else None
+                ),
+            }
+            for session in sessions.list_recent_sessions(limit)
+        ]
+    }
+    connection.close()
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+
+
+@app.command("delete-session")
+def delete_session(
+    session_id: Annotated[str, typer.Option(help="Session identifier to delete")],
+    yes: Annotated[bool, typer.Option("--yes", help="Skip confirmation prompt")] = False,
+) -> None:
+    if not yes:
+        typer.confirm(
+            f"Delete session {session_id} with all turns and memories?",
+            abort=True,
+        )
+    connection, sessions, _, _ = _open_repositories()
+    deleted = sessions.delete_session(session_id)
+    connection.close()
+    if not deleted:
+        typer.echo(f"Unknown session id: {session_id}")
+        raise typer.Exit(code=1)
+    _delete_session_vectors(session_id)
+    typer.echo(json.dumps({"deleted": session_id}))
+
+
+@app.command("export-session")
+def export_session(
+    session_id: Annotated[str, typer.Option(help="Session identifier to export")],
+    output: Annotated[Path, typer.Option(help="Output JSON file path")],
+) -> None:
+    connection, sessions, turns, memories = _open_repositories()
+    session = sessions.get_session(session_id)
+    if session is None:
+        connection.close()
+        typer.echo(f"Unknown session id: {session_id}")
+        raise typer.Exit(code=1)
+    envelope = {
+        "format_version": 1,
+        "session": session.model_dump(mode="json"),
+        "turns": [turn.model_dump(mode="json") for turn in turns.list_all_turns(session_id)],
+        "memory_episodes": [
+            memory.model_dump(mode="json")
+            for memory in memories.list_memories_for_session(session_id)
+        ],
+    }
+    connection.close()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(envelope, indent=2, sort_keys=True), encoding="utf-8")
+    typer.echo(json.dumps({"exported": session_id, "output": str(output)}))
+
+
+@app.command("import-session")
+def import_session(
+    input_path: Annotated[Path, typer.Option("--input", help="Exported session JSON file")],
+    new_id: Annotated[
+        bool,
+        typer.Option("--new-id", help="Import under a fresh session id"),
+    ] = False,
+) -> None:
+    from uuid import uuid4
+
+    from app.domain import MemoryCandidate, SessionState
+
+    envelope = json.loads(input_path.read_text(encoding="utf-8"))
+    if envelope.get("format_version") != 1:
+        typer.echo(f"Unsupported export format: {envelope.get('format_version')}")
+        raise typer.Exit(code=1)
+
+    session = SessionState.model_validate(envelope["session"])
+    if new_id:
+        session = session.model_copy(update={"id": str(uuid4())})
+
+    connection, sessions, turns, memories = _open_repositories()
+    if sessions.get_session(session.id) is not None:
+        connection.close()
+        typer.echo(f"Session {session.id} already exists; use --new-id to import a copy.")
+        raise typer.Exit(code=1)
+    sessions.create_session(session)
+    for raw_turn in envelope["turns"]:
+        route = ModelRoute.model_validate(raw_turn["route"])
+        turns.append_turn(
+            session_id=session.id,
+            scene_id=raw_turn["scene_id"],
+            persona_id=raw_turn["persona_id"],
+            user_message=raw_turn["user_message"],
+            assistant_message=raw_turn["assistant_message"],
+            route=route,
+        )
+    candidates = [
+        MemoryCandidate(
+            summary=raw["summary"],
+            visibility=Visibility(raw["visibility"]),
+            importance=raw["importance"],
+            tags=list(raw.get("tags", [])),
+            scene_id=raw.get("scene_id") or None,
+            actor_id=raw.get("actor_id"),
+        )
+        for raw in envelope["memory_episodes"]
+    ]
+    if candidates:
+        memories.append_memories(session_id=session.id, memories=candidates)
+    connection.close()
+    typer.echo(json.dumps({"session_id": session.id, "turns": len(envelope["turns"])}))
+    typer.echo(
+        "Run reindex-memories --session-id "
+        f"{session.id} to rebuild the vector index.",
+        err=True,
+    )
+
+
+@app.command("inspect-memories")
+def inspect_memories(
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
+    limit: Annotated[
+        int | None,
+        typer.Option(help="Maximum number of memories to show"),
+    ] = None,
+) -> None:
+    connection, sessions, _, memories = _open_repositories()
+    if sessions.get_session(session_id) is None:
+        connection.close()
+        typer.echo(f"Unknown session id: {session_id}")
+        raise typer.Exit(code=1)
+    episodes = memories.list_memories_for_session(session_id, limit=limit)
+    connection.close()
+    typer.echo(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "memories": [
+                    {
+                        "id": episode.id,
+                        "scene_id": episode.scene_id,
+                        "actor_id": episode.actor_id,
+                        "summary": episode.summary,
+                        "importance": episode.importance,
+                        "visibility": episode.visibility.value,
+                        "tags": episode.tags,
+                    }
+                    for episode in episodes
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+@app.command("reset-db")
+def reset_db(
+    yes: Annotated[bool, typer.Option("--yes", help="Skip confirmation prompt")] = False,
+) -> None:
+    if not yes:
+        typer.confirm(
+            "Delete ALL sessions, turns, and memories? This cannot be undone.",
+            abort=True,
+        )
+    connection, sessions, _, _ = _open_repositories()
+    session_ids = [session.id for session in sessions.list_recent_sessions(1_000_000)]
+    connection.execute("DELETE FROM sessions")
+    connection.commit()
+    connection.close()
+    for session_id in session_ids:
+        _delete_session_vectors(session_id)
+    typer.echo(json.dumps({"deleted_sessions": len(session_ids)}))
 
 
 def main() -> None:

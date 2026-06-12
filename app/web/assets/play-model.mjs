@@ -153,11 +153,29 @@ export function selectedRecentSessionId(selectedSessionId) {
   return selectedSessionId;
 }
 
-export function buildTurnRequest(message, requestCloud) {
+export function buildTurnRequest(
+  message,
+  requestCloud,
+  { cloudConfirmed = false, forceLocal = false } = {},
+) {
   return {
     message,
     request_cloud: requestCloud,
+    cloud_confirmed: cloudConfirmed,
+    force_local: forceLocal,
   };
+}
+
+export function isConfirmationRequired(turn) {
+  return turn?.status === "confirmation_required";
+}
+
+export function describeMemories(memoriesResponse) {
+  const memories = memoriesResponse?.memories ?? [];
+  return memories.map((memory) => {
+    const tags = memory.tags?.length ? ` (${memory.tags.join(", ")})` : "";
+    return `[${memory.visibility}/${memory.importance}] ${memory.summary}${tags}`;
+  });
 }
 
 export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
@@ -172,7 +190,18 @@ export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
     memoryWritten: turn.memory_written,
     criticStatus: turn.critic_status,
     warnings: turn.warnings,
+    stageTimings: formatStageTimings(turn.stage_timings),
   };
+}
+
+export function formatStageTimings(stageTimings) {
+  const entries = Object.entries(stageTimings ?? {});
+  if (entries.length === 0) {
+    return "none";
+  }
+  return entries
+    .map(([stage, seconds]) => `${stage} ${seconds.toFixed(1)}s`)
+    .join("; ");
 }
 
 export function startNewSession(sessionResponse) {

@@ -78,10 +78,15 @@ For actor or repair tasks, cloud may be selected when:
 ### `ask`
 
 - cloud routes may still be chosen by the router with `requires_user_confirmation=True`
-- the runtime does not execute those cloud calls silently
-- the CLI does not prompt interactively for confirmation
-- the API does not expose a separate confirmation flow
-- the runtime stays local when possible, or returns a controlled failure after bounded local attempts
+- the runtime never executes a confirmation-required cloud call; it returns a
+  `confirmation_required` turn result before any generation or persistence happens
+- the API reports `status: "confirmation_required"` (JSON) or a
+  `confirmation_required` SSE frame; the client resubmits the same message with
+  `cloud_confirmed: true` (approve) or `force_local: true` (decline)
+- the play UI shows a confirmation dialog and resubmits automatically
+- the CLI prompts interactively, or accepts `--confirm-cloud` / `--force-local`
+  for non-interactive use
+- a declined turn is answered locally with route reason `user declined cloud`
 
 ### `auto`
 
@@ -109,8 +114,6 @@ For actor or repair tasks, cloud may be selected when:
 
 ## Known Limitations
 
-- no interactive cloud approval step
-- no API-level confirmation workflow
 - no structured cloud-call audit log exposed outside route metadata and warnings
 - retry bounds are explicit in code; there is no configurable retry-count setting
 

@@ -19,17 +19,19 @@ from app.api.schemas import (
     CreateTurnResponse,
     ErrorResponse,
     GetSessionResponse,
+    MemoryEpisodeResponse,
     RecentSessionResponse,
     RecentSessionsResponse,
     RecentTurnResponse,
     RouteResponse,
     RuntimeStatusResponse,
+    SessionMemoriesResponse,
     to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
-from app.domain import SessionState, TurnInput, TurnResult
+from app.domain import SessionState, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import ProviderTimeoutError
 from app.persistence import (
     ContentCatalogError,
@@ -255,6 +257,8 @@ async def _run_turn(
                 message=request.message,
                 active_persona_id=request.active_persona_id,
                 user_requested_cloud=request.request_cloud,
+                cloud_confirmed=request.cloud_confirmed,
+                force_local=request.force_local,
             )
         )
     except SessionNotFoundError as exc:
@@ -313,6 +317,43 @@ def get_session(
     )
 
 
+@router.get(
+    "/sessions/{session_id}/memories",
+    response_model=SessionMemoriesResponse,
+    responses=ERROR_404_RESPONSE,
+)
+def get_session_memories(
+    session_id: str,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> SessionMemoriesResponse:
+    if services.session_repository.get_session(session_id) is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="session_not_found",
+            message=f"Unknown session id: {session_id}",
+        )
+    episodes = (
+        services.memory_repository.list_memories_for_session(session_id)
+        if services.memory_repository is not None
+        else []
+    )
+    return SessionMemoriesResponse(
+        session_id=session_id,
+        memories=[
+            MemoryEpisodeResponse(
+                id=episode.id,
+                scene_id=episode.scene_id,
+                actor_id=episode.actor_id,
+                summary=episode.summary,
+                importance=episode.importance,
+                visibility=episode.visibility.value,
+                tags=episode.tags,
+            )
+            for episode in episodes
+        ],
+    )
+
+
 def _to_recent_session_response(session: SessionState) -> RecentSessionResponse:
     if session.created_at is None or session.updated_at is None:
         raise RuntimeError("Persisted sessions must include timestamps")
@@ -329,6 +370,11 @@ def _to_recent_session_response(session: SessionState) -> RecentSessionResponse:
 
 def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
     return CreateTurnResponse(
+        status=(
+            "confirmation_required"
+            if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
+            else "completed"
+        ),
         text=result.text,
         route=RouteResponse(
             provider=result.route.provider.value,
@@ -340,6 +386,7 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         critic_status=result.critic_status.value,
         warnings=result.warnings,
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
+        stage_timings=result.stage_timings,
     )
 
 

@@ -7,9 +7,11 @@ import {
   buildCatalogSessionRequest,
   buildSessionRequest,
   buildTurnRequest,
+  isConfirmationRequired,
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeMemories,
   describeRecentSessionsStatus,
   describeRuntimeStatus,
   formatRecentSessionOption,
@@ -222,11 +224,37 @@ test("recent session selection returns the chosen session id", () => {
   assert.equal(selectedRecentSessionId("session-1"), "session-1");
 });
 
-test("turn request contains only message and request_cloud", () => {
+test("turn request carries cloud routing flags with safe defaults", () => {
   assert.deepEqual(buildTurnRequest("I listen.", true), {
     message: "I listen.",
     request_cloud: true,
+    cloud_confirmed: false,
+    force_local: false,
   });
+  assert.deepEqual(
+    buildTurnRequest("I listen.", true, { cloudConfirmed: true }),
+    {
+      message: "I listen.",
+      request_cloud: true,
+      cloud_confirmed: true,
+      force_local: false,
+    },
+  );
+  assert.deepEqual(
+    buildTurnRequest("I listen.", true, { forceLocal: true }),
+    {
+      message: "I listen.",
+      request_cloud: true,
+      cloud_confirmed: false,
+      force_local: true,
+    },
+  );
+});
+
+test("isConfirmationRequired detects two-phase turn responses", () => {
+  assert.equal(isConfirmationRequired({ status: "confirmation_required" }), true);
+  assert.equal(isConfirmationRequired({ status: "completed" }), false);
+  assert.equal(isConfirmationRequired({}), false);
 });
 
 test("transcript appends player and assistant messages atomically after success", () => {
@@ -338,6 +366,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
       memory_written: true,
       critic_status: "repaired",
       warnings: ["index delayed"],
+      stage_timings: { generation: 12.345, critique: 8.05, memory: 0.4 },
     },
   }), {
     sessionId: "session-1",
@@ -350,5 +379,44 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
     memoryWritten: true,
     criticStatus: "repaired",
     warnings: ["index delayed"],
+    stageTimings: "generation 12.3s; critique 8.1s; memory 0.4s",
   });
+});
+
+test("debug state formats missing stage timings as none", () => {
+  const debug = buildDebugState({
+    sessionId: "session-1",
+    transport: "json",
+    requestCloud: false,
+    turn: {
+      text: "Quiet.",
+      route: { provider: "local", model: "local-model", reason: "default local route" },
+      finish_reason: "stop",
+      memory_written: false,
+      critic_status: "accepted",
+      warnings: [],
+    },
+  });
+  assert.equal(debug.stageTimings, "none");
+});
+
+test("memory panel rows format summaries with visibility and importance", () => {
+  assert.deepEqual(describeMemories({
+    session_id: "session-1",
+    memories: [
+      {
+        id: "memory-1",
+        scene_id: "rose-gallery",
+        actor_id: "archivist",
+        summary: "The player promised to return before dawn.",
+        importance: 4,
+        visibility: "player",
+        tags: ["promise"],
+      },
+    ],
+  }), [
+    "[player/4] The player promised to return before dawn. (promise)",
+  ]);
+  assert.deepEqual(describeMemories({ session_id: "s", memories: [] }), []);
+  assert.deepEqual(describeMemories(null), []);
 });

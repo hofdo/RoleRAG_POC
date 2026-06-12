@@ -7,6 +7,7 @@ import {
   getRecentSessions,
   getRuntimeStatus,
   getSession,
+  getSessionMemories,
 } from "./api-client.mjs";
 import {
   appendSuccessfulTurn,
@@ -17,9 +18,11 @@ import {
   createCatalogSelection,
   createPlayState,
   describeCatalogSetupStatus,
+  describeMemories,
   describeRecentSessionsStatus,
   describeRuntimeStatus,
   formatRecentSessionOption,
+  isConfirmationRequired,
   resumeSession,
   selectedRecentSessionId,
   startNewSession,
@@ -56,6 +59,7 @@ const elements = {
   sendTurn: document.querySelector("#send-turn"),
   transcript: document.querySelector("#transcript"),
   debugState: document.querySelector("#debug-state"),
+  memoryList: document.querySelector("#memory-list"),
 };
 
 let state = createPlayState();
@@ -254,6 +258,26 @@ function addDebugRow(label, value) {
   elements.debugState.append(term, description);
 }
 
+async function refreshMemories(sessionId) {
+  try {
+    const memories = describeMemories(await getSessionMemories(sessionId));
+    elements.memoryList.replaceChildren(
+      ...memories.map((line) => {
+        const item = document.createElement("li");
+        item.textContent = line;
+        return item;
+      }),
+    );
+    if (memories.length === 0) {
+      const item = document.createElement("li");
+      item.textContent = "No memories recorded yet.";
+      elements.memoryList.replaceChildren(item);
+    }
+  } catch {
+    // Memory inspection is a diagnostic; never block play on it.
+  }
+}
+
 function renderDebugState() {
   elements.debugState.replaceChildren();
   if (!state.debug) {
@@ -268,6 +292,7 @@ function renderDebugState() {
   addDebugRow("finish_reason", state.debug.finishReason ?? "none");
   addDebugRow("memory_written", state.debug.memoryWritten);
   addDebugRow("critic_status", state.debug.criticStatus);
+  addDebugRow("stage_timings", state.debug.stageTimings);
   addDebugRow("Warnings", state.debug.warnings.length ? state.debug.warnings.join("; ") : "none");
 }
 
@@ -315,6 +340,7 @@ elements.recentSessionForm.addEventListener("submit", async (event) => {
     renderSession();
     renderTranscript();
     renderDebugState();
+    await refreshMemories(sessionId);
     elements.turnMessage.focus();
   } catch (error) {
     showError(error);
@@ -363,6 +389,7 @@ elements.resumeForm.addEventListener("submit", async (event) => {
     renderSession();
     renderTranscript();
     renderDebugState();
+    await refreshMemories(state.session.session_id);
     elements.turnMessage.focus();
   } catch (error) {
     showError(error);
@@ -383,10 +410,19 @@ elements.turnForm.addEventListener("submit", async (event) => {
   const stream = elements.useStream.checked;
   elements.sendTurn.disabled = true;
   try {
-    const turnRequest = buildTurnRequest(message, requestCloud);
-    const turn = stream
-      ? await createBufferedTurn(session.session_id, turnRequest)
-      : await createTurn(session.session_id, turnRequest);
+    const sendTurn = (options) => {
+      const turnRequest = buildTurnRequest(message, requestCloud, options);
+      return stream
+        ? createBufferedTurn(session.session_id, turnRequest)
+        : createTurn(session.session_id, turnRequest);
+    };
+    let turn = await sendTurn();
+    if (isConfirmationRequired(turn)) {
+      const approved = window.confirm(
+        `Route this turn to cloud model ${turn.route.model}?\nReason: ${turn.route.reason}`,
+      );
+      turn = await sendTurn(approved ? { cloudConfirmed: true } : { forceLocal: true });
+    }
     state = {
       ...appendSuccessfulTurn(state, message, turn),
       debug: buildDebugState({
@@ -399,6 +435,9 @@ elements.turnForm.addEventListener("submit", async (event) => {
     elements.turnMessage.value = "";
     renderTranscript();
     renderDebugState();
+    if (turn.memory_written) {
+      await refreshMemories(session.session_id);
+    }
     elements.turnMessage.focus();
   } catch (error) {
     showError(error);

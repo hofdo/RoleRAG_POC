@@ -211,6 +211,19 @@ export function getSession(sessionId, { fetchImpl = fetch } = {}) {
 
 /**
  * @param {string} sessionId
+ * @param {{ fetchImpl?: typeof fetch }} options
+ * @returns {Promise<{ session_id: string, memories: object[] }>}
+ */
+export function getSessionMemories(sessionId, { fetchImpl = fetch } = {}) {
+  return requestJson(
+    `/sessions/${encodeURIComponent(sessionId)}/memories`,
+    { method: "GET" },
+    fetchImpl,
+  );
+}
+
+/**
+ * @param {string} sessionId
  * @param {CreateTurnRequest} request
  * @param {{ fetchImpl?: typeof fetch }} options
  * @returns {Promise<CreateTurnResponse>}
@@ -223,6 +236,8 @@ export function createTurn(sessionId, request, { fetchImpl = fetch } = {}) {
       body: {
         message: request.message,
         request_cloud: request.request_cloud,
+        cloud_confirmed: request.cloud_confirmed ?? false,
+        force_local: request.force_local ?? false,
       },
     },
     fetchImpl,
@@ -234,10 +249,17 @@ function applyEvent(result, eventName, payload) {
     result.text += payload.text;
     return false;
   }
+  if (eventName === "confirmation_required") {
+    result.status = "confirmation_required";
+    result.route = payload.route;
+    result.warnings = payload.warnings;
+    return true;
+  }
   if (eventName === "final" || eventName === "failure") {
     if (eventName === "failure") {
       result.text = payload.text;
     }
+    result.status = "completed";
     result.route = payload.route;
     result.finish_reason = payload.finish_reason ?? null;
     result.memory_written = payload.memory_written;
@@ -269,6 +291,7 @@ async function parseEventStream(response) {
     throw new ApiError("invalid_stream", "The backend returned an empty event stream.", 502);
   }
   const result = {
+    status: "completed",
     text: "",
     route: null,
     finish_reason: null,
@@ -321,6 +344,8 @@ export async function createBufferedTurn(
     body: JSON.stringify({
       message: request.message,
       request_cloud: request.request_cloud,
+      cloud_confirmed: request.cloud_confirmed ?? false,
+      force_local: request.force_local ?? false,
     }),
   });
   if (!response.ok) {

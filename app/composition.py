@@ -19,7 +19,7 @@ from app.persistence import (
     connect_sqlite,
     initialize_database,
 )
-from app.persistence.repositories import SessionRepository
+from app.persistence.repositories import MemoryRepository, SessionRepository
 from app.rag import (
     ActorContextRetriever,
     EmbeddingProvider,
@@ -36,6 +36,7 @@ class AppServices:
     session_repository: SessionRepository
     orchestrator: TurnOrchestrator
     recent_dialogue_store: RecentDialogueStore
+    memory_repository: MemoryRepository | None = None
 
     def close(self) -> None:
         self.connection.close()
@@ -172,10 +173,13 @@ def build_services(
         cloud_mode=settings.cloud_mode,
         recent_dialogue_max_message_chars=settings.recent_dialogue_max_message_chars,
         structured_failure_sink=build_structured_failure_sink(settings),
+        critic_gating=settings.critic_gating,
+        curator_gating=settings.curator_gating,
     )
     return AppServices(
         connection=connection,
         session_repository=session_repository,
         orchestrator=orchestrator,
         recent_dialogue_store=recent_dialogue_store,
+        memory_repository=memory_repository,
     )

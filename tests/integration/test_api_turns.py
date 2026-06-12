@@ -271,7 +271,9 @@ def _build_in_memory_retrieval_services(
         chunks,
         embedding_provider.embed_batch([chunk.text for chunk in chunks]),
     )
-    provider = SequencedFakeProvider(["Only archivists and locksmiths speak of that door."])
+    provider = SequencedFakeProvider(
+        ["Only archivists speak of the gallery mirror and what it marks."]
+    )
     recent_dialogue_store = RecentDialogueStore(turn_repository=turn_repository, recent_turns=8)
     orchestrator = TurnOrchestrator(
         loader=FakeLoader(),
@@ -322,7 +324,9 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     app.dependency_overrides.clear()
     assert response.status_code == 200
     payload = response.json()
+    assert payload.pop("stage_timings")
     assert payload == {
+        "status": "completed",
         "text": "Only archivists and locksmiths speak of that door.",
         "route": {
             "provider": "local",
@@ -343,6 +347,27 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     assert "cipher key" not in prompt
     assert "The regent ordered the poisoning." not in prompt
     assert "route_max_tokens" not in response.text
+
+
+def test_post_turn_response_includes_stage_timings(tmp_path: Path) -> None:
+    services, provider, retriever = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={
+            "message": "I ask what the locked door hides.",
+            "active_persona_id": "archivist",
+            "request_cloud": False,
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    timings = response.json()["stage_timings"]
+    assert {"retrieval", "routing", "generation", "critique"} <= set(timings)
+    assert all(value >= 0.0 for value in timings.values())
 
 
 def test_post_turn_uses_in_memory_retrieval_without_live_qdrant(tmp_path: Path) -> None:
@@ -428,8 +453,10 @@ def test_post_turn_returns_retrieval_failure_warning_in_success_response(tmp_pat
     assert response.json()["warnings"] == ["retrieval skipped: qdrant offline"]
 
 
-def test_post_turn_returns_skipped_cloud_warning_in_success_response(tmp_path: Path) -> None:
-    services, _, _ = _build_services(tmp_path)
+def test_post_turn_cloud_request_in_ask_mode_returns_confirmation_required(
+    tmp_path: Path,
+) -> None:
+    services, provider, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
 
@@ -440,9 +467,31 @@ def test_post_turn_returns_skipped_cloud_warning_in_success_response(tmp_path: P
 
     app.dependency_overrides.clear()
     assert response.status_code == 200
-    assert response.json()["warnings"] == [
-        "cloud actor skipped: confirmation required for cloud-model (user requested cloud)"
-    ]
+    payload = response.json()
+    assert payload["status"] == "confirmation_required"
+    assert payload["text"] == ""
+    assert payload["route"]["provider"] == "cloud"
+    assert payload["route"]["reason"] == "user requested cloud"
+    assert provider.requests == []
+
+
+def test_post_turn_force_local_declines_cloud_route(tmp_path: Path) -> None:
+    services, provider, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there.", "request_cloud": True, "force_local": True},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["route"]["provider"] == "local"
+    assert payload["route"]["reason"] == "user declined cloud"
+    assert len(provider.requests) == 1
 
 
 def test_post_turn_response_does_not_expose_hidden_context_or_prompt_text(tmp_path: Path) -> None:
@@ -496,7 +545,9 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
     app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert _parse_sse(response.text) == [
+    frames = _parse_sse(response.text)
+    assert frames[1][1].pop("stage_timings")
+    assert frames == [
         ("text", {"text": "Only archivists and locksmiths speak of that door."}),
         (
             "final",
@@ -606,10 +657,10 @@ def test_post_turn_stream_terminal_event_includes_fail_open_warnings(tmp_path: P
 
     app.dependency_overrides.clear()
     assert response.status_code == 200
-    assert _parse_sse(response.text)[-1][1]["warnings"] == [
-        "retrieval skipped: qdrant offline",
-        "cloud actor skipped: confirmation required for cloud-model (user requested cloud)",
-    ]
+    events = _parse_sse(response.text)
+    assert events[-1][0] == "confirmation_required"
+    assert events[-1][1]["status"] == "confirmation_required"
+    assert events[-1][1]["warnings"] == ["retrieval skipped: qdrant offline"]
 
 
 def test_post_turn_stream_does_not_expose_input_or_hidden_context(tmp_path: Path) -> None:
@@ -651,7 +702,11 @@ def test_post_turn_stream_reconstructs_non_streaming_response(tmp_path: Path) ->
     app.dependency_overrides.clear()
     text_event, final_event = _parse_sse(stream_response.text)
     reconstructed = {"text": text_event[1]["text"], **final_event[1]}
-    assert reconstructed == json_response.json()
+    json_payload = json_response.json()
+    assert reconstructed.pop("stage_timings")
+    assert json_payload.pop("stage_timings")
+    assert json_payload.pop("status") == "completed"
+    assert reconstructed == json_payload
 
 
 def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(

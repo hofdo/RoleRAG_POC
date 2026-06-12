@@ -317,7 +317,7 @@ def test_cli_route_forces_local_in_off_mode() -> None:
     )
 
 
-def test_cli_turn_warns_when_ask_mode_skips_cloud(tmp_path: Path) -> None:
+def test_cli_turn_prompts_for_confirmation_in_ask_mode(tmp_path: Path) -> None:
     context_retriever = FakeActorContextRetriever(
         [
             RetrievedChunk(
@@ -353,10 +353,11 @@ def test_cli_turn_warns_when_ask_mode_skips_cloud(tmp_path: Path) -> None:
                 "--request-cloud",
             ],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db"), "CLOUD_MODE": "ask"},
+            input="n\n",
         )
 
     assert result.exit_code == 0
-    assert "Warning: cloud actor skipped: confirmation required" in result.stderr
+    assert "Route this turn to cloud model" in result.stdout
     assert "I have heard enough to know the regent fears open daylight." in result.stdout
 
 
@@ -388,7 +389,7 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
                 "--session-id",
                 "demo-session",
             ],
-            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db"), "CLOUD_MODE": "off"},
         )
 
     assert start_result.exit_code == 0
@@ -607,7 +608,7 @@ def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunk
                 "--session-id",
                 "demo-session",
                 "--message",
-                "What do I notice about the gallery archive mirror?",
+                "What do I notice about the regent near the gallery archive mirror?",
             ],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )

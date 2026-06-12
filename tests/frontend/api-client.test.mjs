@@ -170,6 +170,8 @@ test("createTurn uses the JSON endpoint and sends no persona override", async ()
   assert.deepEqual(JSON.parse(request.options.body), {
     message: "I listen.",
     request_cloud: false,
+    cloud_confirmed: false,
+    force_local: false,
   });
   assert.equal(turn.text, "The gallery is quiet.");
 });
@@ -275,6 +277,7 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
   }, { fetchImpl });
 
   assert.deepEqual(turn, {
+    status: "completed",
     text: "The gallery is quiet.",
     route: { provider: "local", model: "local-model", reason: "default local route" },
     finish_reason: "stop",
@@ -336,4 +339,20 @@ test("createBufferedTurn attaches an abort signal so hung streams time out", asy
 
   assert.ok(receivedSignal instanceof AbortSignal);
   assert.equal(receivedSignal.aborted, false);
+});
+
+test("createBufferedTurn surfaces confirmation_required frames as terminal", async () => {
+  const fetchImpl = async () => new Response(
+    'event: confirmation_required\ndata: {"status":"confirmation_required","route":{"provider":"cloud","model":"cloud-model","reason":"user requested cloud"},"warnings":[]}\n\n',
+    { headers: { "content-type": "text/event-stream" } },
+  );
+
+  const turn = await createBufferedTurn("session-1", {
+    message: "Hi.",
+    request_cloud: true,
+  }, { fetchImpl });
+
+  assert.equal(turn.status, "confirmation_required");
+  assert.equal(turn.route.provider, "cloud");
+  assert.equal(turn.text, "");
 });

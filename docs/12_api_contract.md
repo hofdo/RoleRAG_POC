@@ -13,6 +13,7 @@ Available endpoints:
 - `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/memories`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
 
@@ -142,6 +143,13 @@ The local `/play` UI uses this endpoint when a user resumes from the recent-sess
 pastes a `session_id` into `Resume session`; the returned `recent_turns` are rendered as transcript
 entries and remain backend-owned.
 
+## Session Memories
+
+`GET /sessions/{session_id}/memories` returns the persisted durable-memory episodes for a
+session as metadata: `id`, `scene_id`, `actor_id`, `summary`, `importance`, `visibility`, and
+`tags`. The `/play` UI renders this in a read-only "Memories" panel and the CLI exposes the
+same data via `inspect-memories`. Unknown session ids return the standard `404` envelope.
+
 ## Turn Execution
 
 `POST /sessions/{session_id}/turns` accepts:
@@ -161,6 +169,7 @@ memory-write status, critic validation status, and warnings:
 
 ```json
 {
+  "status": "completed",
   "text": "<actor response>",
   "route": {
     "provider": "local",
@@ -171,6 +180,16 @@ memory-write status, critic validation status, and warnings:
   "memory_written": false,
   "critic_status": "accepted",
   "warnings": [],
+  "stage_timings": {
+    "session": 0.002,
+    "retrieval": 0.041,
+    "routing": 0.0,
+    "generation": 12.318,
+    "validation": 0.001,
+    "critique": 8.077,
+    "persistence": 0.004,
+    "memory": 9.012
+  },
   "retrieval": {
     "query": "<retrieval query>",
     "selected": [
@@ -204,6 +223,26 @@ A turn can return HTTP `200` with warnings when actor generation still completed
 - `skipped`: the returned text was never successfully validated, either because the critic
   errored (see `warnings`) or because the turn failed before critique ran.
 
+The request body accepts three routing flags: `request_cloud` (ask for cloud quality),
+`cloud_confirmed` (approve a previously announced confirmation-required cloud route), and
+`force_local` (decline cloud and answer locally).
+
+With `CLOUD_MODE=ask`, a turn that the router escalates to cloud returns
+`status: "confirmation_required"` with the proposed route, empty `text`, and no
+generation or persistence side effects. The client resubmits the same message with
+`cloud_confirmed: true` or `force_local: true`. The streaming endpoint emits a single
+`confirmation_required` event for the same case:
+
+```text
+event: confirmation_required
+data: {"status":"confirmation_required","route":{"provider":"cloud","model":"cloud-model","reason":"user requested cloud"},"warnings":[]}
+
+```
+
+`stage_timings` is a report-only diagnostic mapping each executed pipeline stage to its
+wall-clock duration in seconds. `repair` appears only when a repair attempt ran. The same
+object appears in the streaming `final` and `failure` payloads.
+
 `retrieval` is a report-only ranking diagnostic. It lists the selected chunks and the rejected
 candidates with their score components, contains metadata only, and never includes chunk text.
 It is `null` when retrieval is not configured or the retriever does not expose diagnostics. The
@@ -227,7 +266,7 @@ event: text
 data: {"text":"<validated final text>"}
 
 event: final
-data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "critic_status":"accepted", "warnings":[]}
+data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "critic_status":"accepted", "warnings":[], "stage_timings":{"generation":12.318,"critique":8.077}}
 
 ```
 
@@ -240,7 +279,7 @@ stream emits only one `failure` event and never emits rejected draft text:
 
 ```text
 event: failure
-data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"length", "memory_written":false, "critic_status":"rejected", "warnings":[]}
+data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"length", "memory_written":false, "critic_status":"rejected", "warnings":[], "stage_timings":{"generation":12.318,"critique":8.077,"repair":11.402}}
 
 ```
 

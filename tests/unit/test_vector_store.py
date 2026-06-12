@@ -91,3 +91,43 @@ def test_search_qdrant_points_uses_query_points_for_current_client() -> None:
             "with_payload": True,
         }
     ]
+
+
+def test_in_memory_store_deletes_points_for_session() -> None:
+    from app.domain import Visibility
+    from app.rag.models import RagChunk, RetrievalFilter
+    from app.rag.vector_store import InMemoryVectorStore
+
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 2)
+    chunks = [
+        RagChunk(
+            id="memory-1",
+            source="memory",
+            source_type="memory",
+            text="promise one",
+            visibility=Visibility.PLAYER,
+            session_id="session-1",
+        ),
+        RagChunk(
+            id="memory-2",
+            source="memory",
+            source_type="memory",
+            text="promise two",
+            visibility=Visibility.PLAYER,
+            session_id="session-2",
+        ),
+    ]
+    store.upsert_chunks(RagCollection.SESSION_MEMORY, chunks, [[1.0, 0.0], [0.0, 1.0]])
+
+    store.delete_session_points(RagCollection.SESSION_MEMORY, "session-1")
+
+    from app.domain import Visibility as _V
+
+    results = store.search(
+        RagCollection.SESSION_MEMORY,
+        [1.0, 1.0],
+        RetrievalFilter(allowed_visibilities=[_V.PLAYER]),
+        10,
+    )
+    assert [chunk.id for chunk in results] == ["memory-2"]
