@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
+import httpx
 from openai import APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
@@ -29,6 +30,13 @@ class OpenAICompatibleProvider(LlmProvider):
             api_key=api_key,
             timeout=timeout_seconds,
             max_retries=max_retries,
+            # No keep-alive: a wedged pooled socket otherwise gets reused by
+            # the SDK retry, so both attempts hang and a rare transient stall
+            # still kills the turn (2026-06-12/13 live acceptance runs).
+            http_client=httpx.AsyncClient(
+                timeout=timeout_seconds,
+                limits=httpx.Limits(max_keepalive_connections=0),
+            ),
         )
 
     async def generate(self, request: LlmRequest) -> LlmResponse:

@@ -798,8 +798,12 @@ def main() -> None:
         for value in (settings.local_llm_api_key, settings.cloud_llm_api_key)
         if value.strip().lower() not in NON_SECRET_PLACEHOLDERS
     )
+    # Must exceed provider timeout x (1 + retries) or the client gives up on
+    # turns the provider would still have salvaged (late 50-turn sessions
+    # legitimately reach ~120s per LLM call).
+    http_timeout = float(os.environ.get("LIVE_HTTP_TIMEOUT_SECONDS", "420"))
     summary = run_checkpoint(
-        client_factory=lambda: httpx.Client(base_url=args.api_base_url, timeout=240.0),
+        client_factory=lambda: httpx.Client(base_url=args.api_base_url, timeout=http_timeout),
         inspector=lambda session_id: inspect_live_state(
             database_path=args.database_path,
             settings=settings,
