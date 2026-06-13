@@ -204,6 +204,44 @@ def test_build_event_attribution_tracks_exact_memory_ids() -> None:
     assert result.matching_memory_ids == ("match",)
     assert result.indexed_memory_ids == ("match",)
     assert result.selected_memory_ids == ("match",)
+    assert result.missed_memory_ids == ()
+
+
+def test_build_event_attribution_records_retrieval_miss_rank() -> None:
+    event = STORY_EVENTS[0]
+    memories = [
+        MemoryEpisode(
+            id="match",
+            session_id="session",
+            scene_id="rose-gallery",
+            summary="The player promised to return before dawn.",
+            importance=4,
+            visibility=Visibility.PLAYER,
+        ),
+    ]
+    result = build_event_attribution(
+        event=event,
+        query="real query",
+        memories=memories,
+        indexed_memory_ids=["match"],
+        selected=[
+            {
+                "id": "lore-1",
+                "collection": "canon_lore",
+                "visibility": "player",
+                "selected_rank": 1,
+            }
+        ],
+        rejected=[
+            {"id": "noise", "selected_rank": None, "adjusted_score": 0.4},
+            {"id": "match", "selected_rank": None, "adjusted_score": 0.3},
+        ],
+    )
+
+    assert result.selected_memory_ids == ()
+    assert result.missed_memory_ids == ("match",)
+    # 1 selected chunk + second position in the rejected tail.
+    assert result.missed_memory_ranks == (3,)
 
 
 def test_extraction_miss_is_report_only_when_not_strict() -> None:

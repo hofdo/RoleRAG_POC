@@ -20,9 +20,11 @@ from app.memory.deterministic_extractor import (
     extract_explicit_durable_events,
     is_covered_by_summaries,
 )
+from app.memory.semantic_dedup import is_semantic_duplicate
 from app.orchestration.stages.critique import record_structured_failure
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.routing import TurnRoutingStage
+from app.rag.embeddings import EmbeddingProvider
 
 
 class MemoryCuratingAgent(Protocol):
@@ -60,6 +62,8 @@ class TurnMemoryStage:
         routing_stage: TurnRoutingStage,
         failure_sink: StructuredFailureRecording | None = None,
         gating: str = "always",
+        embedding_provider: EmbeddingProvider | None = None,
+        write_dedup_cosine_threshold: float = 1.0,
     ) -> None:
         self.provider = provider
         self.memory_store = memory_store
@@ -68,6 +72,8 @@ class TurnMemoryStage:
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
         self.gating = gating
+        self.embedding_provider = embedding_provider
+        self.write_dedup_cosine_threshold = write_dedup_cosine_threshold
 
     async def run(
         self,
@@ -247,4 +253,44 @@ class TurnMemoryStage:
         dropped = len(candidates) - len(kept)
         if dropped:
             warnings.append(f"memory dedup dropped {dropped} duplicate candidate(s)")
+        return self._drop_semantic_duplicates(
+            candidates=kept,
+            existing_summaries=existing[: len(existing) - len(kept)],
+            warnings=warnings,
+        )
+
+    def _drop_semantic_duplicates(
+        self,
+        *,
+        candidates: list[MemoryCandidate],
+        existing_summaries: list[str],
+        warnings: list[str],
+    ) -> list[MemoryCandidate]:
+        """Drop candidates whose embedding is near-identical to an existing or
+        already-kept memory. Inert unless the cosine threshold is below 1.0."""
+        if (
+            self.embedding_provider is None
+            or self.write_dedup_cosine_threshold >= 1.0
+            or not candidates
+        ):
+            return candidates
+        try:
+            reference_vectors = list(self.embedding_provider.embed_batch(existing_summaries))
+            kept: list[MemoryCandidate] = []
+            for candidate in candidates:
+                vector = self.embedding_provider.embed_text(candidate.summary)
+                if is_semantic_duplicate(
+                    vector,
+                    reference_vectors,
+                    threshold=self.write_dedup_cosine_threshold,
+                ):
+                    continue
+                kept.append(candidate)
+                reference_vectors.append(vector)
+        except Exception as exc:
+            warnings.append(f"semantic memory dedup skipped: {exc}")
+            return candidates
+        dropped = len(candidates) - len(kept)
+        if dropped:
+            warnings.append(f"semantic memory dedup dropped {dropped} near-duplicate candidate(s)")
         return kept

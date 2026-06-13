@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -665,6 +666,117 @@ async def test_memory_stage_adds_explicit_event_when_curator_declines_to_write()
     assert result.memory_written is True
     assert len(store.persisted) == 1
     assert "return before dawn" in store.persisted[0].summary
+
+
+class ParaphraseCurator:
+    async def curate(self, **_: object) -> Any:
+        from app.domain import MemoryCandidate, MemoryCuratorResult, Visibility
+
+        return MemoryCuratorResult(
+            write_memory=True,
+            memories=[
+                MemoryCandidate(
+                    # Shares almost no content terms with the seeded memory, so
+                    # the lexical pass keeps it; only the semantic pass can drop it.
+                    summary="At first light the visitor will come back.",
+                    visibility=Visibility.PLAYER,
+                    importance=4,
+                    tags=["promise"],
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ],
+            reason="paraphrase",
+        )
+
+
+class _MappingEmbeddingProvider:
+    dimension = 2
+
+    def embed_text(self, text: str) -> list[float]:
+        intent_group = {
+            "The player promised to return before dawn.",
+            "At first light the visitor will come back.",
+        }
+        return [1.0, 0.0] if text in intent_group else [0.0, 1.0]
+
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed_text(text) for text in texts]
+
+
+def _seed_promise(store: RecordingMemoryStore, session_id: str) -> None:
+    from app.domain import MemoryCandidate, Visibility
+
+    store.persist_memories(
+        session_id=session_id,
+        memories=[
+            MemoryCandidate(
+                summary="The player promised to return before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise"],
+                scene_id="scene",
+                actor_id="persona",
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_semantic_dedup_drops_paraphrase_when_enabled() -> None:
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_promise(store, context.session.id)
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=ParaphraseCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+        embedding_provider=_MappingEmbeddingProvider(),
+        write_dedup_cosine_threshold=0.9,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I ask Iria about the weather outside.",
+        assistant_message="Iria glances toward the frosted glass.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is False
+    assert len(store.persisted) == 1
+    assert any("semantic memory dedup dropped" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_semantic_dedup_is_inert_by_default() -> None:
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_promise(store, context.session.id)
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=ParaphraseCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I ask Iria about the weather outside.",
+        assistant_message="Iria glances toward the frosted glass.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 2
 
 
 @pytest.mark.asyncio

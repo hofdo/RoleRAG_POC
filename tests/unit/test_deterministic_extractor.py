@@ -77,6 +77,66 @@ def test_extracts_only_the_trigger_sentence_from_longer_messages() -> None:
     assert "colder" not in candidates[0].summary
 
 
+def test_extracts_mutual_agreement_signal() -> None:
+    candidates = extract_explicit_durable_events(
+        user_message="We agreed on a three-tap signal at the side door.",
+        scene_id="rose-gallery",
+        actor_id="archivist",
+    )
+
+    assert len(candidates) == 1
+    assert "three-tap signal" in candidates[0].summary
+    assert "agreement" in candidates[0].tags
+
+
+def test_extracts_established_password_rule() -> None:
+    candidates = extract_explicit_durable_events(
+        user_message="The password is ravenwood.",
+        scene_id="rose-gallery",
+        actor_id="archivist",
+    )
+
+    assert len(candidates) == 1
+    assert "ravenwood" in candidates[0].summary
+    assert "agreement" in candidates[0].tags
+
+
+def test_extracts_negative_commitment() -> None:
+    candidates = extract_explicit_durable_events(
+        user_message="I will never tell anyone what you hide in the vault.",
+        scene_id="rose-gallery",
+        actor_id="archivist",
+    )
+
+    assert len(candidates) == 1
+    assert "vault" in candidates[0].summary
+    assert "promise" in candidates[0].tags
+
+
+def test_extracts_you_have_my_word() -> None:
+    candidates = extract_explicit_durable_events(
+        user_message="You have my word on the matter of the ledger.",
+        scene_id="rose-gallery",
+        actor_id="archivist",
+    )
+
+    assert len(candidates) == 1
+    assert "promise" in candidates[0].tags
+
+
+def test_ignores_plain_future_actions() -> None:
+    # "I will/I'll <verb>" without a commitment verb or negation is normal
+    # narration, not a durable event.
+    assert (
+        extract_explicit_durable_events(
+            user_message="I will tell you about the garden. I'll look around the room.",
+            scene_id="rose-gallery",
+            actor_id="archivist",
+        )
+        == []
+    )
+
+
 def test_coverage_detects_paraphrased_duplicate() -> None:
     assert is_covered_by_summaries(
         "Player commitment: I promise to return before dawn.",

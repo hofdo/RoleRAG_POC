@@ -41,6 +41,7 @@ from app.orchestration.stages import (
     TurnSessionLoader,
 )
 from app.persistence.repositories import SessionRepository, TurnRepository
+from app.rag.embeddings import EmbeddingProvider
 
 
 def _visible_texts(
@@ -116,6 +117,8 @@ class TurnOrchestrator:
         canon_importance_floor: int = 4,
         canon_max_items: int = 8,
         canon_max_chars: int = 900,
+        memory_embedding_provider: EmbeddingProvider | None = None,
+        write_dedup_cosine_threshold: float = 1.0,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -199,6 +202,8 @@ class TurnOrchestrator:
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
             gating=curator_gating,
+            embedding_provider=memory_embedding_provider,
+            write_dedup_cosine_threshold=write_dedup_cosine_threshold,
         )
 
     @property
