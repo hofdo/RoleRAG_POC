@@ -17,6 +17,7 @@ import httpx
 
 from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
+from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, Visibility
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
@@ -170,6 +171,10 @@ class EventAttribution:
     indexed_memory_ids: tuple[str, ...]
     selected_memory_ids: tuple[str, ...]
     selected_visibilities: tuple[str, ...]
+    # Matching memories that were retrieved but not selected, with their overall
+    # rank across the candidate set — the actionable "how far off" tuning signal.
+    missed_memory_ids: tuple[str, ...] = ()
+    missed_memory_ranks: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -221,6 +226,7 @@ def build_event_attribution(
     memories: Sequence[MemoryEpisode],
     indexed_memory_ids: Sequence[str],
     selected: Sequence[Mapping[str, Any]],
+    rejected: Sequence[Mapping[str, Any]] = (),
 ) -> EventAttribution:
     matching_ids = tuple(
         memory.id for memory in memories if semantic_match(memory.summary, event.term_groups)
@@ -232,6 +238,16 @@ def build_event_attribution(
         if item.get("collection") == RagCollection.SESSION_MEMORY.value
         and str(item.get("id")) in matching_set
     )
+    miss = summarize_retrieval_miss(
+        expected_ids=matching_ids,
+        selected=selected,
+        rejected=rejected,
+    )
+    missed_memory_ranks = tuple(
+        rank.overall_rank
+        for rank in miss.ranks
+        if not rank.selected and rank.overall_rank is not None
+    )
     return EventAttribution(
         event_key=event.key,
         query=query,
@@ -241,6 +257,8 @@ def build_event_attribution(
         ),
         selected_memory_ids=selected_memory_ids,
         selected_visibilities=tuple(str(item.get("visibility")) for item in selected),
+        missed_memory_ids=miss.missed_ids,
+        missed_memory_ranks=missed_memory_ranks,
     )
 
 
@@ -485,6 +503,12 @@ def run_checkpoint(
         "quality_metrics": {
             "memory_extraction_misses": sum(not event["extracted"] for event in event_payloads),
             "callback_recall_misses": sum(not event["recalled"] for event in event_payloads),
+            "retrieval_selection_misses": sum(
+                bool(event["missed_memory_ids"]) for event in event_payloads
+            ),
+            "retrieval_miss_ranks": sorted(
+                rank for event in event_payloads for rank in event["missed_memory_ranks"]
+            ),
             "response_chars": [turn["response_chars"] for turn in turns],
             "novel_proper_noun_candidates": sorted(
                 {
@@ -606,6 +630,7 @@ def inspect_story_event(
         memories=memories,
         indexed_memory_ids=indexed_ids,
         selected=diagnostics["selected"],
+        rejected=diagnostics["rejected"],
     )
 
 

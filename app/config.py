@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # Memories below this importance are persisted to SQLite but not indexed for
     # retrieval. 1 indexes everything (no behavior change).
     rag_index_importance_floor: int = Field(default=1, ge=1, le=5)
+    # Cosine threshold for semantic write-dedup of new memories. 1.0 disables the
+    # semantic pass (lexical dedup still runs); lower it (e.g. 0.92) to drop
+    # paraphrased near-duplicates the term-overlap check misses.
+    rag_write_dedup_cosine_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
 
     # Pinned session-canon block ("Standing facts") injected into the actor prompt.
     canon_importance_floor: int = Field(default=4, ge=1, le=5)

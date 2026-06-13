@@ -197,6 +197,8 @@ def build_services(
         canon_importance_floor=settings.canon_importance_floor,
         canon_max_items=settings.canon_max_items,
         canon_max_chars=settings.canon_max_chars,
+        memory_embedding_provider=embedding_provider,
+        write_dedup_cosine_threshold=settings.rag_write_dedup_cosine_threshold,
     )
     return AppServices(
         connection=connection,
