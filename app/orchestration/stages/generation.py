@@ -73,6 +73,7 @@ class TurnGenerationStage:
             turn_input=turn_input,
             recent_turns=context.recent_turns,
             retrieved_chunks=retrieval.chunks,
+            standing_facts=context.standing_facts,
             context_budget=self.context_budget,
             recent_dialogue_max_message_chars=self.recent_dialogue_max_message_chars,
         )

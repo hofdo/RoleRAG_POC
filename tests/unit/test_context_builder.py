@@ -49,6 +49,52 @@ def test_context_builder_includes_persona_scene_recent_events_and_user_message()
     assert messages[1].content == "What have you heard about the regent?"
 
 
+def _minimal_persona() -> PersonaCard:
+    return PersonaCard(
+        id="archivist",
+        name="Iria Vale",
+        role="npc",
+        public_description="A composed palace archivist.",
+        speaking_style="Precise and dry.",
+    )
+
+
+def _minimal_scene() -> SceneState:
+    return SceneState(
+        id="rose-gallery",
+        title="Rose Gallery",
+        location="Winter Palace",
+        player_visible_summary="Courtiers drift between mirrors and roses.",
+    )
+
+
+def _minimal_turn_input() -> TurnInput:
+    return TurnInput(session_id="demo-session", message="Do you remember our deal?")
+
+
+def test_context_builder_renders_standing_facts_block() -> None:
+    messages = build_actor_messages(
+        persona=_minimal_persona(),
+        scene=_minimal_scene(),
+        turn_input=_minimal_turn_input(),
+        standing_facts=("The player promised to return before dawn.",),
+    )
+
+    system_prompt = messages[0].content
+    assert "Standing facts (session canon):" in system_prompt
+    assert "- The player promised to return before dawn." in system_prompt
+
+
+def test_context_builder_omits_standing_facts_block_when_empty() -> None:
+    messages = build_actor_messages(
+        persona=_minimal_persona(),
+        scene=_minimal_scene(),
+        turn_input=_minimal_turn_input(),
+    )
+
+    assert "Standing facts" not in messages[0].content
+
+
 def test_context_builder_excludes_private_fields_by_default() -> None:
     persona = PersonaCard(
         id="archivist",

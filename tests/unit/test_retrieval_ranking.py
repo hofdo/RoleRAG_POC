@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from app.domain import RetrievedChunk, Visibility
 from app.rag.diagnostics import ChunkRetrievalDiagnostic
 from app.rag.models import RagCollection, RetrievalFilter
+from app.rag.ranking import RankingWeights, RetrievalRankingContext, rerank_chunks
 from app.rag.retriever import ActorContextRetriever
 
 
@@ -18,6 +21,7 @@ def _chunk(
     persona_id: str | None = None,
     session_id: str | None = None,
     actor_id: str | None = None,
+    created_at: datetime | None = None,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         id=chunk_id,
@@ -32,6 +36,7 @@ def _chunk(
         session_id=session_id,
         actor_id=actor_id,
         importance=importance,
+        created_at=created_at,
     )
 
 
@@ -382,3 +387,100 @@ def test_lexical_boost_counts_tag_matches_and_is_capped() -> None:
     )
 
     assert result.diagnostics.selected[0].applied_boosts["lexical"] == 0.25
+
+
+def _session_candidate(
+    chunk_id: str,
+    *,
+    created_at: datetime | None,
+    score: float = 0.50,
+) -> tuple[RagCollection, RetrievedChunk]:
+    return (
+        RagCollection.SESSION_MEMORY,
+        _chunk(
+            chunk_id,
+            score=score,
+            collection=RagCollection.SESSION_MEMORY,
+            text="The player made a durable commitment.",
+            session_id="session-1",
+            created_at=created_at,
+        ),
+    )
+
+
+_RANK_CONTEXT = RetrievalRankingContext(
+    query="commitment", session_id="session-1", persona_id="archivist"
+)
+
+
+def test_recency_boost_prefers_newer_among_distinct_timestamps() -> None:
+    older = _session_candidate("older", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    newer = _session_candidate("newer", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc))
+
+    chunks, diagnostics = rerank_chunks(
+        context=_RANK_CONTEXT,
+        candidates=[older, newer],
+        top_k=2,
+        weights=RankingWeights(recency_weight=0.1),
+    )
+
+    assert [chunk.id for chunk in chunks] == ["newer", "older"]
+    boosts = {diag.id: diag.applied_boosts for diag in diagnostics.selected}
+    assert boosts["newer"]["recency"] == 0.1
+    assert "recency" not in boosts["older"]
+
+
+def test_recency_no_boost_when_all_timestamps_equal() -> None:
+    stamp = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    candidates = [
+        _session_candidate("a", created_at=stamp),
+        _session_candidate("b", created_at=stamp),
+        _session_candidate("c", created_at=stamp),
+    ]
+
+    _, diagnostics = rerank_chunks(
+        context=_RANK_CONTEXT,
+        candidates=candidates,
+        top_k=3,
+        weights=RankingWeights(recency_weight=0.1),
+    )
+
+    for diag in [*diagnostics.selected, *diagnostics.rejected]:
+        assert "recency" not in diag.applied_boosts
+
+
+def test_recency_no_boost_for_chunks_without_created_at() -> None:
+    dated_new = _session_candidate(
+        "dated-new", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc)
+    )
+    dated_old = _session_candidate(
+        "dated-old", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    undated = _session_candidate("undated", created_at=None)
+
+    _, diagnostics = rerank_chunks(
+        context=_RANK_CONTEXT,
+        candidates=[dated_new, dated_old, undated],
+        top_k=3,
+        weights=RankingWeights(recency_weight=0.1),
+    )
+
+    boosts = {
+        diag.id: diag.applied_boosts
+        for diag in [*diagnostics.selected, *diagnostics.rejected]
+    }
+    assert boosts["dated-new"]["recency"] == 0.1
+    assert "recency" not in boosts["undated"]
+
+
+def test_weights_override_changes_collection_boost() -> None:
+    candidate = _session_candidate("memory-1", created_at=None)
+
+    _, diagnostics = rerank_chunks(
+        context=_RANK_CONTEXT,
+        candidates=[candidate],
+        top_k=1,
+        weights=RankingWeights(session_memory_weight=0.5),
+    )
+
+    assert diagnostics.selected[0].applied_boosts["collection"] == 0.5

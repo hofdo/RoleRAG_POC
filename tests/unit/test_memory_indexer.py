@@ -131,6 +131,97 @@ def test_memory_indexer_preserves_episode_metadata() -> None:
     ]
 
 
+def _episode_with(memory_id: str, *, importance: int) -> MemoryEpisode:
+    return MemoryEpisode(
+        id=memory_id,
+        session_id="session-1",
+        scene_id="rose-gallery",
+        actor_id="archivist",
+        summary=f"Commitment {memory_id}.",
+        importance=importance,
+        visibility=Visibility.PLAYER,
+        tags=["promise"],
+    )
+
+
+def test_index_memories_respects_importance_floor() -> None:
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        importance_floor=4,
+    )
+
+    result = indexer.index_memories(
+        [
+            _episode_with("low-1", importance=1),
+            _episode_with("low-2", importance=3),
+            _episode_with("keep-1", importance=4),
+            _episode_with("keep-2", importance=5),
+        ]
+    )
+
+    assert result.indexed_count == 2
+    _, chunks, _ = vector_store.upsert_calls[0]
+    assert [chunk.id for chunk in chunks] == ["keep-1", "keep-2"]
+
+
+def test_index_memories_floor_one_indexes_everything() -> None:
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        importance_floor=1,
+    )
+
+    result = indexer.index_memories(
+        [_episode_with("a", importance=1), _episode_with("b", importance=2)]
+    )
+
+    assert result.indexed_count == 2
+
+
+def test_reindex_session_applies_importance_floor(tmp_path: Path) -> None:
+    store = _memory_store(tmp_path)
+    store.persist_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="Filler smalltalk.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            ),
+            MemoryCandidate(
+                summary="The player vowed to protect the archive.",
+                visibility=Visibility.PLAYER,
+                importance=5,
+                tags=["vow"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            ),
+        ],
+    )
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=store,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        importance_floor=3,
+    )
+
+    result = indexer.reindex_session("session-1")
+
+    assert result.indexed_count == 1
+    _, chunks, _ = vector_store.upsert_calls[0]
+    assert [chunk.text for chunk in chunks] == ["The player vowed to protect the archive."]
+
+
 def test_memory_indexer_skips_vector_calls_for_empty_list() -> None:
     embedding_provider = FakeEmbeddingProvider()
     vector_store = RecordingVectorStore()

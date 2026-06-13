@@ -171,3 +171,38 @@ def test_settings_reject_invalid_gating_value(
 
     with pytest.raises(ValidationError):
         Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+
+def test_settings_ranking_weight_defaults_mirror_ranking_constants(tmp_path: Path) -> None:
+    from app.rag import ranking
+
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.rag_session_memory_weight == ranking.SESSION_MEMORY_WEIGHT
+    assert settings.rag_persona_memory_weight == ranking.PERSONA_MEMORY_WEIGHT
+    assert settings.rag_canon_lore_weight == ranking.CANON_LORE_WEIGHT
+    assert settings.rag_session_id_match_boost == ranking.SESSION_ID_MATCH_BOOST
+    assert settings.rag_scene_id_match_boost == ranking.SCENE_ID_MATCH_BOOST
+    assert settings.rag_persona_id_match_boost == ranking.PERSONA_ID_MATCH_BOOST
+    assert settings.rag_importance_step_boost == ranking.IMPORTANCE_STEP_BOOST
+    assert settings.rag_lexical_match_step_boost == ranking.LEXICAL_MATCH_STEP_BOOST
+    assert settings.rag_lexical_match_max_boost == ranking.LEXICAL_MATCH_MAX_BOOST
+    assert settings.rag_recency_weight == 0.0
+
+
+def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.rag_index_importance_floor == 1
+    assert settings.canon_importance_floor == 4
+    assert settings.canon_max_items == 8
+    assert settings.canon_max_chars == 900
+
+
+def test_build_ranking_weights_defaults_match_default_ranking_weights(tmp_path: Path) -> None:
+    from app.composition import build_ranking_weights
+    from app.rag.ranking import DEFAULT_RANKING_WEIGHTS
+
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert build_ranking_weights(settings) == DEFAULT_RANKING_WEIGHTS

@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from app.domain import PersonaCard, SceneState, SessionState, StoredTurn, TurnInput
 from app.memory import RecentDialogueStore
+from app.memory.store import MemoryEpisodeStore
+from app.orchestration.canon_builder import build_standing_facts
 from app.persistence import DemoWorldRecord, SessionNotFoundError
 from app.persistence.repositories import SessionRepository
 
@@ -28,6 +30,7 @@ class LoadedTurnContext:
     persona: PersonaCard
     scene: SceneState
     recent_turns: tuple[StoredTurn, ...]
+    standing_facts: tuple[str, ...] = ()
 
 
 class TurnSessionLoader:
@@ -39,12 +42,20 @@ class TurnSessionLoader:
         content_root: str,
         session_repository: SessionRepository,
         recent_dialogue_store: RecentDialogueStore,
+        memory_store: MemoryEpisodeStore | None = None,
+        canon_importance_floor: int = 4,
+        canon_max_items: int = 8,
+        canon_max_chars: int = 900,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
         self.content_root = content_root
         self.session_repository = session_repository
         self.recent_dialogue_store = recent_dialogue_store
+        self.memory_store = memory_store
+        self.canon_importance_floor = canon_importance_floor
+        self.canon_max_items = canon_max_items
+        self.canon_max_chars = canon_max_chars
 
     def create_session(
         self,
@@ -100,11 +111,21 @@ class TurnSessionLoader:
                 f"Unknown scene for world {session.world_id}: {session.active_scene_id}"
             )
 
+        standing_facts: tuple[str, ...] = ()
+        if self.memory_store is not None:
+            standing_facts = build_standing_facts(
+                self.memory_store.list_memories_for_session(session.id),
+                importance_floor=self.canon_importance_floor,
+                max_items=self.canon_max_items,
+                max_chars=self.canon_max_chars,
+            )
+
         return LoadedTurnContext(
             session=session,
             persona=loader.load_persona(persona_id),
             scene=loader.load_scene(session.active_scene_id),
             recent_turns=tuple(self.recent_dialogue_store.load_recent_dialogue(session.id)),
+            standing_facts=standing_facts,
         )
 
     def loader_for_content_root(self, content_root: str) -> TurnDataLoader:

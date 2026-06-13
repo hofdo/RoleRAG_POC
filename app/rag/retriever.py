@@ -7,7 +7,13 @@ from app.domain import PersonaCard, RetrievedChunk, SceneState, StoredTurn
 from app.rag.diagnostics import RetrievalResult
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.models import RagCollection, RetrievalFilter
-from app.rag.ranking import RetrievalRankingContext, candidate_limit, rerank_chunks
+from app.rag.ranking import (
+    DEFAULT_RANKING_WEIGHTS,
+    RankingWeights,
+    RetrievalRankingContext,
+    candidate_limit,
+    rerank_chunks,
+)
 from app.rag.vector_store import VectorStore
 
 
@@ -54,8 +60,14 @@ class ChunkRetrieving(Protocol):
 
 
 class ActorContextRetriever:
-    def __init__(self, *, retriever: ChunkRetrieving) -> None:
+    def __init__(
+        self,
+        *,
+        retriever: ChunkRetrieving,
+        weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+    ) -> None:
         self.retriever = retriever
+        self.weights = weights
 
     def retrieve_for_actor(
         self,
@@ -89,7 +101,9 @@ class ActorContextRetriever:
         top_k: int,
         lexical_query: str | None = None,
     ) -> RetrievalResult:
-        per_collection_limit = candidate_limit(top_k)
+        per_collection_limit = candidate_limit(
+            top_k, oversample_factor=self.weights.candidate_oversample_factor
+        )
         searches = [
             (RagCollection.SESSION_MEMORY, RetrievalFilter.player_visible(session_id=session_id)),
             (RagCollection.PERSONA_MEMORY, RetrievalFilter.player_visible(persona_id=persona_id)),
@@ -123,6 +137,7 @@ class ActorContextRetriever:
             ),
             candidates=candidates,
             top_k=top_k,
+            weights=self.weights,
         )
         return RetrievalResult(chunks=chunks, diagnostics=diagnostics)
 

@@ -14,6 +14,7 @@ def build_actor_messages(
     turn_input: TurnInput,
     recent_turns: Sequence[StoredTurn] = (),
     retrieved_chunks: Sequence[RetrievedChunk] = (),
+    standing_facts: Sequence[str] = (),
     context_budget: ContextBudget | None = None,
     recent_dialogue_max_message_chars: int = 900,
 ) -> list[LlmMessage]:
@@ -44,6 +45,13 @@ def build_actor_messages(
 
     if scene.recent_events:
         prompt_lines.append(f"Recent events: {'; '.join(scene.recent_events)}")
+
+    if standing_facts:
+        prompt_lines.append("Standing facts (session canon):")
+        prompt_lines.extend(f"- {fact}" for fact in standing_facts)
+        prompt_lines.append(
+            "These facts are established and durable; honor them and do not contradict them."
+        )
 
     visible_chunks = select_retrieved_chunks_for_prompt(
         retrieved_chunks,

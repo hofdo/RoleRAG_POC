@@ -59,6 +59,7 @@ class MemoryEpisode(BaseModel):
     importance: int = Field(ge=1, le=5)
     visibility: Visibility
     tags: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
 
 
 class MemoryCandidate(BaseModel):
@@ -100,6 +101,7 @@ class RetrievedChunk(BaseModel):
     session_id: str | None = None
     actor_id: str | None = None
     importance: int | None = Field(default=None, ge=1, le=5)
+    created_at: datetime | None = None
 
 
 class TurnInput(BaseModel):

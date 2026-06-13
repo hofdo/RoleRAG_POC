@@ -54,6 +54,29 @@ class Settings(BaseSettings):
     rag_chunk_overlap_chars: int = Field(default=120, ge=0)
     rag_max_retrieved_chunk_chars: int = Field(default=800, ge=1)
 
+    # Retrieval reranking weights. Defaults mirror the canonical Final constants
+    # in app/rag/ranking.py so behavior is unchanged unless explicitly tuned.
+    rag_candidate_oversample_factor: int = Field(default=2, ge=1)
+    rag_session_memory_weight: float = Field(default=0.08, ge=0.0)
+    rag_persona_memory_weight: float = Field(default=0.04, ge=0.0)
+    rag_canon_lore_weight: float = Field(default=0.0, ge=0.0)
+    rag_session_id_match_boost: float = Field(default=0.02, ge=0.0)
+    rag_scene_id_match_boost: float = Field(default=0.04, ge=0.0)
+    rag_persona_id_match_boost: float = Field(default=0.03, ge=0.0)
+    rag_importance_step_boost: float = Field(default=0.015, ge=0.0)
+    rag_lexical_match_step_boost: float = Field(default=0.05, ge=0.0)
+    rag_lexical_match_max_boost: float = Field(default=0.25, ge=0.0)
+    # Recency boost weight; 0.0 keeps ranking byte-identical to pre-recency behavior.
+    rag_recency_weight: float = Field(default=0.0, ge=0.0)
+    # Memories below this importance are persisted to SQLite but not indexed for
+    # retrieval. 1 indexes everything (no behavior change).
+    rag_index_importance_floor: int = Field(default=1, ge=1, le=5)
+
+    # Pinned session-canon block ("Standing facts") injected into the actor prompt.
+    canon_importance_floor: int = Field(default=4, ge=1, le=5)
+    canon_max_items: int = Field(default=8, ge=0)
+    canon_max_chars: int = Field(default=900, ge=1)
+
     structured_output_failure_log_dir: Path | None = None
 
     recent_dialogue_turns: int = Field(default=8, ge=0)

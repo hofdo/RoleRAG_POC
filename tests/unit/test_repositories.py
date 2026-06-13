@@ -243,6 +243,8 @@ def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) ->
     assert len(episodes) == 1
     assert loaded == episodes
     assert loaded[0].tags == ["promise", "deadline"]
+    assert episodes[0].created_at is not None
+    assert loaded[0].created_at == episodes[0].created_at
 
 
 def _seed_session_with_data(tmp_path: Path) -> tuple[
