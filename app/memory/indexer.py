@@ -22,16 +22,19 @@ class MemoryIndexer:
         memory_store: MemoryEpisodeStore | None,
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
+        importance_floor: int = 1,
     ) -> None:
         self.memory_store = memory_store
         self.embedding_provider = embedding_provider
         self.vector_store = vector_store
+        self.importance_floor = importance_floor
 
     def index_memories(self, memories: Sequence[MemoryEpisode]) -> MemoryIndexingResult:
-        if not memories:
+        eligible = [memory for memory in memories if memory.importance >= self.importance_floor]
+        if not eligible:
             return MemoryIndexingResult(indexed_count=0)
 
-        chunks = [self._to_chunk(memory) for memory in memories]
+        chunks = [self._to_chunk(memory) for memory in eligible]
         vectors = self.embedding_provider.embed_batch([chunk.text for chunk in chunks])
         self.vector_store.ensure_collection(
             RagCollection.SESSION_MEMORY,
@@ -57,4 +60,5 @@ class MemoryIndexer:
             session_id=memory.session_id,
             actor_id=memory.actor_id,
             importance=memory.importance,
+            created_at=memory.created_at,
         )

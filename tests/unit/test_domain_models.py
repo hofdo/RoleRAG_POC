@@ -239,6 +239,7 @@ def test_retrieved_chunk_accepts_optional_metadata_when_absent() -> None:
         "session_id": None,
         "actor_id": None,
         "importance": None,
+        "created_at": None,
     }
 
 
@@ -273,6 +274,7 @@ def test_retrieved_chunk_serializes_tags_and_metadata_predictably() -> None:
         "session_id": "session-1",
         "actor_id": "captain-soren",
         "importance": 4,
+        "created_at": None,
     }
 
 

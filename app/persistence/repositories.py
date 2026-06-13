@@ -353,6 +353,7 @@ class SQLiteMemoryRepository:
                 importance=memory.importance,
                 visibility=memory.visibility,
                 tags=memory.tags,
+                created_at=created_at,
             )
             self.connection.execute(
                 """
@@ -421,6 +422,7 @@ class SQLiteMemoryRepository:
                 importance=row["importance"],
                 visibility=Visibility(row["visibility"]),
                 tags=json.loads(row["tags_json"]),
+                created_at=parse_datetime(row["created_at"]),
             )
             for row in reversed(rows)
         ]

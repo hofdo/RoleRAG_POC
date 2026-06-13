@@ -28,6 +28,7 @@ from app.rag import (
     Retriever,
     VectorStore,
 )
+from app.rag.ranking import RankingWeights
 
 
 @dataclass
@@ -97,6 +98,22 @@ def build_vector_store(settings: Settings) -> VectorStore:
     return QdrantVectorStore(url=settings.qdrant_url)
 
 
+def build_ranking_weights(settings: Settings) -> RankingWeights:
+    return RankingWeights(
+        session_memory_weight=settings.rag_session_memory_weight,
+        persona_memory_weight=settings.rag_persona_memory_weight,
+        canon_lore_weight=settings.rag_canon_lore_weight,
+        session_id_match_boost=settings.rag_session_id_match_boost,
+        scene_id_match_boost=settings.rag_scene_id_match_boost,
+        persona_id_match_boost=settings.rag_persona_id_match_boost,
+        importance_step_boost=settings.rag_importance_step_boost,
+        lexical_match_step_boost=settings.rag_lexical_match_step_boost,
+        lexical_match_max_boost=settings.rag_lexical_match_max_boost,
+        recency_weight=settings.rag_recency_weight,
+        candidate_oversample_factor=settings.rag_candidate_oversample_factor,
+    )
+
+
 def build_actor_context_retriever(
     settings: Settings,
     *,
@@ -108,7 +125,8 @@ def build_actor_context_retriever(
             embedding_provider=embedding_provider or build_embedding_provider(settings),
             vector_store=vector_store or build_vector_store(settings),
             default_top_k=settings.rag_default_top_k,
-        )
+        ),
+        weights=build_ranking_weights(settings),
     )
 
 
@@ -148,6 +166,7 @@ def build_services(
                 memory_store=memory_store,
                 embedding_provider=embedding_provider,
                 vector_store=vector_store,
+                importance_floor=settings.rag_index_importance_floor,
             )
             if embedding_provider is not None and vector_store is not None
             else None
@@ -175,6 +194,9 @@ def build_services(
         structured_failure_sink=build_structured_failure_sink(settings),
         critic_gating=settings.critic_gating,
         curator_gating=settings.curator_gating,
+        canon_importance_floor=settings.canon_importance_floor,
+        canon_max_items=settings.canon_max_items,
+        canon_max_chars=settings.canon_max_chars,
     )
     return AppServices(
         connection=connection,

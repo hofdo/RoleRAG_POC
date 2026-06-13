@@ -113,6 +113,9 @@ class TurnOrchestrator:
         structured_failure_sink: StructuredFailureRecording | None = None,
         critic_gating: str = "always",
         curator_gating: str = "always",
+        canon_importance_floor: int = 4,
+        canon_max_items: int = 8,
+        canon_max_chars: int = 900,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -145,6 +148,10 @@ class TurnOrchestrator:
             content_root=content_root,
             session_repository=session_repository,
             recent_dialogue_store=recent_dialogue_store,
+            memory_store=memory_store,
+            canon_importance_floor=canon_importance_floor,
+            canon_max_items=canon_max_items,
+            canon_max_chars=canon_max_chars,
         )
         self.routing_stage = TurnRoutingStage(
             local_model=local_model,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
@@ -140,6 +141,7 @@ class InMemoryVectorStore:
                 session_id=chunk.session_id,
                 actor_id=chunk.actor_id,
                 importance=chunk.importance,
+                created_at=chunk.created_at,
             )
             for score, chunk in matches[:limit]
         ]
@@ -352,6 +354,7 @@ def _chunk_to_payload(chunk: RagChunk) -> dict[str, Any]:
         "session_id": chunk.session_id,
         "actor_id": chunk.actor_id,
         "importance": chunk.importance,
+        "created_at": chunk.created_at.isoformat() if chunk.created_at is not None else None,
     }
 
 
@@ -371,7 +374,14 @@ def _payload_to_retrieved_chunk(payload: dict[str, Any] | None, *, score: float)
         session_id=raw_payload.get("session_id"),
         actor_id=raw_payload.get("actor_id"),
         importance=raw_payload.get("importance"),
+        created_at=_parse_payload_datetime(raw_payload.get("created_at")),
     )
+
+
+def _parse_payload_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(str(value))
 
 
 def _qdrant_point_id(collection: RagCollection, chunk_id: str) -> str:

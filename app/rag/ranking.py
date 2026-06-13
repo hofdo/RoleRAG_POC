@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from app.domain import RetrievedChunk
@@ -44,6 +45,35 @@ COLLECTION_WEIGHTS: Final[dict[RagCollection, float]] = {
 
 
 @dataclass(frozen=True)
+class RankingWeights:
+    """Tunable reranking weights. Defaults equal the canonical module constants
+    above, so an omitted/`DEFAULT_RANKING_WEIGHTS` argument reproduces the
+    pre-config behavior byte-for-byte."""
+
+    session_memory_weight: float = SESSION_MEMORY_WEIGHT
+    persona_memory_weight: float = PERSONA_MEMORY_WEIGHT
+    canon_lore_weight: float = CANON_LORE_WEIGHT
+    session_id_match_boost: float = SESSION_ID_MATCH_BOOST
+    scene_id_match_boost: float = SCENE_ID_MATCH_BOOST
+    persona_id_match_boost: float = PERSONA_ID_MATCH_BOOST
+    importance_step_boost: float = IMPORTANCE_STEP_BOOST
+    lexical_match_step_boost: float = LEXICAL_MATCH_STEP_BOOST
+    lexical_match_max_boost: float = LEXICAL_MATCH_MAX_BOOST
+    recency_weight: float = 0.0
+    candidate_oversample_factor: int = 2
+
+    def collection_weight(self, collection: RagCollection) -> float:
+        return {
+            RagCollection.SESSION_MEMORY: self.session_memory_weight,
+            RagCollection.PERSONA_MEMORY: self.persona_memory_weight,
+            RagCollection.CANON_LORE: self.canon_lore_weight,
+        }[collection]
+
+
+DEFAULT_RANKING_WEIGHTS: Final[RankingWeights] = RankingWeights()
+
+
+@dataclass(frozen=True)
 class RetrievalRankingContext:
     query: str
     session_id: str
@@ -64,9 +94,9 @@ class RankedChunk:
     applied_boosts: dict[str, float]
 
 
-def candidate_limit(top_k: int) -> int:
+def candidate_limit(top_k: int, *, oversample_factor: int = 2) -> int:
     """Oversample each collection so reranking can promote boosted candidates."""
-    return top_k * 2
+    return top_k * oversample_factor
 
 
 def rerank_chunks(
@@ -74,9 +104,17 @@ def rerank_chunks(
     context: RetrievalRankingContext,
     candidates: list[tuple[RagCollection, RetrievedChunk]],
     top_k: int,
+    weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
 ) -> tuple[list[RetrievedChunk], RetrievalDiagnostics]:
+    recency_ranks = _compute_recency_ranks(candidates)
     ranked = [
-        _rank_chunk(context=context, collection=collection, chunk=chunk)
+        _rank_chunk(
+            context=context,
+            collection=collection,
+            chunk=chunk,
+            weights=weights,
+            recency_rank=recency_ranks.get(chunk.id, 0.0),
+        )
         for collection, chunk in candidates
     ]
     deduplicated = _deduplicate_ranked_chunks(ranked)
@@ -112,30 +150,65 @@ def _to_chunk_diagnostic(
     )
 
 
+def _compute_recency_ranks(
+    candidates: list[tuple[RagCollection, RetrievedChunk]],
+) -> dict[str, float]:
+    """Map chunk id -> normalized recency rank in [0, 1] (newest -> 1.0).
+
+    Ranks by *distinct* ``created_at`` so memories written in one batch share a
+    value and cannot reorder among themselves. Returns an empty mapping when
+    fewer than two distinct timestamps exist, so a single-batch candidate set
+    (e.g. the event_key_retrieval seed) receives no differential boost. Chunks
+    without a timestamp (canon lore, legacy rows) are simply absent and get no
+    recency boost.
+    """
+    created_by_id: dict[str, datetime] = {}
+    for _collection, chunk in candidates:
+        if chunk.created_at is not None:
+            created_by_id.setdefault(chunk.id, chunk.created_at)
+    distinct = sorted(set(created_by_id.values()))
+    if len(distinct) < 2:
+        return {}
+    rank_by_timestamp = {
+        timestamp: index / (len(distinct) - 1)
+        for index, timestamp in enumerate(distinct)
+    }
+    return {
+        chunk_id: rank_by_timestamp[created]
+        for chunk_id, created in created_by_id.items()
+    }
+
+
 def _rank_chunk(
     *,
     context: RetrievalRankingContext,
     collection: RagCollection,
     chunk: RetrievedChunk,
+    weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+    recency_rank: float = 0.0,
 ) -> RankedChunk:
     applied_boosts: dict[str, float] = {}
-    collection_boost = COLLECTION_WEIGHTS[collection]
+    collection_boost = weights.collection_weight(collection)
     if collection_boost != 0.0:
         applied_boosts["collection"] = collection_boost
     if chunk.session_id is not None and chunk.session_id == context.session_id:
-        applied_boosts["session"] = SESSION_ID_MATCH_BOOST
+        applied_boosts["session"] = weights.session_id_match_boost
     if context.scene_id is not None and chunk.scene_id == context.scene_id:
-        applied_boosts["scene"] = SCENE_ID_MATCH_BOOST
+        applied_boosts["scene"] = weights.scene_id_match_boost
     if chunk.persona_id == context.persona_id or chunk.actor_id == context.persona_id:
-        applied_boosts["persona"] = PERSONA_ID_MATCH_BOOST
+        applied_boosts["persona"] = weights.persona_id_match_boost
     if chunk.importance is not None and chunk.importance > 1:
-        applied_boosts["importance"] = (chunk.importance - 1) * IMPORTANCE_STEP_BOOST
+        applied_boosts["importance"] = (chunk.importance - 1) * weights.importance_step_boost
     lexical_boost = _lexical_overlap_boost(
         query_text=context.lexical_query or context.query,
         chunk=chunk,
+        weights=weights,
     )
     if lexical_boost > 0.0:
         applied_boosts["lexical"] = lexical_boost
+    recency_boost = weights.recency_weight * recency_rank
+    if recency_boost > 0.0:
+        applied_boosts["recency"] = recency_boost
     adjusted_score = chunk.score + sum(applied_boosts.values())
     return RankedChunk(
         chunk=chunk,
@@ -146,13 +219,18 @@ def _rank_chunk(
     )
 
 
-def _lexical_overlap_boost(*, query_text: str, chunk: RetrievedChunk) -> float:
+def _lexical_overlap_boost(
+    *,
+    query_text: str,
+    chunk: RetrievedChunk,
+    weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+) -> float:
     query_terms = content_terms(query_text)
     if not query_terms:
         return 0.0
     chunk_terms = content_terms(chunk.text) | content_terms(" ".join(chunk.tags))
     matches = len(query_terms & chunk_terms)
-    return min(matches * LEXICAL_MATCH_STEP_BOOST, LEXICAL_MATCH_MAX_BOOST)
+    return min(matches * weights.lexical_match_step_boost, weights.lexical_match_max_boost)
 
 
 def content_terms(text: str) -> set[str]:

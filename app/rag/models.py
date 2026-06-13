@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,7 @@ class RagChunk(BaseModel):
     session_id: str | None = None
     actor_id: str | None = None
     importance: int | None = Field(default=None, ge=1, le=5)
+    created_at: datetime | None = None
 
 
 class RetrievalFilter(BaseModel):
