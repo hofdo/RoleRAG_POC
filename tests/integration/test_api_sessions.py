@@ -802,6 +802,66 @@ def test_get_session_memories_returns_episode_metadata(tmp_path: Path) -> None:
     assert memory["tags"] == ["promise"]
 
 
+def test_get_session_memories_returns_all_visibilities(tmp_path: Path) -> None:
+    # The memory viewer is an author/admin surface: by design it returns GM and
+    # CHARACTER_PRIVATE memories too. Actor-prompt leakage is blocked elsewhere
+    # (retrieval/prompt filtering), so this endpoint deliberately does not filter.
+    from app.api.routes import get_read_services
+    from app.domain import MemoryCandidate, Visibility
+    from app.persistence import SQLiteMemoryRepository
+
+    services = _build_services(tmp_path)
+    services.session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    memory_repository = SQLiteMemoryRepository(services.connection)
+    memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="Public commitment.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            ),
+            MemoryCandidate(
+                summary="GM-only plot note.",
+                visibility=Visibility.GM,
+                importance=3,
+                tags=["gm"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            ),
+            MemoryCandidate(
+                summary="Character-private fear.",
+                visibility=Visibility.CHARACTER_PRIVATE,
+                importance=2,
+                tags=["private"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            ),
+        ],
+    )
+    services.memory_repository = memory_repository
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.get("/sessions/session-1/memories")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    returned = {m["visibility"] for m in response.json()["memories"]}
+    assert returned == {"player", "gm", "character_private"}
+
+
 def test_get_session_memories_returns_404_for_unknown_session(tmp_path: Path) -> None:
     from app.api.routes import get_read_services
 

@@ -332,6 +332,11 @@ def get_session_memories(
             code="session_not_found",
             message=f"Unknown session id: {session_id}",
         )
+    # The memory viewer is a single-user authoring surface: it intentionally
+    # returns ALL visibilities (PLAYER/GM/CHARACTER_PRIVATE) so the author can
+    # inspect their own GM-only notes. Actor-facing leakage is prevented by
+    # retrieval/prompt visibility filtering, not here. Pinned by
+    # test_get_session_memories_returns_all_visibilities.
     episodes = (
         services.memory_repository.list_memories_for_session(session_id)
         if services.memory_repository is not None

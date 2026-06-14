@@ -350,6 +350,153 @@ async def test_critique_stage_categorizes_structured_failure_and_records_raw_tex
     ]
 
 
+class _EchoingCriticAgent:
+    def __init__(self, result: CriticResult) -> None:
+        self.result = result
+
+    async def evaluate(self, **_: object) -> CriticResult:
+        return self.result
+
+    def build_local_repair_messages(self, **_: object) -> list[Any]:
+        return []
+
+    def build_cloud_repair_messages(self, **_: object) -> list[Any]:
+        return []
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_redacts_hidden_fact_leak_from_critic_output() -> None:
+    persona = PersonaCard(
+        id="archivist",
+        name="Iria",
+        role="npc",
+        public_description="A composed archivist.",
+        speaking_style="Dry.",
+        secrets=["She forged one inventory ledger."],
+    )
+    scene = SceneState(
+        id="rose-gallery",
+        title="Rose Gallery",
+        location="Palace",
+        player_visible_summary="Courtiers drift between mirrors.",
+        gm_private_summary="The regent's spy is already in the room.",
+    )
+    leaking = CriticResult(
+        accepted=False,
+        issues=["The draft nearly admits she forged one inventory ledger."],
+        repair_instruction="Do not reveal that the regent's spy is already in the room.",
+    )
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=_EchoingCriticAgent(leaking),
+        routing_stage=_routing(),
+    )
+
+    result = await stage.run(
+        persona=persona,
+        scene=scene,
+        user_message="What are you hiding?",
+        draft="...",
+        retrieved_chunks=(),
+    )
+
+    assert result.warnings == ("critic output redacted: prevented hidden-fact leak",)
+    assert result.critique is not None
+    assert result.critique.accepted is False
+    assert "forged one inventory ledger" not in result.critique.issues[0].lower()
+    assert result.critique.repair_instruction is not None
+    assert "spy is already in the room" not in result.critique.repair_instruction.lower()
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_passes_clean_critic_output_through_unchanged() -> None:
+    persona = PersonaCard(
+        id="archivist",
+        name="Iria",
+        role="npc",
+        public_description="A composed archivist.",
+        speaking_style="Dry.",
+        secrets=["She forged one inventory ledger."],
+    )
+    clean = CriticResult(
+        accepted=False,
+        issues=["The tone is too generic."],
+        repair_instruction="Answer the question concretely.",
+    )
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=_EchoingCriticAgent(clean),
+        routing_stage=_routing(),
+    )
+
+    result = await stage.run(
+        persona=persona,
+        scene=_context().scene,
+        user_message="What are you hiding?",
+        draft="...",
+        retrieved_chunks=(),
+    )
+
+    assert result.warnings == ()
+    assert result.critique == clean
+
+
+def test_generation_stage_warns_on_silent_prompt_truncation() -> None:
+    import dataclasses
+    from datetime import UTC, datetime
+
+    from app.domain import RetrievedChunk, Visibility
+    from app.orchestration.context_budget import ContextBudget
+    from app.orchestration.stages.generation import TurnGenerationStage
+    from app.orchestration.stages.retrieval import RetrievalStageResult
+
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local",
+        max_tokens=100,
+        temperature=0.5,
+        reason="x",
+    )
+    long_turn = StoredTurn(
+        id=1,
+        session_id="session",
+        turn_index=1,
+        scene_id="scene",
+        persona_id="persona",
+        user_message="u" * 50,
+        assistant_message="a",
+        route=route,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    context = dataclasses.replace(_context(), recent_turns=(long_turn,))
+    retrieval = RetrievalStageResult(
+        chunks=(
+            RetrievedChunk(
+                id="c1",
+                source="lore",
+                source_type="canon_lore",
+                text="x" * 50,
+                score=0.9,
+                visibility=Visibility.PLAYER,
+            ),
+        ),
+        confidence=0.9,
+        warnings=(),
+    )
+    stage = TurnGenerationStage(
+        provider=UnusedProvider(),
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(retrieved_chunks=5, max_retrieved_chunk_chars=20),
+        recent_dialogue_max_message_chars=20,
+    )
+
+    warnings = stage._context_truncation_warnings(context=context, retrieval=retrieval)
+
+    assert any("recent dialogue truncated" in warning for warning in warnings)
+    assert any("retrieved context truncated" in warning for warning in warnings)
+
+
 @pytest.mark.asyncio
 async def test_critique_stage_tolerates_failure_sink_errors() -> None:
     class BrokenSink:

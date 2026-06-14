@@ -89,8 +89,38 @@ class TurnGenerationStage:
             route=route,
             finish_reason=finish_reason,
             messages=tuple(messages),
-            warnings=warnings,
+            warnings=(*self._context_truncation_warnings(context=context, retrieval=retrieval),
+                      *warnings),
         )
+
+    def _context_truncation_warnings(
+        self,
+        *,
+        context: LoadedTurnContext,
+        retrieval: RetrievalStageResult,
+    ) -> tuple[str, ...]:
+        """Surface otherwise-silent prompt clipping so long-session continuity
+        loss is visible in TurnResult.warnings."""
+        warnings: list[str] = []
+        max_message = self.recent_dialogue_max_message_chars
+        clipped_messages = sum(
+            1
+            for turn in context.recent_turns
+            for message in (turn.user_message, turn.assistant_message)
+            if len(message) > max_message
+        )
+        if clipped_messages:
+            warnings.append(
+                f"recent dialogue truncated: {clipped_messages} prior message(s) exceeded "
+                f"{max_message} chars and were clipped for the prompt"
+            )
+        max_chunk = self.context_budget.max_retrieved_chunk_chars
+        clipped_chunks = sum(1 for chunk in retrieval.chunks if len(chunk.text) > max_chunk)
+        if clipped_chunks:
+            warnings.append(
+                f"retrieved context truncated: {clipped_chunks} chunk(s) exceeded {max_chunk} chars"
+            )
+        return tuple(warnings)
 
     async def generate_messages(
         self,

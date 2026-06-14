@@ -152,6 +152,52 @@ def test_persona_secret_in_public_description_is_reported_as_warning(tmp_path: P
     assert any(issue.code == "persona_secret_in_public_description" for issue in report.warnings)
 
 
+def test_persona_secret_in_goals_is_reported_as_warning(tmp_path: Path) -> None:
+    root = _build_valid_content_root(tmp_path)
+    _write_json(
+        root / "personas" / "court-narrator.json",
+        {
+            "id": "court-narrator",
+            "name": "Court Narrator",
+            "role": "narrator",
+            "public_description": "A poised voice.",
+            "speaking_style": "Measured and observant.",
+            "secrets": ["The usher hides every sealed note."],
+            "goals": ["The usher hides every sealed note."],
+        },
+    )
+
+    report = validate_content(content_root=root)
+
+    assert any(
+        issue.code == "persona_secret_in_goals_or_values" for issue in report.warnings
+    )
+
+
+def test_persona_forbidden_knowledge_in_values_is_reported_as_warning(tmp_path: Path) -> None:
+    root = _build_valid_content_root(tmp_path)
+    _write_json(
+        root / "personas" / "court-narrator.json",
+        {
+            "id": "court-narrator",
+            "name": "Court Narrator",
+            "role": "narrator",
+            "public_description": "A poised voice.",
+            "speaking_style": "Measured and observant.",
+            "private_description": "Keeps the regent's confidence.",
+            "forbidden_knowledge": ["The regent poisoned the late duke."],
+            "values": ["The regent poisoned the late duke."],
+        },
+    )
+
+    report = validate_content(content_root=root)
+
+    assert any(
+        issue.code == "persona_forbidden_knowledge_in_goals_or_values"
+        for issue in report.warnings
+    )
+
+
 def test_gm_private_summary_duplication_is_reported_as_warning(tmp_path: Path) -> None:
     root = _build_valid_content_root(tmp_path)
     _write_json(

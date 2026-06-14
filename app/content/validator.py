@@ -365,6 +365,41 @@ def _validate_secrecy_rules(
                         suggested_fix="Remove hidden knowledge from the public description.",
                     )
                 )
+        # goals and values are injected verbatim into the actor prompt
+        # (context_builder), so a hidden fact here would reach the player.
+        goals_and_values = _normalize_text(" ".join([*persona.goals, *persona.values]))
+        for secret in persona.secrets:
+            normalized_secret = _normalize_text(secret)
+            if normalized_secret and normalized_secret in goals_and_values:
+                report.warnings.append(
+                    _issue(
+                        code="persona_secret_in_goals_or_values",
+                        file=_display_path(persona_file),
+                        message=(
+                            f"Persona '{persona.id}' goals or values contain a listed secret."
+                        ),
+                        suggested_fix=(
+                            "Goals and values feed the actor prompt; move the secret to a "
+                            "private field."
+                        ),
+                    )
+                )
+        for forbidden_knowledge in persona.forbidden_knowledge:
+            normalized_knowledge = _normalize_text(forbidden_knowledge)
+            if normalized_knowledge and normalized_knowledge in goals_and_values:
+                report.warnings.append(
+                    _issue(
+                        code="persona_forbidden_knowledge_in_goals_or_values",
+                        file=_display_path(persona_file),
+                        message=(
+                            f"Persona '{persona.id}' goals or values contain forbidden_knowledge."
+                        ),
+                        suggested_fix=(
+                            "Goals and values are player-visible context; remove hidden knowledge."
+                        ),
+                    )
+                )
+
         if persona.forbidden_knowledge and not persona.private_description and not persona.secrets:
             report.warnings.append(
                 _issue(

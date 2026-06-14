@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.agents.secret_guard import redact_hidden_facts
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider
 from app.llm.router import (
@@ -102,6 +103,19 @@ class TurnCritiqueStage:
                 draft=draft,
                 retrieved_chunks=list(retrieved_chunks),
             )
+            issues, repair_instruction, leaked = redact_hidden_facts(
+                issues=list(critique.issues),
+                repair_instruction=critique.repair_instruction,
+                hidden_facts=_hidden_facts(persona=persona, scene=scene),
+            )
+            if leaked:
+                critique = critique.model_copy(
+                    update={"issues": issues, "repair_instruction": repair_instruction}
+                )
+                return CritiqueStageResult(
+                    critique=critique,
+                    warnings=("critic output redacted: prevented hidden-fact leak",),
+                )
             return CritiqueStageResult(critique=critique, warnings=())
         except StructuredOutputError as exc:
             warnings = [f"critic skipped: {exc} ({exc.category})"]
@@ -135,6 +149,16 @@ class TurnCritiqueStage:
             or scene_complexity >= HIGH_SCENE_COMPLEXITY
             or route_provider == ModelProviderName.CLOUD
         )
+
+
+def _hidden_facts(*, persona: PersonaCard, scene: SceneState) -> list[str]:
+    """Facts the critic may inspect but must never echo into player-facing output."""
+    facts = [*persona.secrets, *persona.forbidden_knowledge]
+    if persona.private_description:
+        facts.append(persona.private_description)
+    if scene.gm_private_summary:
+        facts.append(scene.gm_private_summary)
+    return facts
 
 
 def record_structured_failure(
