@@ -441,6 +441,37 @@ async def test_critique_stage_passes_clean_critic_output_through_unchanged() -> 
     assert result.critique == clean
 
 
+def test_critique_stage_risk_gate_honors_high_scene_complexity_override() -> None:
+    from app.llm.router import ModelProviderName
+
+    clean = CriticResult(accepted=True)
+    default_stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=_EchoingCriticAgent(clean),
+        routing_stage=_routing(),
+    )
+    raised_stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=_EchoingCriticAgent(clean),
+        routing_stage=_routing(),
+        high_scene_complexity=5,
+    )
+
+    # Complexity 4 is risky at the default threshold (4) but not when raised to 5.
+    assert default_stage._is_risky_turn(
+        validator_flagged=False,
+        retrieval_confidence=0.9,
+        scene_complexity=4,
+        route_provider=ModelProviderName.LOCAL,
+    ) is True
+    assert raised_stage._is_risky_turn(
+        validator_flagged=False,
+        retrieval_confidence=0.9,
+        scene_complexity=4,
+        route_provider=ModelProviderName.LOCAL,
+    ) is False
+
+
 def test_generation_stage_warns_on_silent_prompt_truncation() -> None:
     import dataclasses
     from datetime import UTC, datetime

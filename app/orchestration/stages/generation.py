@@ -51,6 +51,7 @@ class TurnGenerationStage:
         context_budget: ContextBudget,
         recent_dialogue_max_message_chars: int,
         actor_agent: ActorAgent | None = None,
+        truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -58,6 +59,7 @@ class TurnGenerationStage:
         self.context_budget = context_budget
         self.recent_dialogue_max_message_chars = recent_dialogue_max_message_chars
         self.actor_agent = actor_agent or ActorAgent()
+        self.truncation_retry_budget_multiplier = truncation_retry_budget_multiplier
 
     async def run(
         self,
@@ -171,7 +173,7 @@ class TurnGenerationStage:
         if response.finish_reason != "length":
             return response, route, warnings
         retry_route = route.model_copy(
-            update={"max_tokens": route.max_tokens * TRUNCATION_RETRY_BUDGET_MULTIPLIER}
+            update={"max_tokens": route.max_tokens * self.truncation_retry_budget_multiplier}
         )
         warnings = (
             *warnings,

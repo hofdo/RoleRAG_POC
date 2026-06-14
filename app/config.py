@@ -81,6 +81,14 @@ class Settings(BaseSettings):
     canon_max_items: int = Field(default=8, ge=0)
     canon_max_chars: int = Field(default=900, ge=1)
 
+    # Routing / generation thresholds. Defaults mirror the canonical constants in
+    # app/llm/router.py and app/orchestration/stages/generation.py; tuning these
+    # adjusts cloud escalation, critic auto-gating, and truncation retry without
+    # editing source.
+    low_retrieval_confidence: float = Field(default=0.45, ge=0.0, le=1.0)
+    high_scene_complexity: int = Field(default=4, ge=1, le=5)
+    truncation_retry_budget_multiplier: int = Field(default=2, ge=1)
+
     structured_output_failure_log_dir: Path | None = None
 
     recent_dialogue_turns: int = Field(default=8, ge=0)

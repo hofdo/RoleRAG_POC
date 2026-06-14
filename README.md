@@ -660,9 +660,12 @@ Run the standalone deterministic regression summary:
 python -m app.evals.regression_runner
 ```
 
-CI runs those deterministic checks on push and pull request. The separate `Live Smoke` workflow is
-manual and targets self-hosted runners because GitHub-hosted runners do not provide the required
-local GGUF model or llama.cpp binary. The workflow defaults to the managed Hugging Face model and
+CI runs those deterministic checks on push and pull request. The separate `Live Smoke` workflow
+targets self-hosted runners because GitHub-hosted runners do not provide the required local GGUF
+model or llama.cpp binary. It runs on manual `workflow_dispatch` and on a weekly `schedule`; the
+scheduled run is a no-op unless the repository variable `ENABLE_SCHEDULED_LIVE_SMOKE` is set to
+`true` (set it once a self-hosted runner with the model server is online) and falls back to the
+input defaults. The workflow defaults to the managed Hugging Face model and
 supports `llama_server_path`, `llama_hf_model`, `llama_model_path`, `llama_ctx_size`, and
 `llama_n_gpu_layers` overrides. The live
 workflow validates `turn_count` from `5` through `50`, defaults to eight turns and strict warning

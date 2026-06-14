@@ -53,6 +53,8 @@ def choose_route(
     user_requested_cloud: bool = False,
     local_provider_failed: bool = False,
     local_structured_max_tokens: int | None = None,
+    low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
+    high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
 ) -> ModelRoute:
     if task == ModelTask.CRITIC:
         return ModelRoute(
@@ -84,13 +86,13 @@ def choose_route(
     elif task == ModelTask.REPAIR and failed_local_attempts > 1:
         should_use_cloud = True
         reason = "local repair failed"
-    elif task == ModelTask.ACTOR_RESPONSE and scene_complexity >= HIGH_SCENE_COMPLEXITY:
+    elif task == ModelTask.ACTOR_RESPONSE and scene_complexity >= high_scene_complexity:
         should_use_cloud = True
         reason = "high scene complexity"
     elif (
         task == ModelTask.ACTOR_RESPONSE
         and retrieval_confidence is not None
-        and retrieval_confidence < LOW_RETRIEVAL_CONFIDENCE
+        and retrieval_confidence < low_retrieval_confidence
     ):
         should_use_cloud = True
         reason = "low retrieval confidence"

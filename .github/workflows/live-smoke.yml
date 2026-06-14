@@ -55,6 +55,13 @@ on:
         description: "Set to 1 to fail on critic, memory, indexing, or retrieval warnings."
         required: true
         default: "1"
+  # Weekly self-hosted acceptance gate so live quality does not rot between manual
+  # runs. Scheduled runs are a no-op unless the repo variable
+  # ENABLE_SCHEDULED_LIVE_SMOKE is "true" (set it once a self-hosted runner with
+  # the model server is online). Manual workflow_dispatch always runs and uses its
+  # inputs; scheduled runs fall back to the defaults below.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -62,7 +69,8 @@ permissions:
 jobs:
   live-smoke:
     name: Disposable local stack
-    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_SCHEDULED_LIVE_SMOKE == 'true' }}
+    runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted"]') }}
     timeout-minutes: 90
 
     steps:
@@ -95,27 +103,27 @@ jobs:
 
       - name: Validate live smoke inputs
         env:
-          TURN_COUNT: ${{ inputs.turn_count }}
-          FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings }}
+          TURN_COUNT: ${{ inputs.turn_count || '8' }}
+          FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings || '1' }}
         run: |
           [[ "$TURN_COUNT" =~ ^[0-9]+$ ]] && (( TURN_COUNT >= 5 && TURN_COUNT <= 50 ))
           [[ "$FAIL_ON_STRUCTURED_WARNINGS" == "0" || "$FAIL_ON_STRUCTURED_WARNINGS" == "1" ]]
 
       - name: Run live smoke
         env:
-          API_PORT: ${{ inputs.api_port }}
-          QDRANT_PORT: ${{ inputs.qdrant_port }}
-          LOCAL_LLM_BASE_URL: ${{ inputs.local_base_url }}
+          API_PORT: ${{ inputs.api_port || '18080' }}
+          QDRANT_PORT: ${{ inputs.qdrant_port || '6334' }}
+          LOCAL_LLM_BASE_URL: ${{ inputs.local_base_url || 'http://127.0.0.1:8080/v1' }}
           LOCAL_LLM_API_KEY: local
-          LOCAL_LLM_MODEL: ${{ inputs.local_model }}
+          LOCAL_LLM_MODEL: ${{ inputs.local_model || 'chatgpt-onnechan' }}
           LLAMA_CPP_SERVER_PATH: ${{ inputs.llama_server_path }}
           LLAMA_CPP_MODEL_PATH: ${{ inputs.llama_model_path }}
-          LLAMA_CPP_HF_MODEL: ${{ inputs.llama_hf_model }}
+          LLAMA_CPP_HF_MODEL: ${{ inputs.llama_hf_model || 'DavidAU/gemma-4-E4B-it-The-DECKARD-Expresso-Universe-HERETIC-UNCENSORED-Thinking-GGUF:Q8_0' }}
           LLAMA_CPP_CTX_SIZE: ${{ inputs.llama_ctx_size }}
           LLAMA_CPP_N_GPU_LAYERS: ${{ inputs.llama_n_gpu_layers }}
-          LIVE_SKIP_BROWSER: ${{ inputs.skip_browser }}
-          LIVE_TURN_COUNT: ${{ inputs.turn_count }}
-          LIVE_FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings }}
+          LIVE_SKIP_BROWSER: ${{ inputs.skip_browser || '0' }}
+          LIVE_TURN_COUNT: ${{ inputs.turn_count || '8' }}
+          LIVE_FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings || '1' }}
           LIVE_ARTIFACT_DIR: /tmp/rolerag-live-test
           CLOUD_MODE: off
         run: bash scripts/live-smoke.sh

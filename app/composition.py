@@ -199,6 +199,9 @@ def build_services(
         canon_max_chars=settings.canon_max_chars,
         memory_embedding_provider=embedding_provider,
         write_dedup_cosine_threshold=settings.rag_write_dedup_cosine_threshold,
+        low_retrieval_confidence=settings.low_retrieval_confidence,
+        high_scene_complexity=settings.high_scene_complexity,
+        truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier,
     )
     return AppServices(
         connection=connection,

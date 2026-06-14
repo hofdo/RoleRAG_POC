@@ -1,9 +1,54 @@
 from app.llm.router import (
+    HIGH_SCENE_COMPLEXITY,
+    LOW_RETRIEVAL_CONFIDENCE,
     CloudMode,
     ModelProviderName,
+    ModelRoute,
     ModelTask,
     choose_route,
 )
+
+
+def _auto_actor_route(
+    *,
+    scene_complexity: int = 1,
+    retrieval_confidence: float | None = None,
+    low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
+    high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
+) -> ModelRoute:
+    return choose_route(
+        task=ModelTask.ACTOR_RESPONSE,
+        cloud_mode=CloudMode.AUTO,
+        local_model="local-model",
+        cloud_model="cloud-model",
+        local_max_tokens=700,
+        cloud_max_tokens=1000,
+        local_temperature=0.75,
+        cloud_temperature=0.65,
+        failed_local_attempts=0,
+        retrieval_confidence=retrieval_confidence,
+        scene_complexity=scene_complexity,
+        low_retrieval_confidence=low_retrieval_confidence,
+        high_scene_complexity=high_scene_complexity,
+    )
+
+
+def test_router_honors_high_scene_complexity_override() -> None:
+    # Default threshold (4) escalates at complexity 4; raising it keeps it local.
+    assert _auto_actor_route(scene_complexity=4).provider == ModelProviderName.CLOUD
+    assert (
+        _auto_actor_route(scene_complexity=4, high_scene_complexity=5).provider
+        == ModelProviderName.LOCAL
+    )
+
+
+def test_router_honors_low_retrieval_confidence_override() -> None:
+    # Default threshold (0.45) escalates at confidence 0.4; lowering it keeps it local.
+    assert _auto_actor_route(retrieval_confidence=0.4).provider == ModelProviderName.CLOUD
+    assert (
+        _auto_actor_route(retrieval_confidence=0.4, low_retrieval_confidence=0.3).provider
+        == ModelProviderName.LOCAL
+    )
 
 
 def test_router_chooses_local_by_default() -> None:

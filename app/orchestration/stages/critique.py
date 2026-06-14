@@ -62,12 +62,16 @@ class TurnCritiqueStage:
         routing_stage: TurnRoutingStage,
         failure_sink: StructuredFailureRecording | None = None,
         gating: str = "always",
+        low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
+        high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
     ) -> None:
         self.provider = provider
         self.critic_agent = critic_agent
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
         self.gating = gating
+        self.low_retrieval_confidence = low_retrieval_confidence
+        self.high_scene_complexity = high_scene_complexity
 
     async def run(
         self,
@@ -134,8 +138,8 @@ class TurnCritiqueStage:
                 warnings=(f"critic skipped: {exc}",),
             )
 
-    @staticmethod
     def _is_risky_turn(
+        self,
         *,
         validator_flagged: bool,
         retrieval_confidence: float | None,
@@ -145,8 +149,8 @@ class TurnCritiqueStage:
         return (
             validator_flagged
             or retrieval_confidence is None
-            or retrieval_confidence < LOW_RETRIEVAL_CONFIDENCE
-            or scene_complexity >= HIGH_SCENE_COMPLEXITY
+            or retrieval_confidence < self.low_retrieval_confidence
+            or scene_complexity >= self.high_scene_complexity
             or route_provider == ModelProviderName.CLOUD
         )
 

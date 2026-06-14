@@ -3,7 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.domain import SceneState, TurnInput
-from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
+from app.llm.router import (
+    HIGH_SCENE_COMPLEXITY,
+    LOW_RETRIEVAL_CONFIDENCE,
+    CloudMode,
+    ModelProviderName,
+    ModelRoute,
+    ModelTask,
+    choose_route,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,8 @@ class TurnRoutingStage:
         local_temperature: float,
         cloud_temperature: float,
         cloud_mode: CloudMode | str,
+        low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
+        high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
     ) -> None:
         self.local_model = local_model
         self.cloud_model = cloud_model
@@ -34,6 +44,8 @@ class TurnRoutingStage:
         self.local_temperature = local_temperature
         self.cloud_temperature = cloud_temperature
         self.cloud_mode = CloudMode(cloud_mode)
+        self.low_retrieval_confidence = low_retrieval_confidence
+        self.high_scene_complexity = high_scene_complexity
 
     def actor(
         self,
@@ -147,6 +159,8 @@ class TurnRoutingStage:
             scene_complexity=scene_complexity,
             user_requested_cloud=user_requested_cloud,
             local_provider_failed=local_provider_failed,
+            low_retrieval_confidence=self.low_retrieval_confidence,
+            high_scene_complexity=self.high_scene_complexity,
         )
 
     def build_local_route(self, *, reason: str) -> ModelRoute:

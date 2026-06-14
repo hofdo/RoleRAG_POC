@@ -14,7 +14,12 @@ from app.domain import (
     TurnResult,
 )
 from app.llm.provider import LlmProvider
-from app.llm.router import CloudMode, ModelRoute
+from app.llm.router import (
+    HIGH_SCENE_COMPLEXITY,
+    LOW_RETRIEVAL_CONFIDENCE,
+    CloudMode,
+    ModelRoute,
+)
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.draft_validator import DraftValidationResult, validate_draft
@@ -40,6 +45,7 @@ from app.orchestration.stages import (
     TurnRoutingStage,
     TurnSessionLoader,
 )
+from app.orchestration.stages.generation import TRUNCATION_RETRY_BUDGET_MULTIPLIER
 from app.persistence.repositories import SessionRepository, TurnRepository
 from app.rag.embeddings import EmbeddingProvider
 
@@ -119,6 +125,9 @@ class TurnOrchestrator:
         canon_max_chars: int = 900,
         memory_embedding_provider: EmbeddingProvider | None = None,
         write_dedup_cosine_threshold: float = 1.0,
+        low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
+        high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
+        truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -165,6 +174,8 @@ class TurnOrchestrator:
             local_temperature=local_temperature,
             cloud_temperature=cloud_temperature,
             cloud_mode=cloud_mode,
+            low_retrieval_confidence=low_retrieval_confidence,
+            high_scene_complexity=high_scene_complexity,
         )
         self.retrieval_stage = TurnRetrievalStage(
             actor_context_retriever=actor_context_retriever,
@@ -177,6 +188,7 @@ class TurnOrchestrator:
             context_budget=self.context_budget,
             recent_dialogue_max_message_chars=recent_dialogue_max_message_chars,
             actor_agent=self.actor_agent,
+            truncation_retry_budget_multiplier=truncation_retry_budget_multiplier,
         )
         self.critique_stage = TurnCritiqueStage(
             provider=provider,
@@ -184,6 +196,8 @@ class TurnOrchestrator:
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
             gating=critic_gating,
+            low_retrieval_confidence=low_retrieval_confidence,
+            high_scene_complexity=high_scene_complexity,
         )
         self.repair_stage = TurnRepairStage(
             generation_stage=self.generation_stage,
