@@ -31,6 +31,7 @@ class RecordingVectorStore:
         self.error = error
         self.ensure_calls: list[tuple[RagCollection, int]] = []
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
+        self.deleted_ids: list[str] = []
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         self.ensure_calls.append((collection, vector_size))
@@ -58,6 +59,9 @@ class RecordingVectorStore:
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         raise AssertionError("delete_session_points should not be used for memory indexing")
+
+    def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
+        self.deleted_ids.extend(chunk_ids)
 
     def search(
         self,
@@ -220,6 +224,57 @@ def test_reindex_session_applies_importance_floor(tmp_path: Path) -> None:
     assert result.indexed_count == 1
     _, chunks, _ = vector_store.upsert_calls[0]
     assert [chunk.text for chunk in chunks] == ["The player vowed to protect the archive."]
+
+
+def _persist_importances(store: MemoryEpisodeStore, importances: list[int]) -> list[MemoryEpisode]:
+    return store.persist_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary=f"Memory with importance {importance} #{index}",
+                visibility=Visibility.PLAYER,
+                importance=importance,
+                tags=["promise"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+            for index, importance in enumerate(importances)
+        ],
+    )
+
+
+def test_index_memories_evicts_lowest_priority_beyond_session_cap(tmp_path: Path) -> None:
+    store = _memory_store(tmp_path)
+    persisted = _persist_importances(store, [5, 4, 3, 2, 1])
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=store,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        session_memory_max_episodes=3,
+    )
+
+    indexer.index_memories(persisted)
+
+    # Top 3 importances (5, 4, 3) stay indexed; the two lowest are unindexed.
+    evicted = {memory.id for memory in persisted if memory.importance in (1, 2)}
+    assert set(vector_store.deleted_ids) == evicted
+
+
+def test_index_memories_does_not_evict_when_cap_is_zero(tmp_path: Path) -> None:
+    store = _memory_store(tmp_path)
+    persisted = _persist_importances(store, [5, 4, 3, 2, 1])
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=store,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        session_memory_max_episodes=0,
+    )
+
+    indexer.index_memories(persisted)
+
+    assert vector_store.deleted_ids == []
 
 
 def test_memory_indexer_skips_vector_calls_for_empty_list() -> None:

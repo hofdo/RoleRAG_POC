@@ -197,6 +197,7 @@ def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
     assert settings.canon_importance_floor == 4
     assert settings.canon_max_items == 8
     assert settings.canon_max_chars == 900
+    assert settings.session_memory_max_episodes == 0
 
 
 def test_build_ranking_weights_defaults_match_default_ranking_weights(tmp_path: Path) -> None:

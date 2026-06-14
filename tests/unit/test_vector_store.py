@@ -2,8 +2,44 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from app.rag.models import RagCollection
-from app.rag.vector_store import _qdrant_point_id, _search_qdrant_points
+from app.domain import Visibility
+from app.rag.models import RagChunk, RagCollection, RetrievalFilter
+from app.rag.vector_store import (
+    InMemoryVectorStore,
+    _qdrant_point_id,
+    _search_qdrant_points,
+)
+
+
+def test_in_memory_delete_points_removes_only_listed_chunks() -> None:
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 2)
+    chunks = [
+        RagChunk(
+            id=f"m{index}",
+            source="memory",
+            source_type="session_memory",
+            text=f"memory {index}",
+            visibility=Visibility.PLAYER,
+            session_id="session-1",
+        )
+        for index in range(3)
+    ]
+    store.upsert_chunks(
+        RagCollection.SESSION_MEMORY,
+        chunks,
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+    )
+
+    store.delete_points(RagCollection.SESSION_MEMORY, ["m1"])
+
+    remaining = store.search(
+        RagCollection.SESSION_MEMORY,
+        [1.0, 1.0],
+        RetrievalFilter.player_visible(session_id="session-1"),
+        limit=10,
+    )
+    assert {chunk.id for chunk in remaining} == {"m0", "m2"}
 
 
 def test_qdrant_point_id_normalizes_app_chunk_ids_to_stable_uuid() -> None:

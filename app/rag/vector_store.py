@@ -48,6 +48,8 @@ class VectorStore(Protocol):
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None: ...
 
+    def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None: ...
+
 
 class InMemoryVectorStore:
     def __init__(self) -> None:
@@ -109,6 +111,16 @@ class InMemoryVectorStore:
             (chunk, vector)
             for chunk, vector in self._entries[collection]
             if chunk.session_id != session_id
+        ]
+
+    def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
+        drop = set(chunk_ids)
+        if not drop:
+            return
+        self._entries[collection] = [
+            (chunk, vector)
+            for chunk, vector in self._entries[collection]
+            if chunk.id not in drop
         ]
 
     def search(
@@ -245,6 +257,19 @@ class QdrantVectorStore:
                         )
                     ]
                 )
+            ),
+        )
+
+    def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
+        if not chunk_ids:
+            return
+        models = _require_qdrant_models()
+        if not self.client.collection_exists(collection_name=collection.value):
+            return
+        self.client.delete(
+            collection_name=collection.value,
+            points_selector=models.PointIdsList(
+                points=[_qdrant_point_id(collection, chunk_id) for chunk_id in chunk_ids]
             ),
         )
 

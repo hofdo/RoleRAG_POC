@@ -53,6 +53,9 @@ class RecordingVectorStore:
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         raise AssertionError("delete_session_points should not be called during ingestion")
 
+    def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
+        raise AssertionError("delete_points should not be called during ingestion")
+
     def search(
         self,
         collection: RagCollection,

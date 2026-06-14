@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # semantic pass (lexical dedup still runs); lower it (e.g. 0.92) to drop
     # paraphrased near-duplicates the term-overlap check misses.
     rag_write_dedup_cosine_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Cap on the number of session memories kept in the retrievable vector index
+    # (lowest importance-then-recency evicted from the index; SQLite keeps all).
+    # 0 = unbounded (no behavior change).
+    session_memory_max_episodes: int = Field(default=0, ge=0)
 
     # Pinned session-canon block ("Standing facts") injected into the actor prompt.
     canon_importance_floor: int = Field(default=4, ge=1, le=5)
