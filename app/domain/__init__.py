@@ -1,4 +1,5 @@
 from app.domain.models import (
+    CanonFact,
     CriticResult,
     CriticStatus,
     MemoryCandidate,
@@ -18,6 +19,7 @@ from app.domain.models import (
 from app.domain.visibility import Visibility
 
 __all__ = [
+    "CanonFact",
     "CriticResult",
     "CriticStatus",
     "MemoryCandidate",

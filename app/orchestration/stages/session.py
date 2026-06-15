@@ -9,7 +9,7 @@ from app.memory import RecentDialogueStore
 from app.memory.store import MemoryEpisodeStore
 from app.orchestration.canon_builder import build_standing_facts
 from app.persistence import DemoWorldRecord, SessionNotFoundError
-from app.persistence.repositories import SessionRepository
+from app.persistence.repositories import CanonRepository, SessionRepository
 
 
 class TurnDataLoader(Protocol):
@@ -43,6 +43,7 @@ class TurnSessionLoader:
         session_repository: SessionRepository,
         recent_dialogue_store: RecentDialogueStore,
         memory_store: MemoryEpisodeStore | None = None,
+        canon_repository: CanonRepository | None = None,
         canon_importance_floor: int = 4,
         canon_max_items: int = 8,
         canon_max_chars: int = 900,
@@ -53,6 +54,7 @@ class TurnSessionLoader:
         self.session_repository = session_repository
         self.recent_dialogue_store = recent_dialogue_store
         self.memory_store = memory_store
+        self.canon_repository = canon_repository
         self.canon_importance_floor = canon_importance_floor
         self.canon_max_items = canon_max_items
         self.canon_max_chars = canon_max_chars
@@ -111,10 +113,21 @@ class TurnSessionLoader:
                 f"Unknown scene for world {session.world_id}: {session.active_scene_id}"
             )
 
+        pinned_canon = (
+            [fact.text for fact in self.canon_repository.list_canon_facts(session.id)]
+            if self.canon_repository is not None
+            else []
+        )
+        memories = (
+            self.memory_store.list_memories_for_session(session.id)
+            if self.memory_store is not None
+            else []
+        )
         standing_facts: tuple[str, ...] = ()
-        if self.memory_store is not None:
+        if pinned_canon or memories:
             standing_facts = build_standing_facts(
-                self.memory_store.list_memories_for_session(session.id),
+                memories,
+                pinned=pinned_canon,
                 importance_floor=self.canon_importance_floor,
                 max_items=self.canon_max_items,
                 max_chars=self.canon_max_chars,

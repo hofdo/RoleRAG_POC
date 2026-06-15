@@ -6,7 +6,14 @@ from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
 
-from app.domain import MemoryCandidate, MemoryEpisode, SessionState, StoredTurn, Visibility
+from app.domain import (
+    CanonFact,
+    MemoryCandidate,
+    MemoryEpisode,
+    SessionState,
+    StoredTurn,
+    Visibility,
+)
 from app.llm.router import ModelProviderName, ModelRoute
 from app.persistence.sqlite import parse_datetime, serialize_datetime, utc_now
 
@@ -59,6 +66,14 @@ class MemoryRepository(Protocol):
     ) -> list[MemoryEpisode]: ...
 
     def add_tag_to_memories(self, memory_ids: list[str], tag: str) -> None: ...
+
+
+class CanonRepository(Protocol):
+    def add_canon_fact(self, *, session_id: str, text: str) -> CanonFact: ...
+
+    def list_canon_facts(self, session_id: str) -> list[CanonFact]: ...
+
+    def delete_canon_fact(self, *, session_id: str, fact_id: str) -> bool: ...
 
 
 class SQLiteSessionRepository:
@@ -447,3 +462,51 @@ class SQLiteMemoryRepository:
                 (json.dumps(tags), row["id"]),
             )
         self.connection.commit()
+
+
+class SQLiteCanonRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def add_canon_fact(self, *, session_id: str, text: str) -> CanonFact:
+        created_at = utc_now()
+        fact = CanonFact(
+            id=str(uuid4()),
+            session_id=session_id,
+            text=text,
+            created_at=created_at,
+        )
+        self.connection.execute(
+            "INSERT INTO canon_facts (id, session_id, text, created_at) VALUES (?, ?, ?, ?)",
+            (fact.id, fact.session_id, fact.text, serialize_datetime(created_at)),
+        )
+        self.connection.commit()
+        return fact
+
+    def list_canon_facts(self, session_id: str) -> list[CanonFact]:
+        rows = self.connection.execute(
+            """
+            SELECT id, session_id, text, created_at
+            FROM canon_facts
+            WHERE session_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [
+            CanonFact(
+                id=row["id"],
+                session_id=row["session_id"],
+                text=row["text"],
+                created_at=parse_datetime(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    def delete_canon_fact(self, *, session_id: str, fact_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM canon_facts WHERE id = ? AND session_id = ?",
+            (fact_id, session_id),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0

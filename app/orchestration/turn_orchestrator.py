@@ -46,7 +46,7 @@ from app.orchestration.stages import (
     TurnSessionLoader,
 )
 from app.orchestration.stages.generation import TRUNCATION_RETRY_BUDGET_MULTIPLIER
-from app.persistence.repositories import SessionRepository, TurnRepository
+from app.persistence.repositories import CanonRepository, SessionRepository, TurnRepository
 from app.rag.embeddings import EmbeddingProvider
 
 
@@ -130,6 +130,7 @@ class TurnOrchestrator:
         truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
         memory_consolidation_threshold: int = 0,
         memory_consolidation_max_importance: int = 3,
+        canon_repository: CanonRepository | None = None,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -163,6 +164,7 @@ class TurnOrchestrator:
             session_repository=session_repository,
             recent_dialogue_store=recent_dialogue_store,
             memory_store=memory_store,
+            canon_repository=canon_repository,
             canon_importance_floor=canon_importance_floor,
             canon_max_items=canon_max_items,
             canon_max_chars=canon_max_chars,

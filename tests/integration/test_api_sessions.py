@@ -873,3 +873,37 @@ def test_get_session_memories_returns_404_for_unknown_session(tmp_path: Path) ->
 
     app.dependency_overrides.clear()
     assert response.status_code == 404
+
+
+def test_session_canon_add_list_and_delete(tmp_path: Path) -> None:
+    from app.api.routes import get_read_services
+    from app.persistence import SQLiteCanonRepository
+
+    services = _build_services(tmp_path)
+    services.session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    services.canon_repository = SQLiteCanonRepository(services.connection)
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    added = client.post("/sessions/session-1/canon", json={"text": "The east gate stays shut."})
+    listed = client.get("/sessions/session-1/canon")
+    fact_id = added.json()["id"]
+    deleted = client.delete(f"/sessions/session-1/canon/{fact_id}")
+    after = client.get("/sessions/session-1/canon")
+    missing_session = client.post("/sessions/missing/canon", json={"text": "x"})
+
+    app.dependency_overrides.clear()
+    assert added.status_code == 201
+    assert listed.status_code == 200
+    assert [fact["text"] for fact in listed.json()["facts"]] == ["The east gate stays shut."]
+    assert deleted.status_code == 204
+    assert after.json()["facts"] == []
+    assert missing_session.status_code == 404

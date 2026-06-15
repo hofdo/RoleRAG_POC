@@ -63,6 +63,16 @@ def initialize_database(connection: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS memory_episodes_session_idx
         ON memory_episodes(session_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS canon_facts (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS canon_facts_session_idx
+        ON canon_facts(session_id, created_at);
         """
     )
     _ensure_column(

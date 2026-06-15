@@ -547,6 +547,14 @@ Implemented endpoints:
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/memories`
+- `GET /sessions/{session_id}/canon`
+- `POST /sessions/{session_id}/canon`
+- `DELETE /sessions/{session_id}/canon/{fact_id}`
+
+The `canon` endpoints are an author surface for pinning durable "Standing facts"
+into the actor prompt by hand, alongside the auto-derived canon. Pinned facts
+lead the Standing-facts block.
 
 Create a session:
 

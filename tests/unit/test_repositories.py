@@ -285,6 +285,37 @@ def test_add_tag_to_memories_marks_episodes_idempotently(tmp_path: Path) -> None
     assert loaded[0].tags == ["mood", "consolidated"]
 
 
+def test_canon_repository_adds_lists_and_deletes_facts(tmp_path: Path) -> None:
+    from app.persistence import SQLiteCanonRepository
+
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    canon_repository = SQLiteCanonRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    fact = canon_repository.add_canon_fact(session_id="session-1", text="The east gate stays shut.")
+    canon_repository.add_canon_fact(session_id="session-1", text="Trust only the blue seal.")
+
+    assert [item.text for item in canon_repository.list_canon_facts("session-1")] == [
+        "The east gate stays shut.",
+        "Trust only the blue seal.",
+    ]
+    assert canon_repository.delete_canon_fact(session_id="session-1", fact_id=fact.id) is True
+    assert [item.text for item in canon_repository.list_canon_facts("session-1")] == [
+        "Trust only the blue seal.",
+    ]
+    assert canon_repository.delete_canon_fact(session_id="session-1", fact_id="missing") is False
+
+
 def _seed_session_with_data(tmp_path: Path) -> tuple[
     SQLiteSessionRepository, SQLiteTurnRepository, SQLiteMemoryRepository
 ]:

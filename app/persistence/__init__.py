@@ -8,6 +8,7 @@ from app.persistence.file_loader import (
 )
 from app.persistence.repositories import (
     SessionNotFoundError,
+    SQLiteCanonRepository,
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
@@ -21,6 +22,7 @@ __all__ = [
     "DataValidationError",
     "DemoWorldRecord",
     "FileDataLoader",
+    "SQLiteCanonRepository",
     "SQLiteMemoryRepository",
     "SessionNotFoundError",
     "SQLiteSessionRepository",

@@ -62,6 +62,13 @@ class MemoryEpisode(BaseModel):
     created_at: datetime | None = None
 
 
+class CanonFact(BaseModel):
+    id: str
+    session_id: str
+    text: str
+    created_at: datetime | None = None
+
+
 class MemoryCandidate(BaseModel):
     summary: str
     visibility: Visibility

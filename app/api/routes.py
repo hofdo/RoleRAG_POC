@@ -3,12 +3,15 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import StreamingResponse
 
 from app import __version__
 from app.api.errors import ApiError
 from app.api.schemas import (
+    AddCanonFactRequest,
+    CanonFactResponse,
+    CanonFactsResponse,
     CatalogPersonaResponse,
     CatalogSceneResponse,
     CatalogWorldResponse,
@@ -357,6 +360,83 @@ def get_session_memories(
             for episode in episodes
         ],
     )
+
+
+@router.get(
+    "/sessions/{session_id}/canon",
+    response_model=CanonFactsResponse,
+    responses=ERROR_404_RESPONSE,
+)
+def get_session_canon(
+    session_id: str,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> CanonFactsResponse:
+    _require_session(services, session_id)
+    facts = (
+        services.canon_repository.list_canon_facts(session_id)
+        if services.canon_repository is not None
+        else []
+    )
+    return CanonFactsResponse(
+        session_id=session_id,
+        facts=[CanonFactResponse(id=fact.id, text=fact.text) for fact in facts],
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/canon",
+    response_model=CanonFactResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=ERROR_404_RESPONSE,
+)
+def add_session_canon(
+    session_id: str,
+    request: AddCanonFactRequest,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> CanonFactResponse:
+    _require_session(services, session_id)
+    if services.canon_repository is None:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="canon_unavailable",
+            message="Canon repository is unavailable.",
+        )
+    fact = services.canon_repository.add_canon_fact(session_id=session_id, text=request.text)
+    return CanonFactResponse(id=fact.id, text=fact.text)
+
+
+@router.delete(
+    "/sessions/{session_id}/canon/{fact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=ERROR_404_RESPONSE,
+)
+def delete_session_canon(
+    session_id: str,
+    fact_id: str,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> Response:
+    _require_session(services, session_id)
+    deleted = (
+        services.canon_repository.delete_canon_fact(session_id=session_id, fact_id=fact_id)
+        if services.canon_repository is not None
+        else False
+    )
+    if not deleted:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="canon_fact_not_found",
+            message=f"Unknown canon fact id: {fact_id}",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _require_session(services: AppServices, session_id: str) -> None:
+    if services.session_repository.get_session(session_id) is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="session_not_found",
+            message=f"Unknown session id: {session_id}",
+        )
 
 
 def _to_recent_session_response(session: SessionState) -> RecentSessionResponse:

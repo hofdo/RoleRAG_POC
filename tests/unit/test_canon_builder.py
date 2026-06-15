@@ -43,6 +43,26 @@ def test_filters_to_player_visible_canon_tags_above_floor() -> None:
     assert facts == ("The player promised to return before dawn.",)
 
 
+def test_pinned_facts_lead_and_dedupe_against_derived() -> None:
+    memories = [
+        _memory("m", summary="The player promised to return before dawn.", tags=["promise"]),
+    ]
+
+    facts = build_standing_facts(
+        memories,
+        pinned=[
+            "Author rule: the east gate stays shut.",
+            "The player promised to return before dawn.",  # duplicate of the derived fact
+        ],
+        importance_floor=1,
+        max_items=8,
+        max_chars=900,
+    )
+
+    assert facts[0] == "Author rule: the east gate stays shut."
+    assert facts.count("The player promised to return before dawn.") == 1
+
+
 def test_orders_by_importance_then_recency() -> None:
     memories = [
         _memory(

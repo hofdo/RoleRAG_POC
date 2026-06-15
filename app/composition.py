@@ -13,13 +13,14 @@ from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     FileDataLoader,
+    SQLiteCanonRepository,
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
     connect_sqlite,
     initialize_database,
 )
-from app.persistence.repositories import MemoryRepository, SessionRepository
+from app.persistence.repositories import CanonRepository, MemoryRepository, SessionRepository
 from app.rag import (
     ActorContextRetriever,
     EmbeddingProvider,
@@ -38,6 +39,7 @@ class AppServices:
     orchestrator: TurnOrchestrator
     recent_dialogue_store: RecentDialogueStore
     memory_repository: MemoryRepository | None = None
+    canon_repository: CanonRepository | None = None
 
     def close(self) -> None:
         self.connection.close()
@@ -142,6 +144,7 @@ def build_services(
     session_repository = SQLiteSessionRepository(connection)
     turn_repository = SQLiteTurnRepository(connection)
     memory_repository = SQLiteMemoryRepository(connection)
+    canon_repository = SQLiteCanonRepository(connection)
     memory_store = MemoryEpisodeStore(memory_repository=memory_repository)
     recent_dialogue_store = RecentDialogueStore(
         turn_repository=turn_repository,
@@ -205,6 +208,7 @@ def build_services(
         truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier,
         memory_consolidation_threshold=settings.memory_consolidation_threshold,
         memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
+        canon_repository=canon_repository,
     )
     return AppServices(
         connection=connection,
@@ -212,4 +216,5 @@ def build_services(
         orchestrator=orchestrator,
         recent_dialogue_store=recent_dialogue_store,
         memory_repository=memory_repository,
+        canon_repository=canon_repository,
     )

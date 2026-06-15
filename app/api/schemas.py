@@ -198,6 +198,20 @@ class SessionMemoriesResponse(BaseModel):
     memories: list[MemoryEpisodeResponse]
 
 
+class AddCanonFactRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+class CanonFactResponse(BaseModel):
+    id: str
+    text: str
+
+
+class CanonFactsResponse(BaseModel):
+    session_id: str
+    facts: list[CanonFactResponse]
+
+
 class GetSessionResponse(BaseModel):
     session_id: str
     world_id: str
