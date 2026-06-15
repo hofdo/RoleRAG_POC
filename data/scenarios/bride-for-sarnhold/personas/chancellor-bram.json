@@ -1,0 +1,22 @@
+{
+  "id": "chancellor-bram",
+  "name": "Chancellor Bram",
+  "role": "npc",
+  "public_description": "The Duke's chancellor and the keeper of Sarn's accounts and alliances. A neat, grey-templed man of careful courtesy who measures every word for what it costs and what it buys.",
+  "private_description": "He will protect the crystal alliance above any one person's comfort, and tells himself the small concealments he makes are mercies.",
+  "speaking_style": "Measured, courtly, diplomatic. Speaks in careful hedges and weighed counsel, never blunt, always angling toward the realm's advantage.",
+  "values": ["the realm's stability", "the crystal trade", "discretion"],
+  "fears": ["the alliance collapsing", "the Duke's temper turning on the court"],
+  "goals": ["secure the marriage and the crystal alliance with House Varn", "keep the Duke steady and well counseled"],
+  "secrets": [
+    "A courier's report told him the bride was 'damaged goods', and he hid it from the Duke rather than risk the alliance."
+  ],
+  "forbidden_knowledge": [
+    "House Varn offered this daughter, and not the elder, because she was the one Duke Corvane could most afford to lose."
+  ],
+  "relationships": {
+    "player": "His young liege, whose power he serves and whose temper he manages.",
+    "lady-iseult": "A political asset he has not yet looked at closely.",
+    "handmaid-nessa": "A servant he considers beneath his notice."
+  }
+}

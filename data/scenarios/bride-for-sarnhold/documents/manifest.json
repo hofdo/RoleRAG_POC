@@ -1,0 +1,25 @@
+{
+  "documents": [
+    {
+      "path": "sarn_lore.md",
+      "visibility": "player",
+      "source_type": "lore",
+      "tags": ["sarn", "crystals", "duke", "house-varn"],
+      "world_id": "sarnhold"
+    },
+    {
+      "path": "court_history.md",
+      "visibility": "player",
+      "source_type": "history",
+      "tags": ["sarn", "alliance", "history", "house-varn"],
+      "world_id": "sarnhold"
+    },
+    {
+      "path": "gm_truth.md",
+      "visibility": "gm",
+      "source_type": "lore",
+      "tags": ["secret", "varn", "iseult", "abuse"],
+      "world_id": "sarnhold"
+    }
+  ]
+}

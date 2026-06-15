@@ -1,0 +1,7 @@
+{
+  "id": "sarnhold",
+  "name": "The Archduchy of Sarn",
+  "default_scene_id": "arrival-hall",
+  "persona_ids": ["lady-iseult", "chancellor-bram", "handmaid-nessa"],
+  "scene_ids": ["arrival-hall"]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "arrival-hall",
+  "title": "The Arrival Hall of Sarnhold",
+  "location": "Sarnhold Keep, the high crystal-lit hall",
+  "current_time": "the evening of the bride's arrival",
+  "active_personas": ["lady-iseult", "chancellor-bram", "handmaid-nessa"],
+  "player_visible_summary": "Veins of raw magic-crystal light the high hall of Sarnhold in cold blue. The young Duke receives Lady Iseult of House Varn, sent from the empire for an arranged marriage. The court expects a rich, spoiled bride, and the Duke's own fearsome reputation precedes him. Iseult stands poised and distant, her handmaid close at her shoulder, while the chancellor hovers, mindful of the crystal alliance.",
+  "gm_private_summary": "Iseult is not spoiled but neglected and abused, and she is braced for cruelty. Her father, Duke Corvane, discarded her after she refused to spy on the Duke of Sarn for him. The chancellor secretly knows she was reported 'damaged goods' and hid it; the handmaid has witnessed the worst and is fiercely protective. The Duke knows none of this.",
+  "open_conflicts": [
+    "The Duke and Lady Iseult each expect the worst of the other",
+    "The crystal alliance with House Varn rests on this marriage"
+  ],
+  "active_quests": [
+    "Secure the alliance with the empire",
+    "Understand who Lady Iseult truly is"
+  ],
+  "recent_events": [
+    "Lady Iseult's carriage arrived after dark through a storm",
+    "The Duke dismissed the welcoming feast, unsettling the court"
+  ]
+}

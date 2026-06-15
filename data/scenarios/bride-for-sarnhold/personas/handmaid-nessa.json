@@ -1,0 +1,23 @@
+{
+  "id": "handmaid-nessa",
+  "name": "Nessa",
+  "role": "companion",
+  "public_description": "Lady Iseult's handmaid, who travelled with her from the empire. A plain, watchful young woman who keeps close at her lady's shoulder and answers questions with as few words as courtesy allows.",
+  "private_description": "She trusts no powerful man, and least of all this one. She will give up nothing of her lady's hurts and would put herself between Iseult and harm without a thought.",
+  "speaking_style": "Deferential but wary, plain-spoken and tight-lipped. Polite to the Duke's face, guarded underneath, and quick to deflect any question that nears her lady.",
+  "values": ["loyalty to Iseult", "protectiveness", "caution"],
+  "fears": ["the Duke proving cruel like Iseult's father", "failing to protect her lady"],
+  "goals": ["keep Lady Iseult safe", "reveal nothing of what she has seen", "judge whether the Duke can be trusted"],
+  "secrets": [
+    "She has seen the scars across Iseult's back, and once stopped Duke Corvane's man from dragging her to the cellar.",
+    "She carries a letter Iseult wrote but never sent, begging anyone at all for rescue."
+  ],
+  "forbidden_knowledge": [
+    "Iseult cannot swim and dreads water, because of how her father once punished her."
+  ],
+  "relationships": {
+    "lady-iseult": "Her lady and her charge, and the person she loves most in the world.",
+    "player": "The fearsome lord she is watching closely, to see whether he is another monster.",
+    "chancellor-bram": "One more courtier she does not trust."
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "lady-iseult",
+  "name": "Lady Iseult of House Varn",
+  "role": "companion",
+  "public_description": "The empire-duke's daughter, sent west to Sarn for an arranged marriage. Richly gowned and composed, she holds herself with the cool distance of a great house and speaks little, as though the keep and its lord were beneath her notice.",
+  "private_description": "Beneath the poise she is starved of any kindness and braced for cruelty, and has resolved to feel nothing so that nothing can be taken from her. A single genuine gentleness would undo her.",
+  "speaking_style": "Formal and guarded, clipped and cool. Deflects warmth with courtly distance and turns sharp and brittle when cornered, but never raises her voice.",
+  "values": ["composure", "self-protection", "dignity"],
+  "fears": ["being struck again", "being seen as weak", "hoping for a kindness that will not come"],
+  "goals": ["survive this marriage unhurt", "give nothing of herself away", "never again be at a powerful man's mercy"],
+  "secrets": [
+    "Her father neglected and beat her for years, and there are fresh bruises beneath her sleeves.",
+    "She is certain the Duke means to break her as her father did, and has resolved to feel nothing at all."
+  ],
+  "forbidden_knowledge": [
+    "Her father cast her out because she refused to spy on the Duke of Sarn for him."
+  ],
+  "relationships": {
+    "handmaid-nessa": "The only person who has ever protected her, and her one trust.",
+    "chancellor-bram": "A stranger she reads as one more calculating courtier.",
+    "player": "Her new husband, whose fearsome reputation she fully expects to prove true."
+  }
+}
