@@ -128,6 +128,8 @@ class TurnOrchestrator:
         low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
         high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
         truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
+        memory_consolidation_threshold: int = 0,
+        memory_consolidation_max_importance: int = 3,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -218,6 +220,8 @@ class TurnOrchestrator:
             gating=curator_gating,
             embedding_provider=memory_embedding_provider,
             write_dedup_cosine_threshold=write_dedup_cosine_threshold,
+            consolidation_threshold=memory_consolidation_threshold,
+            consolidation_importance_ceiling=memory_consolidation_max_importance,
         )
 
     @property

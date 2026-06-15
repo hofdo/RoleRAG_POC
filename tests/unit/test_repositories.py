@@ -247,6 +247,44 @@ def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) ->
     assert loaded[0].created_at == episodes[0].created_at
 
 
+def test_add_tag_to_memories_marks_episodes_idempotently(tmp_path: Path) -> None:
+    from app.domain import MemoryCandidate, Visibility
+    from app.persistence import SQLiteMemoryRepository
+
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    episodes = memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="A minor observation.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+
+    memory_repository.add_tag_to_memories([episodes[0].id], "consolidated")
+    memory_repository.add_tag_to_memories([episodes[0].id], "consolidated")  # idempotent
+
+    loaded = memory_repository.list_memories_for_session("session-1")
+    assert loaded[0].tags == ["mood", "consolidated"]
+
+
 def _seed_session_with_data(tmp_path: Path) -> tuple[
     SQLiteSessionRepository, SQLiteTurnRepository, SQLiteMemoryRepository
 ]:

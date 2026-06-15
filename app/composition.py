@@ -203,6 +203,8 @@ def build_services(
         low_retrieval_confidence=settings.low_retrieval_confidence,
         high_scene_complexity=settings.high_scene_complexity,
         truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier,
+        memory_consolidation_threshold=settings.memory_consolidation_threshold,
+        memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
     )
     return AppServices(
         connection=connection,

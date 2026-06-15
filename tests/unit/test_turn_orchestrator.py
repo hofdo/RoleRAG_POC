@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,9 @@ class StubMemoryCurator:
             raise self.error
         return self.result
 
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
 
 class StubCritic:
     def __init__(self, result: CriticResult | None = None) -> None:
@@ -105,6 +109,9 @@ class StubMemoryIndexer:
         self.calls.append(memories)
         if self.error is not None:
             raise self.error
+
+    def unindex(self, memory_ids: Sequence[str]) -> None:
+        raise AssertionError("unindex not expected in this test")
 
 
 class FakeLoader:

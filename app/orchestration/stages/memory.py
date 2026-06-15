@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -10,11 +11,17 @@ from app.domain import (
     PersonaCard,
     SceneState,
     SessionState,
+    Visibility,
 )
 from app.llm.provider import LlmProvider
 from app.llm.router import ModelRoute
 from app.llm.structured_output import StructuredOutputError
 from app.memory import MemoryEpisodeStore
+from app.memory.consolidation import (
+    SUMMARY_TAG,
+    deterministic_consolidated_summary,
+    select_consolidatable,
+)
 from app.memory.deterministic_extractor import (
     contains_durable_event_terms,
     extract_explicit_durable_events,
@@ -40,9 +47,19 @@ class MemoryCuratingAgent(Protocol):
         assistant_message: str,
     ) -> MemoryCuratorResult: ...
 
+    async def consolidate(
+        self,
+        *,
+        provider: LlmProvider,
+        route: ModelRoute,
+        summaries: list[str],
+    ) -> str: ...
+
 
 class MemoryIndexing(Protocol):
     def index_memories(self, memories: list[MemoryEpisode]) -> object: ...
+
+    def unindex(self, memory_ids: Sequence[str]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -64,6 +81,8 @@ class TurnMemoryStage:
         gating: str = "always",
         embedding_provider: EmbeddingProvider | None = None,
         write_dedup_cosine_threshold: float = 1.0,
+        consolidation_threshold: int = 0,
+        consolidation_importance_ceiling: int = 3,
     ) -> None:
         self.provider = provider
         self.memory_store = memory_store
@@ -74,8 +93,42 @@ class TurnMemoryStage:
         self.gating = gating
         self.embedding_provider = embedding_provider
         self.write_dedup_cosine_threshold = write_dedup_cosine_threshold
+        self.consolidation_threshold = consolidation_threshold
+        self.consolidation_importance_ceiling = consolidation_importance_ceiling
 
     async def run(
+        self,
+        *,
+        session: SessionState,
+        scene: SceneState,
+        persona: PersonaCard,
+        user_message: str,
+        assistant_message: str,
+        retrieval_confidence: float | None,
+        scene_complexity: int,
+    ) -> MemoryStageResult:
+        result = await self._run_extraction(
+            session=session,
+            scene=scene,
+            persona=persona,
+            user_message=user_message,
+            assistant_message=assistant_message,
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+        )
+        consolidation = await self._consolidate_if_needed(
+            session_id=session.id,
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+        )
+        if not consolidation:
+            return result
+        return MemoryStageResult(
+            memory_written=result.memory_written,
+            warnings=(*result.warnings, *consolidation),
+        )
+
+    async def _run_extraction(
         self,
         *,
         session: SessionState,
@@ -294,3 +347,79 @@ class TurnMemoryStage:
         if dropped:
             warnings.append(f"semantic memory dedup dropped {dropped} near-duplicate candidate(s)")
         return kept
+
+    async def _consolidate_if_needed(
+        self,
+        *,
+        session_id: str,
+        retrieval_confidence: float | None,
+        scene_complexity: int,
+    ) -> tuple[str, ...]:
+        """Roll up old low-value episodic memories into one dense summary once the
+        consolidatable backlog reaches the threshold. Inert when threshold is 0."""
+        if (
+            self.consolidation_threshold <= 0
+            or self.memory_store is None
+            or self.memory_indexer is None
+            or self.memory_curator is None
+        ):
+            return ()
+        try:
+            candidates = select_consolidatable(
+                self.memory_store.list_memories_for_session(session_id),
+                importance_ceiling=self.consolidation_importance_ceiling,
+            )
+        except Exception as exc:
+            return (f"memory consolidation skipped: {exc}",)
+        if len(candidates) < self.consolidation_threshold:
+            return ()
+
+        warnings: list[str] = []
+        route = self.routing_stage.memory(
+            retrieval_confidence=retrieval_confidence,
+            scene_complexity=scene_complexity,
+        )
+        try:
+            summary_text = await self.memory_curator.consolidate(
+                provider=self.provider,
+                route=route,
+                summaries=[memory.summary for memory in candidates],
+            )
+        except Exception as exc:
+            summary_text = deterministic_consolidated_summary(candidates)
+            warnings.append(f"memory consolidation fell back to deterministic roll-up: {exc}")
+        try:
+            self._persist_consolidation(
+                session_id=session_id,
+                candidates=candidates,
+                summary_text=summary_text,
+            )
+        except Exception as exc:
+            warnings.append(f"memory consolidation skipped: {exc}")
+            return tuple(warnings)
+        warnings.append(
+            f"memory consolidation: rolled up {len(candidates)} memories into 1 summary"
+        )
+        return tuple(warnings)
+
+    def _persist_consolidation(
+        self,
+        *,
+        session_id: str,
+        candidates: list[MemoryEpisode],
+        summary_text: str,
+    ) -> None:
+        assert self.memory_store is not None and self.memory_indexer is not None
+        summary = MemoryCandidate(
+            summary=summary_text,
+            visibility=Visibility.PLAYER,
+            importance=min(5, self.consolidation_importance_ceiling + 1),
+            tags=[SUMMARY_TAG],
+            scene_id=candidates[0].scene_id,
+            actor_id=candidates[0].actor_id,
+        )
+        persisted = self.memory_store.persist_memories(session_id=session_id, memories=[summary])
+        self.memory_indexer.index_memories(persisted)
+        original_ids = [memory.id for memory in candidates]
+        self.memory_store.mark_memories_consolidated(original_ids)
+        self.memory_indexer.unindex(original_ids)

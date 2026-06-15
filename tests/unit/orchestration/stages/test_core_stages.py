@@ -311,6 +311,9 @@ class FailingCurator:
     ) -> MemoryCuratorResult:
         raise self.error
 
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
 
 @pytest.mark.asyncio
 async def test_critique_stage_categorizes_structured_failure_and_records_raw_text() -> None:
@@ -735,6 +738,7 @@ def test_retrieval_stage_passes_player_message_as_lexical_query() -> None:
 class RecordingMemoryStore:
     def __init__(self) -> None:
         self.persisted: list[Any] = []
+        self.consolidated_ids: list[str] = []
 
     def persist_memories(self, *, session_id: str, memories: list[Any]) -> list[Any]:
         from app.domain import MemoryEpisode
@@ -758,8 +762,158 @@ class RecordingMemoryStore:
     def list_memories_for_session(self, session_id: str) -> list[Any]:
         return [episode for episode in self.persisted if episode.session_id == session_id]
 
+    def mark_memories_consolidated(self, memory_ids: list[str]) -> None:
+        self.consolidated_ids.extend(memory_ids)
+
+
+class _RecordingIndexer:
+    def __init__(self) -> None:
+        self.indexed: list[list[Any]] = []
+        self.unindexed: list[str] = []
+
+    def index_memories(self, memories: list[Any]) -> object:
+        self.indexed.append(list(memories))
+        return None
+
+    def unindex(self, memory_ids: Sequence[str]) -> None:
+        self.unindexed.extend(memory_ids)
+
+
+class _ConsolidatingCurator:
+    def __init__(self, *, summary: str = "Consolidated summary.", fail: bool = False) -> None:
+        self.summary = summary
+        self.fail = fail
+
+    async def curate(self, **_: object) -> Any:
+        from app.domain import MemoryCuratorResult
+
+        return MemoryCuratorResult(write_memory=False, memories=[], reason="nothing new")
+
+    async def consolidate(self, **_: object) -> str:
+        if self.fail:
+            raise RuntimeError("consolidation provider failed")
+        return self.summary
+
+
+def _seed_filler(store: RecordingMemoryStore, session_id: str, count: int) -> None:
+    from app.domain import MemoryCandidate, Visibility
+
+    store.persist_memories(
+        session_id=session_id,
+        memories=[
+            MemoryCandidate(
+                summary=f"Filler observation {index}",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+            )
+            for index in range(count)
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidates_when_threshold_reached() -> None:
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 3)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:3]]
+    # A summary memory was persisted and indexed; originals marked + unindexed.
+    assert len(store.persisted) == 4
+    assert "consolidation_summary" in store.persisted[-1].tags
+    assert store.persisted[-1].summary == "Consolidated summary."
+    assert set(store.consolidated_ids) == set(original_ids)
+    assert set(indexer.unindexed) == set(original_ids)
+    assert any("rolled up 3 memories" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_falls_back_to_deterministic_on_llm_failure() -> None:
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 3)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(fail=True),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert len(store.persisted) == 4
+    assert "Filler observation 0" in store.persisted[-1].summary
+    assert any("deterministic roll-up" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_does_not_consolidate_below_threshold() -> None:
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 2)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert len(store.persisted) == 2
+    assert store.consolidated_ids == []
+    assert not any("consolidation" in warning for warning in result.warnings)
+
 
 class DecliningCurator:
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
     async def curate(self, **_: object) -> Any:
         from app.domain import MemoryCuratorResult
 
@@ -767,6 +921,9 @@ class DecliningCurator:
 
 
 class CoveringCurator:
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
     async def curate(self, **_: object) -> Any:
         from app.domain import MemoryCandidate, MemoryCuratorResult, Visibility
 
@@ -847,6 +1004,9 @@ async def test_memory_stage_adds_explicit_event_when_curator_declines_to_write()
 
 
 class ParaphraseCurator:
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
     async def curate(self, **_: object) -> Any:
         from app.domain import MemoryCandidate, MemoryCuratorResult, Visibility
 
@@ -1126,6 +1286,9 @@ async def test_critique_stage_always_mode_runs_critic_without_signals() -> None:
 class CountingCurator:
     def __init__(self) -> None:
         self.calls = 0
+
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
 
     async def curate(self, **_: object) -> Any:
         from app.domain import MemoryCuratorResult

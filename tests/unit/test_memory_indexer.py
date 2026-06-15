@@ -277,6 +277,34 @@ def test_index_memories_does_not_evict_when_cap_is_zero(tmp_path: Path) -> None:
     assert vector_store.deleted_ids == []
 
 
+def test_index_memories_skips_consolidated_memories() -> None:
+    from app.memory.consolidation import CONSOLIDATED_TAG
+
+    vector_store = RecordingVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+    )
+
+    result = indexer.index_memories(
+        [
+            MemoryEpisode(
+                id="m1",
+                session_id="session-1",
+                scene_id="rose-gallery",
+                summary="A consolidated original.",
+                importance=4,
+                visibility=Visibility.PLAYER,
+                tags=[CONSOLIDATED_TAG],
+            )
+        ]
+    )
+
+    assert result.indexed_count == 0
+    assert vector_store.upsert_calls == []
+
+
 def test_memory_indexer_skips_vector_calls_for_empty_list() -> None:
     embedding_provider = FakeEmbeddingProvider()
     vector_store = RecordingVectorStore()

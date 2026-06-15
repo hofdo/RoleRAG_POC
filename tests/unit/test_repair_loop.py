@@ -94,6 +94,9 @@ class RecordingMemoryCurator:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
+    async def consolidate(self, **_: Any) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
     async def curate(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         return type(

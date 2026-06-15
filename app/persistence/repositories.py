@@ -58,6 +58,8 @@ class MemoryRepository(Protocol):
         limit: int | None = None,
     ) -> list[MemoryEpisode]: ...
 
+    def add_tag_to_memories(self, memory_ids: list[str], tag: str) -> None: ...
+
 
 class SQLiteSessionRepository:
     def __init__(self, connection: sqlite3.Connection) -> None:
@@ -426,3 +428,22 @@ class SQLiteMemoryRepository:
             )
             for row in reversed(rows)
         ]
+
+    def add_tag_to_memories(self, memory_ids: list[str], tag: str) -> None:
+        if not memory_ids:
+            return
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = self.connection.execute(
+            f"SELECT id, tags_json FROM memory_episodes WHERE id IN ({placeholders})",
+            tuple(memory_ids),
+        ).fetchall()
+        for row in rows:
+            tags = json.loads(row["tags_json"])
+            if tag in tags:
+                continue
+            tags.append(tag)
+            self.connection.execute(
+                "UPDATE memory_episodes SET tags_json = ? WHERE id = ?",
+                (json.dumps(tags), row["id"]),
+            )
+        self.connection.commit()

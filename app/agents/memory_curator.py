@@ -10,10 +10,15 @@ from app.llm.structured_output import (
     StructuredOutputParseError,
     parse_single_json_object,
 )
+from app.memory.consolidation import CONSOLIDATION_PROMPT
 from app.memory.policies import MEMORY_EXTRACTION_PROMPT
 
 
 class MemoryCuratorOutputError(StructuredOutputError):
+    pass
+
+
+class MemoryConsolidationError(RuntimeError):
     pass
 
 
@@ -63,6 +68,34 @@ class MemoryCurator:
             raise MemoryCuratorOutputError(
                 "invalid structured output", category="schema", raw_text=response.text
             ) from exc
+
+    async def consolidate(
+        self,
+        *,
+        provider: LlmProvider,
+        route: ModelRoute,
+        summaries: list[str],
+    ) -> str:
+        """Compress past memory summaries into one. Plain-text completion (no JSON)
+        for reliability; the caller falls back to a deterministic roll-up on error."""
+        request = LlmRequest(
+            messages=[
+                LlmMessage(role="system", content=CONSOLIDATION_PROMPT),
+                LlmMessage(
+                    role="user",
+                    content="\n".join(f"- {summary}" for summary in summaries),
+                ),
+            ],
+            model=route.model,
+            max_tokens=route.max_tokens,
+            temperature=route.temperature,
+            metadata={"task": "memory_consolidation"},
+        )
+        response = await provider.generate(request)
+        text = response.text.strip()
+        if not text:
+            raise MemoryConsolidationError("consolidation produced empty text")
+        return text
 
     def _build_context(
         self,

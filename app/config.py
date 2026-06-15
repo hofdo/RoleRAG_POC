@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # (lowest importance-then-recency evicted from the index; SQLite keeps all).
     # 0 = unbounded (no behavior change).
     session_memory_max_episodes: int = Field(default=0, ge=0)
+    # Memory consolidation ("sleep cycle"): once this many old, low-importance,
+    # non-durable memories accumulate, roll them into one summary (LLM with a
+    # deterministic fallback). 0 = disabled. Only memories at or below
+    # memory_consolidation_max_importance are eligible.
+    memory_consolidation_threshold: int = Field(default=0, ge=0)
+    memory_consolidation_max_importance: int = Field(default=3, ge=1, le=5)
 
     # Pinned session-canon block ("Standing facts") injected into the actor prompt.
     canon_importance_floor: int = Field(default=4, ge=1, le=5)

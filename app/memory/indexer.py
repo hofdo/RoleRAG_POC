@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 
 from app.domain import MemoryEpisode
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.memory.store import MemoryEpisodeStore
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.models import RagChunk, RagCollection
@@ -32,7 +33,12 @@ class MemoryIndexer:
         self.session_memory_max_episodes = session_memory_max_episodes
 
     def index_memories(self, memories: Sequence[MemoryEpisode]) -> MemoryIndexingResult:
-        eligible = [memory for memory in memories if memory.importance >= self.importance_floor]
+        eligible = [
+            memory
+            for memory in memories
+            if memory.importance >= self.importance_floor
+            and CONSOLIDATED_TAG not in memory.tags
+        ]
         if not eligible:
             return MemoryIndexingResult(indexed_count=0)
 
@@ -51,6 +57,9 @@ class MemoryIndexer:
         if self.memory_store is None:
             raise RuntimeError("memory store is required for session reindexing")
         return self.index_memories(self.memory_store.list_memories_for_session(session_id))
+
+    def unindex(self, memory_ids: Sequence[str]) -> None:
+        self.vector_store.delete_points(RagCollection.SESSION_MEMORY, list(memory_ids))
 
     def _enforce_session_cap(self, session_id: str) -> None:
         """Bound the retrievable session-memory index to the most valuable N

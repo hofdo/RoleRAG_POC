@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.domain import MemoryCandidate, MemoryEpisode, StoredTurn
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.persistence.repositories import MemoryRepository, TurnRepository
 
 
@@ -30,3 +31,6 @@ class MemoryEpisodeStore:
 
     def list_memories_for_session(self, session_id: str) -> list[MemoryEpisode]:
         return self.memory_repository.list_memories_for_session(session_id)
+
+    def mark_memories_consolidated(self, memory_ids: list[str]) -> None:
+        self.memory_repository.add_tag_to_memories(memory_ids, CONSOLIDATED_TAG)
