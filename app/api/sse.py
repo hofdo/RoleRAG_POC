@@ -16,7 +16,7 @@ from app.api.schemas import (
 from app.domain import TurnOutcome, TurnResult
 
 
-def build_turn_stream_frames(result: TurnResult) -> list[str]:
+def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -> list[str]:
     route = RouteResponse(
         provider=result.route.provider.value,
         model=result.route.model,
@@ -50,7 +50,7 @@ def build_turn_stream_frames(result: TurnResult) -> list[str]:
             )
         ]
     return [
-        _serialize_frame("text", StreamTextPayload(text=result.text)),
+        *_text_frames(result.text, text_chunk_chars),
         _serialize_frame(
             "final",
             StreamFinalPayload(
@@ -63,6 +63,18 @@ def build_turn_stream_frames(result: TurnResult) -> list[str]:
                 stage_timings=result.stage_timings,
             ),
         ),
+    ]
+
+
+def _text_frames(text: str, chunk_chars: int) -> list[str]:
+    """Emit the validated text as one frame, or as ordered fragments the client
+    concatenates. Fragments are slices of the already-validated text, so the
+    critic-before-emission boundary is preserved."""
+    if chunk_chars <= 0 or len(text) <= chunk_chars:
+        return [_serialize_frame("text", StreamTextPayload(text=text))]
+    return [
+        _serialize_frame("text", StreamTextPayload(text=text[index : index + chunk_chars]))
+        for index in range(0, len(text), chunk_chars)
     ]
 
 

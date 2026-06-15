@@ -240,10 +240,11 @@ async def stream_turn(
     session_id: str,
     request: CreateTurnRequest,
     services: Annotated[AppServices, Depends(get_turn_services)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
     result = await _run_turn(session_id, request, services)
     return StreamingResponse(
-        iter(build_turn_stream_frames(result)),
+        iter(build_turn_stream_frames(result, text_chunk_chars=settings.sse_text_chunk_chars)),
         media_type="text/event-stream",
     )
 

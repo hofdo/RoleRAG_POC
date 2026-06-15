@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # memory_consolidation_max_importance are eligible.
     memory_consolidation_threshold: int = Field(default=0, ge=0)
     memory_consolidation_max_importance: int = Field(default=3, ge=1, le=5)
+    # SSE: split the validated response into fragments of this many characters for
+    # progressive client rendering. 0 = single frame (no behavior change). Never
+    # exposes pre-validation tokens — fragments come from the already-validated text.
+    sse_text_chunk_chars: int = Field(default=0, ge=0)
 
     # Pinned session-canon block ("Standing facts") injected into the actor prompt.
     canon_importance_floor: int = Field(default=4, ge=1, le=5)

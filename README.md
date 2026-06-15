@@ -581,7 +581,9 @@ curl -N -X POST http://127.0.0.1:8000/sessions/<session-id>/turns/stream \
 ```
 
 The SSE route emits validated text only after the existing orchestration pipeline completes. It
-does not stream provider tokens or expose drafts before critic validation.
+does not stream provider tokens or expose drafts before critic validation. Setting
+`SSE_TEXT_CHUNK_CHARS` above `0` splits that already-validated text into ordered `text` fragments
+the client concatenates, for progressive rendering; it never exposes pre-validation tokens.
 
 ### Local Play UI
 
