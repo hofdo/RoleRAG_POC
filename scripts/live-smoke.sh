@@ -434,6 +434,7 @@ run_step api-flow "Run live HTTP API flow" \
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -464,7 +465,9 @@ def warning_counts(warnings: list[Any]) -> dict[str, int]:
     return counts
 
 
-with httpx.Client(base_url=base_url, timeout=180.0) as client:
+# ponytail: warmup must tolerate slow dense models too; match the checkpoint's budget.
+_api_flow_timeout = float(os.environ.get("LIVE_HTTP_TIMEOUT_SECONDS", "420"))
+with httpx.Client(base_url=base_url, timeout=_api_flow_timeout) as client:
     status = client.get("/runtime/status")
     status.raise_for_status()
     runtime_status: dict[str, Any] = status.json()
