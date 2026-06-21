@@ -51,6 +51,12 @@ class OpenAICompatibleProvider(LlmProvider):
                     messages=messages,
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
+                    # Neutralize server-side repetition penalties for grammar-constrained
+                    # JSON: aggressive presets (e.g. --presence-penalty 1.5) penalize the
+                    # repeated braces/keys/quotes that valid JSON requires, pushing the
+                    # model off-grammar. No-op when the server already runs penalty 0.
+                    presence_penalty=0,
+                    frequency_penalty=0,
                     response_format={
                         "type": "json_schema",
                         "json_schema": {
@@ -65,6 +71,8 @@ class OpenAICompatibleProvider(LlmProvider):
                     messages=messages,
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
+                    presence_penalty=0,
+                    frequency_penalty=0,
                     response_format={"type": "json_object"},
                 )
             else:

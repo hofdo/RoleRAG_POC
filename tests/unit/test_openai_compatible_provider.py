@@ -97,6 +97,40 @@ async def test_provider_sends_json_schema_response_format_when_schema_present() 
         "type": "json_schema",
         "json_schema": {"name": "critic", "schema": schema},
     }
+    # Repetition penalties are neutralized so aggressive server presets can't corrupt JSON.
+    assert captured["presence_penalty"] == 0
+    assert captured["frequency_penalty"] == 0
+
+
+@pytest.mark.asyncio
+async def test_provider_leaves_penalties_to_server_for_unstructured_actor_calls() -> None:
+    provider = OpenAICompatibleProvider(
+        provider_name="local",
+        base_url="http://127.0.0.1:8080/v1",
+        api_key="local",
+    )
+    captured: dict[str, object] = {}
+
+    async def capture(**kwargs: object) -> object:
+        captured.update(kwargs)
+
+        class Choice:
+            message = type("Message", (), {"content": "A reply."})()
+            finish_reason = "stop"
+
+        class Response:
+            choices = [Choice()]
+            usage = None
+
+        return Response()
+
+    provider.client.chat.completions.create = capture  # type: ignore[method-assign, assignment]
+
+    await provider.generate(_request())
+
+    # Actor turns keep the server's intended sampling - no penalty override sent.
+    assert "presence_penalty" not in captured
+    assert "frequency_penalty" not in captured
 
 
 @pytest.mark.asyncio
