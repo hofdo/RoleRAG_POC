@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     local_llm_api_key: str = "local"
     local_llm_model: str = "chatgpt-onnechan"
     local_llm_max_tokens: int = 500
-    local_structured_max_tokens: int = Field(default=350, ge=1)
+    # Critic/memory JSON budget. Verbose models (e.g. Qwen3.6) overflow a tight cap
+    # and truncate mid-string, failing the parse; 640 fits their critic output. Bake-off
+    # 2026-06: qwen35b had 6 critic-truncation failures at 350, 0 at 640.
+    local_structured_max_tokens: int = Field(default=640, ge=1)
     local_llm_temperature: float = 0.75
     local_llm_timeout_seconds: float = Field(default=180.0, gt=0)
     # One retry absorbs transient request stalls that otherwise kill a whole

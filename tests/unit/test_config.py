@@ -15,7 +15,7 @@ def test_settings_use_llamacpp_friendly_local_defaults(tmp_path: Path) -> None:
     assert settings.local_llm_api_key == "local"
     assert settings.local_llm_model == "chatgpt-onnechan"
     assert settings.local_llm_max_tokens == 500
-    assert settings.local_structured_max_tokens == 350
+    assert settings.local_structured_max_tokens == 640
     assert settings.cloud_mode == CloudMode.ASK
     assert settings.qdrant_url == "http://localhost:6333"
     assert settings.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
