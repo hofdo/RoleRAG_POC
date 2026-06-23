@@ -18,6 +18,10 @@ python -m app.cli config
 python -m app.cli health
 ```
 
+Two faster entry points are documented in the root [README](../README.md): `docker compose up
+--build` runs the app + Qdrant in containers (model server stays on the host), and `make`
+(or `make help`) lists task shortcuts (`make up`, `make dev`, `make install`, `make check`).
+
 ### Local model
 
 Configure an OpenAI-compatible local endpoint in `.env`.
@@ -50,16 +54,14 @@ Without Qdrant or embeddings, turn execution continues without retrieved context
 
 ## CLI Operations
 
-Commands exposed by [app/cli.py](../app/cli.py):
+Commands exposed by [app/cli.py](../app/cli.py) — run `python -m app.cli --help` for the full,
+authoritative list. Grouped:
 
-- `python -m app.cli config`
-- `python -m app.cli health`
-- `python -m app.cli start-session`
-- `python -m app.cli resume`
-- `python -m app.cli route`
-- `python -m app.cli ingest`
-- `python -m app.cli reindex-memories`
-- `python -m app.cli turn`
+- diagnostics: `config`, `health`, `doctor`, `smoke-run`, `validate-content`
+- sessions: `start-session`, `resume`, `turn`, `list-sessions`, `inspect-memories`,
+  `export-session`, `import-session`, `delete-session`, `reset-db`
+- retrieval / content: `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`,
+  `create-scenario-template`, `route`
 
 Recommended local flow:
 
@@ -99,14 +101,12 @@ Start the API:
 uvicorn app.main:app --reload
 ```
 
-Implemented endpoints:
-
-- `GET /play`
-- `GET /sessions`
-- `POST /sessions`
-- `POST /sessions/{session_id}/turns`
-- `POST /sessions/{session_id}/turns/stream`
-- `GET /sessions/{session_id}`
+The full HTTP surface — endpoints, request/response shapes, and error codes — is documented in
+[docs/12_api_contract.md](12_api_contract.md). In brief: `GET /play`, `GET /runtime/status`,
+`GET /content/catalog`, session CRUD (`POST`/`GET /sessions`, `GET /sessions/{id}`), turns
+(`POST /sessions/{id}/turns` and `/turns/stream`), durable memories
+(`GET /sessions/{id}/memories`), and session canon
+(`GET`/`POST`/`DELETE /sessions/{id}/canon`).
 
 The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
 The public HTTP contract and exposure boundaries are documented in
@@ -124,22 +124,16 @@ persistence, memory, and authoritative session state stay in the backend.
 
 ## Config Notes
 
-The active settings fields are defined in [app/config.py](../app/config.py). They currently include:
+All settings are defined in [app/config.py](../app/config.py) and mirrored — with defaults and
+per-field commentary — in [`.env.example`](../.env.example). Those two are the single source of
+truth; copy `.env.example` to `.env` and edit there. Beyond the base provider/Qdrant settings, the
+surface covers provider timeouts and retries, critic/curator gating, the full RAG ranking weights
+and boosts, durable-memory caps and consolidation, session canon, routing thresholds, and the
+output-side containment threshold.
 
-- `APP_ENV`
-- `DATABASE_PATH`
-- local LLM base URL, key, model, max tokens, and temperature
-- `CLOUD_MODE`
-- cloud LLM base URL, key, model, max tokens, and temperature
-- `QDRANT_URL`
-- `EMBEDDING_MODEL`
-- `RAG_DEFAULT_TOP_K`
-- `RAG_CHUNK_SIZE_CHARS`
-- `RAG_CHUNK_OVERLAP_CHARS`
-- `RAG_MAX_RETRIEVED_CHUNK_CHARS`
-- `RECENT_DIALOGUE_TURNS`
-
-Current implementation note: the repair loop is fixed and bounded in code; there is no configurable retry-count setting.
+The repair escalation is fixed in code (local, then cloud), but provider retries and the
+structured-truncation retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`,
+`CLOUD_LLM_MAX_RETRIES`, `TRUNCATION_RETRY_BUDGET_MULTIPLIER`).
 
 ## Runtime Safety Rules
 
@@ -195,6 +189,7 @@ Safe extension means staying inside the current ownership boundaries:
 
 ## Related Documents
 
+- [docs/README.md](README.md) — documentation hub with architecture diagrams
 - [docs/04_agent_workflows.md](04_agent_workflows.md)
 - [docs/05_rag_memory_design.md](05_rag_memory_design.md)
 - [docs/06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md)

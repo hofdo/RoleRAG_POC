@@ -82,11 +82,20 @@ The retrieval query is built from:
 
 Private persona fields and GM scene summaries are excluded from the retrieval query.
 
+Retrieval runs as a dual-query pass: the context blob above anchors scene/lore relevance, and a
+second pass with the bare player message keeps indirect callbacks ("what rule did we agree?")
+retrievable when the framed blob would otherwise bury them. The union is deduplicated by chunk id
+before reranking ([app/rag/retriever.py](../app/rag/retriever.py)).
+
 Current ranking behavior:
 
 - retrieve a bounded candidate pool from each collection
 - preserve the original vector score on every returned chunk
-- apply deterministic post-retrieval boosts for collection, matching session metadata, matching scene metadata, matching persona metadata, and memory importance
+- apply deterministic post-retrieval boosts for collection, matching session/scene/persona
+  metadata, memory importance, lexical overlap with the player message, and (optionally) recency
+- every weight and boost is tunable via `RAG_*` settings (e.g. `RAG_SESSION_MEMORY_WEIGHT`,
+  `RAG_LEXICAL_MATCH_STEP_BOOST`, `RAG_RECENCY_WEIGHT`); defaults mirror the constants in
+  [app/rag/ranking.py](../app/rag/ranking.py), and recency is off (`0.0`) by default
 - keep ranking policy in application code rather than inside Qdrant
 - expose metadata-only diagnostics for selected chunks through the CLI
 
@@ -142,6 +151,9 @@ Implemented through:
 Current behavior:
 
 - the curator returns structured memory candidates
+- a deterministic extractor independently captures explicit player promises and agreements as a
+  fallback when the LLM curator fails or misses them
+  ([app/memory/deterministic_extractor.py](../app/memory/deterministic_extractor.py))
 - only the application decides whether to persist them
 - persisted memory episodes are stored in SQLite with visibility, importance, and tags
 
@@ -155,6 +167,19 @@ Current indexing behavior:
 SQLite is authoritative for durable memory episodes. The vector store is derived and replaceable:
 reindexing a session reads the persisted SQLite episodes and repairs retrieval state after an index
 loss or outage.
+
+Write-time dedup and consolidation:
+
+- before persistence, a candidate is dropped if an existing session memory already covers it
+  lexically; an optional semantic pass (cosine, `RAG_WRITE_DEDUP_COSINE_THRESHOLD`, off at `1.0`)
+  additionally drops paraphrased near-duplicates
+- consolidation ("sleep cycle") can roll up old low-importance memories into a single summary once
+  a backlog threshold is reached (`MEMORY_CONSOLIDATION_THRESHOLD`, off at `0`;
+  `MEMORY_CONSOLIDATION_MAX_IMPORTANCE` bounds eligibility), implemented in
+  [app/memory/consolidation.py](../app/memory/consolidation.py) and
+  [app/orchestration/stages/memory.py](../app/orchestration/stages/memory.py)
+- both ship OFF by default: live acceptance found caps/auto-gating regressed 50-turn recall, so the
+  always-on defaults are intentional
 
 ## Failure Handling
 
@@ -209,8 +234,10 @@ LLM behavior, semantic embedding quality, Qdrant quality, or generated prose qua
 
 Deferred but not implemented:
 
-- timestamp-aware recency decay for indexed memories
-- ingestion of additional source formats
+- ingestion of additional source formats beyond `.md`/`.txt`
 - broader production retrieval observability beyond CLI inspection
 
-Those items are tracked in [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).
+Recency-aware ranking and memory consolidation are implemented but ship OFF by default
+(`RAG_RECENCY_WEIGHT=0.0`, `MEMORY_CONSOLIDATION_THRESHOLD=0`); see the ranking and durable-memory
+sections above. Remaining items are tracked in
+[docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).

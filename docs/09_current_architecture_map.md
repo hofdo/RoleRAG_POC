@@ -4,6 +4,8 @@
 
 `RoleRAG_POC` is a backend-owned roleplaying engine with thin entry points, a minimal local play UI, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.
 
+See [docs/README.md](README.md) for the component, turn-pipeline, and routing diagrams; this map is the module-level companion to those.
+
 ## Dependency Map
 
 ```mermaid
@@ -61,7 +63,7 @@ graph TD
 | `app/agents/` | actor generation, critic evaluation, and memory extraction |
 | `app/llm/` | provider abstraction, OpenAI-compatible adapter, deterministic routing |
 | `app/persistence/` | JSON loading plus SQLite schema and repositories |
-| `app/memory/` | recent-dialogue and durable-memory adapters |
+| `app/memory/` | recent-dialogue window, durable-memory store, vector indexing, semantic write-dedup, and consolidation |
 | `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
 | `app/diagnostics/` | runtime environment checks and deterministic end-to-end smoke verification |
 | `app/content/` | standalone scenario-pack validation and template generation |
@@ -78,9 +80,9 @@ graph TD
 
 ### FastAPI API
 
-- exposes `GET /play`, `GET /sessions`, `POST /sessions`,
-  `POST /sessions/{session_id}/turns`, `POST /sessions/{session_id}/turns/stream`,
-  and `GET /sessions/{session_id}`
+- exposes the play UI, runtime status, content catalog, session CRUD, turns (JSON + buffered
+  SSE), durable memories, and session canon — see
+  [docs/12_api_contract.md](12_api_contract.md) for the full surface
 - does not duplicate orchestration logic
 - buffers SSE frames until the shared turn pipeline completes
 
