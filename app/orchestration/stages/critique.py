@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.agents.secret_guard import redact_hidden_facts
+from app.agents.secret_guard import collect_hidden_facts, redact_hidden_facts
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider
 from app.llm.router import (
@@ -110,7 +110,7 @@ class TurnCritiqueStage:
             issues, repair_instruction, leaked = redact_hidden_facts(
                 issues=list(critique.issues),
                 repair_instruction=critique.repair_instruction,
-                hidden_facts=_hidden_facts(persona=persona, scene=scene),
+                hidden_facts=collect_hidden_facts(persona, scene),
             )
             if leaked:
                 critique = critique.model_copy(
@@ -153,16 +153,6 @@ class TurnCritiqueStage:
             or scene_complexity >= self.high_scene_complexity
             or route_provider == ModelProviderName.CLOUD
         )
-
-
-def _hidden_facts(*, persona: PersonaCard, scene: SceneState) -> list[str]:
-    """Facts the critic may inspect but must never echo into player-facing output."""
-    facts = [*persona.secrets, *persona.forbidden_knowledge]
-    if persona.private_description:
-        facts.append(persona.private_description)
-    if scene.gm_private_summary:
-        facts.append(scene.gm_private_summary)
-    return facts
 
 
 def record_structured_failure(

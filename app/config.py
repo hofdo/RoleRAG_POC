@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     low_retrieval_confidence: float = Field(default=0.45, ge=0.0, le=1.0)
     high_scene_complexity: int = Field(default=4, ge=1, le=5)
     truncation_retry_budget_multiplier: int = Field(default=2, ge=1)
+    # Output-side containment backstop: fraction of a hidden fact's content words that
+    # must appear in the actor reply before it is flagged as a possible paraphrase.
+    # Lower = more sensitive (more false positives). 0.6 caught the bake-off leaks.
+    containment_overlap_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
     structured_output_failure_log_dir: Path | None = None
 

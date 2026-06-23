@@ -5,6 +5,11 @@ from contextlib import contextmanager
 from time import perf_counter
 
 from app.agents import ActorAgent
+from app.agents.secret_guard import (
+    DEFAULT_PARAPHRASE_OVERLAP,
+    collect_hidden_facts,
+    scan_reply,
+)
 from app.domain import (
     CriticResult,
     CriticStatus,
@@ -128,6 +133,7 @@ class TurnOrchestrator:
         low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
         high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
         truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
+        containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP,
         memory_consolidation_threshold: int = 0,
         memory_consolidation_max_importance: int = 3,
         canon_repository: CanonRepository | None = None,
@@ -156,6 +162,7 @@ class TurnOrchestrator:
         self.local_temperature = local_temperature
         self.cloud_temperature = cloud_temperature
         self.recent_dialogue_max_message_chars = recent_dialogue_max_message_chars
+        self.containment_overlap_threshold = containment_overlap_threshold
 
         self.session_stage = TurnSessionLoader(
             loader=loader,
@@ -418,6 +425,23 @@ class TurnOrchestrator:
                 final_route = repair.route
                 final_finish_reason = repair.finish_reason
                 critic_status = CriticStatus.REPAIRED
+
+        # Deterministic output-side containment backstop behind the LLM critic: redact
+        # verbatim hidden-fact echoes and flag likely paraphrases before the reply is
+        # persisted, fed to memory extraction, or returned to the player.
+        containment = scan_reply(
+            final_text,
+            collect_hidden_facts(context.persona, context.scene),
+            paraphrase_overlap_threshold=self.containment_overlap_threshold,
+        )
+        final_text = containment.text
+        if containment.verbatim_redacted:
+            warnings.append("containment: redacted verbatim hidden-fact echo from reply")
+        if containment.paraphrased_facts:
+            warnings.append(
+                "containment risk: reply may paraphrase a hidden fact "
+                f"({len(containment.paraphrased_facts)} flagged)"
+            )
 
         with _stage_timer(timings, "persistence"):
             self.persistence_stage.run(
