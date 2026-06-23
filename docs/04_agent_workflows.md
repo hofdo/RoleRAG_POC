@@ -28,12 +28,14 @@ There is no implemented `IntentClassifier`, `PersonaAssembler`, or standalone `R
 7. Choose actor route
 8. Build actor messages
 9. Generate actor draft
-10. Critique draft locally
-11. If needed, run one local repair
-12. If still needed and policy allows, run one cloud repair
-13. Persist final turn
-14. Curate durable memory locally
-15. Persist memory episodes when approved
+10. Validate the draft (deterministic checks)
+11. Critique draft locally
+12. If needed, run one local repair
+13. If still needed and policy allows, run one cloud repair
+14. Apply output-side secret containment
+15. Persist final turn
+16. Curate durable memory locally (with a deterministic fallback extractor)
+17. Persist, index, dedup, and optionally consolidate memory episodes
 ```
 
 This flow is finite. No component recursively calls the orchestrator.

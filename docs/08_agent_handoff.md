@@ -32,7 +32,9 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 - Do not put orchestration logic in API routes.
 - Do not bypass visibility filtering for player-facing actor prompts.
 - Do not make tests depend on real providers or live Qdrant.
-- Do not assume `CLOUD_MODE=ask` provides an interactive approval loop. It does not.
+- `CLOUD_MODE=ask` is two-phase: a cloud-eligible turn returns `confirmation_required` and the
+  client resubmits with `cloud_confirmed`/`force_local` (the CLI prompts interactively). It never
+  calls cloud silently.
 
 ## Where To Change Things
 
@@ -76,7 +78,9 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
   the turn remains valid and `reindex-memories` can repair the derived Qdrant index.
 - Retrieval ranking is intentionally deterministic and transparent. Keep boost policy in `app/rag`,
   preserve the original vector score, and avoid player-facing hidden-text diagnostics.
-- Retry bounds are fixed in code; the former `MAX_LOCAL_RETRIES` setting was removed as unused.
+- The repair escalation is fixed in code (local, then cloud); provider retries and the
+  structured-truncation budget are configurable (`LOCAL_LLM_MAX_RETRIES`, `CLOUD_LLM_MAX_RETRIES`,
+  `TRUNCATION_RETRY_BUDGET_MULTIPLIER`).
 
 ## Verification Before Claiming Success
 

@@ -74,8 +74,10 @@ The project does not target hosted end users, teams, or production tenants.
 
 ## What the MVP Includes
 
-- Typer CLI for session creation, resume, route inspection, lore ingestion, and turns
-- FastAPI API for session creation, turn execution, and session lookup
+- Typer CLI for sessions, turns, routing, lore ingestion, diagnostics, content validation, and
+  session management (list/resume/export/import/delete/inspect)
+- FastAPI API for the content catalog, session CRUD, turns (JSON + buffered SSE), durable
+  memories, and session canon
 - framework-free local play UI over the same-origin API
 - deterministic local/cloud router
 - actor generation, critic validation, and local memory curation
@@ -117,6 +119,7 @@ The MVP is successful when a future contributor can:
 - no auth or account system
 - no provider token streaming
 - no production-grade observability or deployment story
-- no advanced ranking or reranking for curated SQLite memories
+- no learned reranking model; retrieval ranking is deterministic rule-based boosts (collection,
+  session/scene/persona metadata, importance, lexical overlap, optional recency)
 
 Those gaps are acceptable for this MVP because the repository is proving architecture and safety boundaries, not product polish.
