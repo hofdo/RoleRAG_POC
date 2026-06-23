@@ -177,37 +177,11 @@ The app does not contain provider-specific gameplay logic. It relies on the conf
 
 ## Environment and Routing
 
-The settings model lives in [app/config.py](app/config.py). `.env.example` mirrors the actual fields used by `Settings`.
-
-Key values:
-
-```env
-APP_ENV=local
-DATABASE_PATH=data/rolerag.db
-
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
-LOCAL_LLM_API_KEY=local
-LOCAL_LLM_MODEL=chatgpt-onnechan
-LOCAL_LLM_MAX_TOKENS=500
-LOCAL_STRUCTURED_MAX_TOKENS=350
-LOCAL_LLM_TEMPERATURE=0.75
-
-CLOUD_MODE=ask
-CLOUD_LLM_BASE_URL=https://api.openai.com/v1
-CLOUD_LLM_API_KEY=replace_me
-CLOUD_LLM_MODEL=gpt-4.1-mini
-CLOUD_LLM_MAX_TOKENS=1000
-CLOUD_LLM_TEMPERATURE=0.65
-
-QDRANT_URL=http://localhost:6333
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-RAG_DEFAULT_TOP_K=5
-RAG_CHUNK_SIZE_CHARS=1000
-RAG_CHUNK_OVERLAP_CHARS=120
-RAG_MAX_RETRIEVED_CHUNK_CHARS=800
-RECENT_DIALOGUE_TURNS=8
-RECENT_DIALOGUE_MAX_MESSAGE_CHARS=900
-```
+The settings model lives in [app/config.py](app/config.py), and [`.env.example`](.env.example)
+mirrors every field with its default and per-field commentary. Those two are the single source
+of truth for configuration — copy `.env.example` to `.env` and edit there. The recommended
+local-session values (26B-friendly structured-token budget, `RAG_DEFAULT_TOP_K=10`, one provider
+retry, a 300s timeout for slow dense models) are already set in `.env.example`.
 
 Cloud behavior:
 
