@@ -1,5 +1,8 @@
 # Local Model Comparison - June 8, 2026
 
+> **Historical record** — a dated model benchmark (2026-06-08). Point-in-time; not kept in sync
+> with the code. For current state see [docs/README.md](README.md).
+
 ## Scope
 
 This study compares the repository's small and 26B local-model profiles with the same application

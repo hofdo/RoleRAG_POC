@@ -15,16 +15,19 @@ CLI / local play UI / FastAPI
   -> composition
   -> TurnOrchestrator
       -> load session, world, scene, persona
-      -> retrieve actor context when enabled
+      -> retrieve actor context when enabled (fail-open)
       -> choose route
       -> ActorAgent.generate
+      -> validate draft
       -> CriticAgent.evaluate
-      -> optional local repair
-      -> optional cloud repair
+      -> repair if rejected (local, then cloud escalation per CLOUD_MODE)
+      -> output-side secret containment
       -> persist turn
-      -> MemoryCurator.curate
+      -> MemoryCurator.curate (+ index, dedup, consolidate)
       -> persist memory episodes
 ```
+
+See [docs/README.md](README.md) for the rendered component, turn-pipeline, and routing diagrams.
 
 ## Module Layout
 
@@ -140,7 +143,12 @@ The router in [app/llm/router.py](../app/llm/router.py) is deterministic.
 - `ask`: routes may indicate cloud, but the runtime avoids silent cloud calls
 - `auto`: cloud may be used for explicit requests, low retrieval confidence, high scene complexity, failed local repair, or local-provider failure
 
-Important current detail: `ask` mode does not open an interactive approval step or return a dedicated confirmation endpoint response. It falls back locally when possible and otherwise returns a controlled failure with warnings.
+Important current detail: in `ask` mode the runtime never calls cloud silently. When the router
+would escalate an actor turn to cloud, it returns a two-phase `confirmation_required` result (API
+`status: "confirmation_required"`, a single SSE `confirmation_required` frame, or an interactive
+CLI prompt); the client resubmits the same message with `cloud_confirmed: true` or
+`force_local: true`. A confirmation-required cloud repair that is not approved degrades to a
+controlled local failure with warnings.
 
 ## Retrieval Architecture
 

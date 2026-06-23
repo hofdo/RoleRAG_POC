@@ -1,5 +1,8 @@
 # 07 — MVP Phases Status
 
+> **Historical record** — the phase-by-phase build log of the MVP. Point-in-time; not kept in
+> sync with the code. For current state see [docs/README.md](README.md).
+
 ## Purpose
 
 This document records the phase-by-phase status of the repository after Phase 13.

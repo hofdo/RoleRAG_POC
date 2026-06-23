@@ -1,5 +1,8 @@
 # Milestone 1 MVP Acceptance Report
 
+> **Historical record** — the Phase 18 MVP acceptance baseline. Point-in-time; not kept in sync
+> with the code. For current state see [docs/README.md](README.md).
+
 This report freezes the Phase 18 MVP acceptance baseline for future agents. It records what is implemented, what remains out of scope, the architectural boundaries to preserve, and the verification commands used for the baseline.
 
 ## Implemented capabilities

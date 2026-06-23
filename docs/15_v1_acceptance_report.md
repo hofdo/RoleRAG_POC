@@ -1,5 +1,8 @@
 # 15 — 1.0 Acceptance Report
 
+> **Historical record** — the 1.0 acceptance baseline. Point-in-time; not kept in sync with the
+> code. For current state see [docs/README.md](README.md).
+
 Date: 2026-06-12
 
 ## Scope

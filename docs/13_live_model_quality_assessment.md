@@ -1,5 +1,9 @@
 # Live-Model Quality Assessment - June 8, 2026
 
+> **Historical record** — live-model quality findings from 2026-06-08. Point-in-time; later
+> fixes (e.g. dual-query retrieval, 640-token structured budget, retry defaults) changed several
+> conclusions. For current state see [docs/README.md](README.md).
+
 ## Purpose and Scope
 
 This report preserves the deterministic verification and 12-turn local-model checkpoint results
