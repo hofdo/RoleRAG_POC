@@ -52,6 +52,10 @@ Not implemented:
 
 ## Quickstart
 
+Run `make` (or `make help`) to list the common tasks — `make up` (Docker),
+`make dev` (host stack), `make install`, `make check`, `make smoke`. Each is just a
+thin wrapper over the commands documented below.
+
 ### Run in Docker (no local Python needed)
 
 The app (FastAPI + `/play` UI) runs in Docker alongside Qdrant. The model server
