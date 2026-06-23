@@ -5,3 +5,29 @@ services:
       - "6333:6333"
     volumes:
       - ./data/qdrant:/qdrant/storage
+
+  app:
+    build: .
+    depends_on:
+      - qdrant
+    ports:
+      - "${DEV_API_PORT:-8000}:8000"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      # Model server runs on the HOST (see README "Run in Docker"); reach it via
+      # host.docker.internal. Override if your server is elsewhere.
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:8080/v1}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-chatgpt-onnechan}
+      CLOUD_MODE: ${CLOUD_MODE:-off}
+    extra_hosts:
+      # Lets the container resolve the host on Linux too (no-op on macOS/Windows).
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persist the SQLite db and let you edit scenario content on the host.
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/runtime/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s

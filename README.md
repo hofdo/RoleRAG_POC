@@ -52,7 +52,39 @@ Not implemented:
 
 ## Quickstart
 
-### Daily Use (one command)
+### Run in Docker (no local Python needed)
+
+The app (FastAPI + `/play` UI) runs in Docker alongside Qdrant. The model server
+stays on the **host**: Docker has no GPU passthrough on macOS, so a local LLM inside
+a container would run CPU-only and far too slowly for the recommended 26B model.
+
+1. Start a model server on the host, port 8080 (see [Local Model Setup](#local-model-setup)).
+2. Bring up the app + Qdrant:
+
+   ```bash
+   docker compose up --build
+   ```
+
+   Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play). The container reaches
+   the host model via `host.docker.internal`, talks to Qdrant over the compose network,
+   and bind-mounts `./data` so the SQLite db persists and scenario content is editable on
+   the host. A turn sent before the model server is up returns a clear "provider
+   unreachable" message instead of failing hard.
+
+Override settings with env vars (a different host port, model, or cloud mode):
+
+```bash
+DEV_API_PORT=9000 LOCAL_LLM_MODEL=my-model CLOUD_MODE=off docker compose up --build
+```
+
+Run CLI commands inside the container:
+
+```bash
+docker compose exec app rolerag start-session --world-id demo_world \
+  --scene-id rose-gallery --active-persona-id archivist --player-name Avery
+```
+
+### Daily Use (one command, host Python)
 
 With Docker running and a `.venv` installed:
 
