@@ -14,6 +14,9 @@ Available endpoints:
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `GET /sessions/{session_id}/memories`
+- `GET /sessions/{session_id}/canon`
+- `POST /sessions/{session_id}/canon`
+- `DELETE /sessions/{session_id}/canon/{fact_id}`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
 
@@ -150,6 +153,23 @@ session as metadata: `id`, `scene_id`, `actor_id`, `summary`, `importance`, `vis
 `tags`. The `/play` UI renders this in a read-only "Memories" panel and the CLI exposes the
 same data via `inspect-memories`. Unknown session ids return the standard `404` envelope.
 
+## Session Canon
+
+The canon endpoints are an author surface for pinning durable "Standing facts" into the actor
+prompt by hand, alongside the auto-derived canon. Pinned facts lead the Standing-facts block.
+
+`GET /sessions/{session_id}/canon` returns the pinned facts as `{ "session_id": "<id>", "facts":
+[{ "id": "<id>", "text": "<fact>" }] }`.
+
+`POST /sessions/{session_id}/canon` accepts `{ "text": "<1-500 chars>" }` and returns `201` with
+the created `{ "id": "<id>", "text": "<fact>" }`. It returns `503 canon_unavailable` when the
+session was opened without a canon repository.
+
+`DELETE /sessions/{session_id}/canon/{fact_id}` returns `204` on success and `404
+canon_fact_not_found` for an unknown fact id.
+
+All three return `404 session_not_found` for an unknown session.
+
 ## Turn Execution
 
 `POST /sessions/{session_id}/turns` accepts:
@@ -285,7 +305,7 @@ data: {"text":"<safe controlled failure>", "route":{"provider":"local","model":"
 
 ## Errors
 
-Handled `400`, `404`, and request-validation `422` responses use one envelope:
+Handled `400`, `404`, `422`, `503`, and `504` responses use one envelope:
 
 ```json
 {
@@ -299,19 +319,24 @@ Handled `400`, `404`, and request-validation `422` responses use one envelope:
 
 Stable error codes:
 
-- `invalid_content_catalog`
-- `invalid_session_request`
-- `invalid_turn_request`
-- `provider_timeout`
-- `session_not_found`
-- `validation_error`
+- `invalid_content_catalog` (`400`)
+- `invalid_session_request` (`400`)
+- `invalid_turn_request` (`400`)
+- `session_not_found` (`404`)
+- `canon_fact_not_found` (`404`)
+- `validation_error` (`422`)
+- `provider_unavailable` (`503`)
+- `canon_unavailable` (`503`)
+- `provider_timeout` (`504`)
 
 A turn whose provider request exceeds the configured provider timeout returns
-`504 provider_timeout` with the same envelope. The message names the provider and model but never
-includes prompt text.
+`504 provider_timeout`; a turn whose model server is unreachable (down, refused, wrong URL)
+returns `503 provider_unavailable`. Both use the same envelope and name the provider and model
+but never include prompt text.
 
 Failures known before streaming starts retain the same JSON envelopes: `400 invalid_turn_request`,
-`404 session_not_found`, `422 validation_error`, and `504 provider_timeout`. Validation details
+`404 session_not_found`, `422 validation_error`, `503 provider_unavailable`, and
+`504 provider_timeout`. Validation details
 contain only `loc`, `type`, and the fixed sanitized message `Request field validation failed`;
 reflected input and validator context are excluded.
 

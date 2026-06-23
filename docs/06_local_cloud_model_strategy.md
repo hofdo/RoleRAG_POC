@@ -18,15 +18,20 @@ Both local and cloud model access go through that same provider shape.
 
 ## Settings
 
-The current settings are defined in [app/config.py](../app/config.py):
+The settings are defined in [app/config.py](../app/config.py); the model-strategy-relevant ones
+are below. See [`.env.example`](../.env.example) for the full surface with per-field commentary.
 
 ```env
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
 LOCAL_LLM_API_KEY=local
 LOCAL_LLM_MODEL=chatgpt-onnechan
 LOCAL_LLM_MAX_TOKENS=500
-LOCAL_STRUCTURED_MAX_TOKENS=350
+# Critic/memory JSON budget; verbose models truncate mid-JSON at 350, 640 fits.
+LOCAL_STRUCTURED_MAX_TOKENS=640
 LOCAL_LLM_TEMPERATURE=0.75
+# Slow dense models can take minutes; one retry absorbs a transient request stall.
+LOCAL_LLM_TIMEOUT_SECONDS=300
+LOCAL_LLM_MAX_RETRIES=1
 
 CLOUD_MODE=ask
 CLOUD_LLM_BASE_URL=https://api.openai.com/v1
@@ -34,6 +39,8 @@ CLOUD_LLM_API_KEY=replace_me
 CLOUD_LLM_MODEL=gpt-4.1-mini
 CLOUD_LLM_MAX_TOKENS=1000
 CLOUD_LLM_TEMPERATURE=0.65
+CLOUD_LLM_TIMEOUT_SECONDS=120
+CLOUD_LLM_MAX_RETRIES=1
 ```
 
 If `CLOUD_LLM_API_KEY=replace_me`, [app/composition.py](../app/composition.py) does not build a cloud provider.
@@ -105,6 +112,10 @@ For actor or repair tasks, cloud may be selected when:
 
 - if policy permits and cloud is configured, actor or repair work may fall back to cloud
 - in `ask` mode, confirmation requirements still block silent cloud dispatch
+- with no usable cloud fallback, an unreachable model server surfaces as a clean
+  `ProviderUnavailableError` (API `503 provider_unavailable`, CLI exit 1) rather than a
+  raw traceback; a request that exceeds the timeout surfaces as `ProviderTimeoutError`
+  (API `504 provider_timeout`)
 
 ### Cloud unavailable
 
@@ -115,7 +126,9 @@ For actor or repair tasks, cloud may be selected when:
 ## Known Limitations
 
 - no structured cloud-call audit log exposed outside route metadata and warnings
-- retry bounds are explicit in code; there is no configurable retry-count setting
+- the repair escalation is fixed in code (local, then cloud); provider retries and the
+  structured-truncation retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`,
+  `CLOUD_LLM_MAX_RETRIES`, `TRUNCATION_RETRY_BUDGET_MULTIPLIER`)
 
 ## Invariants to Preserve
 

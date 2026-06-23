@@ -745,6 +745,9 @@ Post-1.0 candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_nex
 
 ## Additional Documentation
 
+See [docs/README.md](docs/README.md) for the documentation hub — architecture diagrams
+(components, turn pipeline, routing) and a living-vs-historical index of every doc.
+
 - [docs/01_product_goal.md](docs/01_product_goal.md)
 - [docs/02_architecture.md](docs/02_architecture.md)
 - [docs/03_implementation_guide.md](docs/03_implementation_guide.md)
