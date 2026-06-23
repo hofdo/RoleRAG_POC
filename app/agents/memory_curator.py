@@ -3,7 +3,12 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from app.domain import MemoryCuratorResult, PersonaCard, SceneState, SessionState
-from app.llm.provider import LlmMessage, LlmProvider, LlmRequest
+from app.llm.provider import (
+    LlmMessage,
+    LlmProvider,
+    LlmRequest,
+    generate_with_truncation_retry,
+)
 from app.llm.router import ModelRoute
 from app.llm.structured_output import (
     StructuredOutputError,
@@ -55,7 +60,7 @@ class MemoryCurator:
             response_schema=MemoryCuratorResult.model_json_schema(),
             metadata={"task": "memory_extraction", "session_id": session.id},
         )
-        response = await provider.generate(request)
+        response = await generate_with_truncation_retry(provider, request)
         try:
             payload = parse_single_json_object(response.text)
         except StructuredOutputParseError as exc:
@@ -91,7 +96,7 @@ class MemoryCurator:
             temperature=route.temperature,
             metadata={"task": "memory_consolidation"},
         )
-        response = await provider.generate(request)
+        response = await generate_with_truncation_retry(provider, request)
         text = response.text.strip()
         if not text:
             raise MemoryConsolidationError("consolidation produced empty text")

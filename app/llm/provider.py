@@ -42,3 +42,26 @@ class LlmProvider(ABC):
     @abstractmethod
     async def generate(self, request: LlmRequest) -> LlmResponse:
         raise NotImplementedError
+
+
+STRUCTURED_TRUNCATION_RETRY_MULTIPLIER = 2
+
+
+async def generate_with_truncation_retry(
+    provider: LlmProvider,
+    request: LlmRequest,
+    *,
+    multiplier: int = STRUCTURED_TRUNCATION_RETRY_MULTIPLIER,
+) -> LlmResponse:
+    """Generate, retrying once with a larger budget when the model stopped on length.
+
+    Grammar-constrained JSON (critic, memory extraction) must close every brace; a
+    verbose model that hits max_tokens truncates mid-string and fails the parse. The
+    actor path already retries on finish_reason=length; this gives structured calls the
+    same protection so a tight budget degrades to a retry, not a silent skip.
+    """
+    response = await provider.generate(request)
+    if response.finish_reason != "length":
+        return response
+    retried = request.model_copy(update={"max_tokens": request.max_tokens * multiplier})
+    return await provider.generate(retried)

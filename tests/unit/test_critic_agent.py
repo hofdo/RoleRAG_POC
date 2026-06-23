@@ -24,6 +24,25 @@ class FakeProvider(LlmProvider):
         )
 
 
+class SequenceProvider(LlmProvider):
+    """Returns scripted (text, finish_reason) pairs, one per call."""
+
+    def __init__(self, responses: list[tuple[str, str]]) -> None:
+        self.responses = responses
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        text, finish_reason = self.responses[len(self.requests) - 1]
+        return LlmResponse(
+            text=text,
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 12},
+            finish_reason=finish_reason,
+        )
+
+
 def _build_route() -> ModelRoute:
     return ModelRoute(
         provider=ModelProviderName.LOCAL,
@@ -195,6 +214,32 @@ async def test_critic_agent_error_carries_raw_response_text() -> None:
             retrieved_chunks=[],
         )
     assert exc_info.value.raw_text == "not json"
+
+
+@pytest.mark.asyncio
+async def test_critic_agent_retries_once_when_truncated_on_length() -> None:
+    # First call truncates mid-JSON (finish_reason=length); retry returns valid JSON.
+    provider = SequenceProvider(
+        [
+            ('{"accepted": false, "issues": ["secret le', "length"),
+            ('{"accepted": true, "issues": [], "repair_instruction": null}', "stop"),
+        ]
+    )
+
+    result = await CriticAgent().evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=[],
+    )
+
+    assert result.accepted is True
+    assert len(provider.requests) == 2
+    # Retry doubles the structured token budget so verbose JSON can complete.
+    assert provider.requests[1].max_tokens == provider.requests[0].max_tokens * 2
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,12 @@ from collections.abc import Sequence
 from pydantic import ValidationError
 
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
-from app.llm.provider import LlmMessage, LlmProvider, LlmRequest
+from app.llm.provider import (
+    LlmMessage,
+    LlmProvider,
+    LlmRequest,
+    generate_with_truncation_retry,
+)
 from app.llm.router import ModelRoute
 from app.llm.structured_output import (
     StructuredOutputError,
@@ -51,7 +56,7 @@ class CriticAgent:
             response_schema=CriticResult.model_json_schema(),
             metadata={"task": "critic"},
         )
-        response = await provider.generate(request)
+        response = await generate_with_truncation_retry(provider, request)
         try:
             payload = parse_single_json_object(response.text)
         except StructuredOutputParseError as exc:
