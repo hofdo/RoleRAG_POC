@@ -4,14 +4,22 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
+from app.agents.critic_agent import CriticAgent
 from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
+from app.agents.secret_guard import scan_reply
 from app.evals.event_key_retrieval import evaluate_event_key_retrieval
 from app.evals.fixtures import EvalFixture, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
 from app.evals.memory_recall import evaluate_memory_recall
 from app.evals.retrieval_quality import evaluate_retrieval_quality
 from app.evals.role_consistency import evaluate_role_consistency
-from app.llm.router import CloudMode, ModelProviderName, ModelTask, choose_route
+from app.llm.provider import (
+    LlmProvider,
+    LlmRequest,
+    LlmResponse,
+    generate_with_truncation_retry,
+)
+from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.orchestration.draft_validator import validate_draft
 
 
@@ -39,6 +47,8 @@ def run_regressions() -> RegressionReport:
         _memory_continuity_result(),
         _draft_validation_result(),
         _cloud_routing_result(fixture),
+        _containment_result(),
+        asyncio.run(_structured_resilience_result()),
     ]
     total_checks = sum(len(result.checks) for result in results)
     return RegressionReport(
@@ -260,6 +270,82 @@ def _cloud_routing_result(fixture: EvalFixture) -> CategoryResult:
         "memory_extraction_stays_local": memory_route.provider == ModelProviderName.LOCAL,
     }
     return CategoryResult(name="cloud_routing", passed=all(checks.values()), checks=checks)
+
+
+def _containment_result() -> CategoryResult:
+    """Output-side secret containment — the bake-off's confabulation failure mode."""
+    secret = (
+        "House Varn offered this daughter, and not the elder, because she was the one "
+        "Duke Corvane could most afford to lose."
+    )
+    verbatim = scan_reply(f"In truth, {secret.lower()}", [secret])
+    paraphrase = scan_reply(
+        "House Varn sees her as the daughter they can most afford to lose; her elder "
+        "sister carries the weight, so Corvane sent the one he could spare.",
+        [secret],
+    )
+    deflection = scan_reply(
+        "House Varn would not part with a treasure lightly, my lord.",
+        [secret],
+    )
+    checks = {
+        "verbatim_echo_redacted": verbatim.verbatim_redacted,
+        "paraphrased_confabulation_flagged": bool(paraphrase.paraphrased_facts),
+        "in_character_deflection_not_flagged": not deflection.flagged,
+    }
+    return CategoryResult(name="containment", passed=all(checks.values()), checks=checks)
+
+
+class _ScriptedProvider(LlmProvider):
+    """Returns scripted (text, finish_reason) pairs, one per call."""
+
+    def __init__(self, responses: list[tuple[str, str]]) -> None:
+        self.responses = responses
+        self.calls = 0
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        text, finish_reason = self.responses[self.calls]
+        self.calls += 1
+        return LlmResponse(
+            text=text, provider="scripted", model=request.model, finish_reason=finish_reason
+        )
+
+
+async def _structured_resilience_result() -> CategoryResult:
+    """Truncated structured calls retry once instead of failing silently."""
+    valid = '{"accepted": true, "issues": [], "repair_instruction": null}'
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=320,
+        temperature=0.0,
+        reason="critic stays local",
+    )
+    persona = build_eval_fixture().primary_persona
+    scene = build_eval_fixture().scene
+
+    truncated_then_valid = _ScriptedProvider([('{"accepted": fal', "length"), (valid, "stop")])
+    recovered = await CriticAgent().evaluate(
+        provider=truncated_then_valid,
+        route=route,
+        persona=persona,
+        scene=scene,
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=[],
+    )
+
+    complete = _ScriptedProvider([(valid, "stop")])
+    request = LlmRequest(messages=[], model="local-model", max_tokens=320, temperature=0.0)
+    await generate_with_truncation_retry(complete, request)
+
+    checks = {
+        "truncated_structured_call_retries": truncated_then_valid.calls == 2 and recovered.accepted,
+        "complete_structured_call_not_retried": complete.calls == 1,
+    }
+    return CategoryResult(
+        name="structured_resilience", passed=all(checks.values()), checks=checks
+    )
 
 
 def _format_category(result: CategoryResult) -> str:
