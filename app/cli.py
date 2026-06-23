@@ -35,6 +35,7 @@ from app.diagnostics import (
     run_smoke,
 )
 from app.domain import TurnInput, TurnOutcome, TurnResult, Visibility
+from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.llm.router import ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator
@@ -605,6 +606,10 @@ def turn(
                     ),
                 )
             )
+    except (ProviderTimeoutError, ProviderUnavailableError) as exc:
+        services.close()
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
         services.close()
         typer.echo(str(exc))

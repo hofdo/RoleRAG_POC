@@ -3,10 +3,16 @@ from __future__ import annotations
 from typing import cast
 
 import httpx
-from openai import APITimeoutError, AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse, ProviderTimeoutError
+from app.llm.provider import (
+    LlmProvider,
+    LlmRequest,
+    LlmResponse,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
 from app.llm.structured_output import inline_schema_refs
 
 
@@ -25,6 +31,7 @@ class OpenAICompatibleProvider(LlmProvider):
     ) -> None:
         self.provider_name = provider_name
         self.timeout_seconds = timeout_seconds
+        self.base_url = base_url
         self.client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -83,10 +90,18 @@ class OpenAICompatibleProvider(LlmProvider):
                     temperature=request.temperature,
                 )
         except APITimeoutError as exc:
+            # APITimeoutError subclasses APIConnectionError, so it must be caught first.
             raise ProviderTimeoutError(
                 provider=self.provider_name,
                 model=request.model,
                 timeout_seconds=self.timeout_seconds,
+            ) from exc
+        except APIConnectionError as exc:
+            # Server down / wrong URL / connection refused — distinct from a timeout.
+            raise ProviderUnavailableError(
+                provider=self.provider_name,
+                model=request.model,
+                base_url=self.base_url,
             ) from exc
 
         choice = response.choices[0]

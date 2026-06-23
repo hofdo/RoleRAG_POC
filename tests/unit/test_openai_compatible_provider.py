@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from openai import APITimeoutError
+from openai import APIConnectionError, APITimeoutError
 
 from app.llm.openai_compatible import OpenAICompatibleProvider
-from app.llm.provider import LlmMessage, LlmRequest, ProviderTimeoutError
+from app.llm.provider import (
+    LlmMessage,
+    LlmRequest,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
 
 
 def _request() -> LlmRequest:
@@ -52,6 +57,30 @@ async def test_provider_translates_api_timeout_into_provider_timeout_error() -> 
     assert exc_info.value.provider == "local"
     assert exc_info.value.model == "local-model"
     assert exc_info.value.timeout_seconds == 0.5
+
+
+@pytest.mark.asyncio
+async def test_provider_translates_connection_error_into_provider_unavailable_error() -> None:
+    provider = OpenAICompatibleProvider(
+        provider_name="local",
+        base_url="http://127.0.0.1:8080/v1",
+        api_key="local",
+        timeout_seconds=30.0,
+        max_retries=0,
+    )
+
+    async def raise_connection(**_: object) -> object:
+        raise APIConnectionError(request=httpx.Request("POST", "http://127.0.0.1:8080/v1"))
+
+    completions = provider.client.chat.completions
+    completions.create = raise_connection  # type: ignore[method-assign, assignment]
+
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await provider.generate(_request())
+
+    assert exc_info.value.provider == "local"
+    assert exc_info.value.model == "local-model"
+    assert exc_info.value.base_url == "http://127.0.0.1:8080/v1"
 
 
 @pytest.mark.asyncio

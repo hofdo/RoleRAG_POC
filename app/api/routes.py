@@ -35,7 +35,7 @@ from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.domain import SessionState, TurnInput, TurnOutcome, TurnResult
-from app.llm.provider import ProviderTimeoutError
+from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.persistence import (
     ContentCatalogError,
     DataFileNotFoundError,
@@ -275,6 +275,12 @@ async def _run_turn(
         raise ApiError(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             code="provider_timeout",
+            message=str(exc),
+        ) from exc
+    except ProviderUnavailableError as exc:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="provider_unavailable",
             message=str(exc),
         ) from exc
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:

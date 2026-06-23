@@ -38,6 +38,19 @@ class ProviderTimeoutError(RuntimeError):
         self.timeout_seconds = timeout_seconds
 
 
+class ProviderUnavailableError(RuntimeError):
+    """The model server could not be reached at all (down, wrong URL, refused)."""
+
+    def __init__(self, *, provider: str, model: str, base_url: str) -> None:
+        super().__init__(
+            f"{provider} provider for {model} is unreachable at {base_url} "
+            "(is the model server running?)"
+        )
+        self.provider = provider
+        self.model = model
+        self.base_url = base_url
+
+
 class LlmProvider(ABC):
     @abstractmethod
     async def generate(self, request: LlmRequest) -> LlmResponse:
