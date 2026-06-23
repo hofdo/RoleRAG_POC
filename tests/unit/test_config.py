@@ -81,7 +81,7 @@ def test_settings_accept_database_path_and_recent_turn_overrides(tmp_path: Path)
 def test_settings_default_provider_timeouts_and_retries(tmp_path: Path) -> None:
     settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
 
-    assert settings.local_llm_timeout_seconds == 180.0
+    assert settings.local_llm_timeout_seconds == 300.0
     assert settings.local_llm_max_retries == 1
     assert settings.cloud_llm_timeout_seconds == 120.0
     assert settings.cloud_llm_max_retries == 1

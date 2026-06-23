@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     # 2026-06: qwen35b had 6 critic-truncation failures at 350, 0 at 640.
     local_structured_max_tokens: int = Field(default=640, ge=1)
     local_llm_temperature: float = 0.75
-    local_llm_timeout_seconds: float = Field(default=180.0, gt=0)
+    # Headroom for slow local models: a turn on a dense/large model can legitimately
+    # take 1-4 min, and the app returns 504 if the provider call exceeds this. 300s
+    # clears the bake-off's slow models; lower it for fast models if you want to fail fast.
+    local_llm_timeout_seconds: float = Field(default=300.0, gt=0)
     # One retry absorbs transient request stalls that otherwise kill a whole
     # session via a single 504 (2026-06-12 live acceptance, run #2).
     local_llm_max_retries: int = Field(default=1, ge=0)
