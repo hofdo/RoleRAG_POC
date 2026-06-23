@@ -28,6 +28,9 @@ class MemoryConsolidationError(RuntimeError):
 
 
 class MemoryCurator:
+    def __init__(self, *, truncation_retry_budget_multiplier: int = 2) -> None:
+        self.truncation_retry_budget_multiplier = truncation_retry_budget_multiplier
+
     async def curate(
         self,
         *,
@@ -60,7 +63,9 @@ class MemoryCurator:
             response_schema=MemoryCuratorResult.model_json_schema(),
             metadata={"task": "memory_extraction", "session_id": session.id},
         )
-        response = await generate_with_truncation_retry(provider, request)
+        response = await generate_with_truncation_retry(
+            provider, request, multiplier=self.truncation_retry_budget_multiplier
+        )
         try:
             payload = parse_single_json_object(response.text)
         except StructuredOutputParseError as exc:
@@ -96,7 +101,9 @@ class MemoryCurator:
             temperature=route.temperature,
             metadata={"task": "memory_consolidation"},
         )
-        response = await generate_with_truncation_retry(provider, request)
+        response = await generate_with_truncation_retry(
+            provider, request, multiplier=self.truncation_retry_budget_multiplier
+        )
         text = response.text.strip()
         if not text:
             raise MemoryConsolidationError("consolidation produced empty text")

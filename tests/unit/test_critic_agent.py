@@ -243,6 +243,30 @@ async def test_critic_agent_retries_once_when_truncated_on_length() -> None:
 
 
 @pytest.mark.asyncio
+async def test_critic_agent_uses_configured_truncation_multiplier() -> None:
+    # The configured multiplier must reach the structured retry, not just the default 2x.
+    provider = SequenceProvider(
+        [
+            ('{"accepted": false, "issues": ["secret le', "length"),
+            ('{"accepted": true, "issues": [], "repair_instruction": null}', "stop"),
+        ]
+    )
+
+    result = await CriticAgent(truncation_retry_budget_multiplier=3).evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="Hello.",
+        draft="Good evening.",
+        retrieved_chunks=[],
+    )
+
+    assert result.accepted is True
+    assert provider.requests[1].max_tokens == provider.requests[0].max_tokens * 3
+
+
+@pytest.mark.asyncio
 async def test_critic_agent_prompt_includes_required_checks_and_context() -> None:
     provider = FakeProvider('{"accepted": true, "issues": [], "repair_instruction": null}')
 

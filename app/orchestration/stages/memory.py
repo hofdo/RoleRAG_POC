@@ -288,6 +288,11 @@ class TurnMemoryStage:
         """
         assert self.memory_store is not None
         try:
+            # ponytail: full per-turn rescan of all session memories, O(n) per turn,
+            # unbounded by default (session_memory_max_episodes=0, consolidation_threshold=0
+            # are off on purpose — caps regressed 50-turn recall in live acceptance). Fine
+            # at POC scale (a long session is ~tens-low-hundreds of memories). If a session
+            # ever exceeds ~few hundred, cache summaries on the session or enable the cap.
             existing = [
                 episode.summary
                 for episode in self.memory_store.list_memories_for_session(session_id)

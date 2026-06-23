@@ -30,6 +30,25 @@ class FakeProvider(LlmProvider):
         )
 
 
+class SequenceProvider(LlmProvider):
+    """Returns scripted (text, finish_reason) pairs, one per call."""
+
+    def __init__(self, responses: list[tuple[str, str]]) -> None:
+        self.responses = responses
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        text, finish_reason = self.responses[len(self.requests) - 1]
+        return LlmResponse(
+            text=text,
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 12},
+            finish_reason=finish_reason,
+        )
+
+
 def _build_route() -> ModelRoute:
     return ModelRoute(
         provider=ModelProviderName.LOCAL,
@@ -104,6 +123,30 @@ async def test_memory_curator_returns_structured_candidates_from_valid_json() ->
     assert result.memories[0].visibility == Visibility.PLAYER
     assert provider.requests[0].response_format == "json"
     assert provider.requests[0].response_schema == MemoryCuratorResult.model_json_schema()
+
+
+@pytest.mark.asyncio
+async def test_memory_curator_uses_configured_truncation_multiplier() -> None:
+    # First call truncates mid-JSON; the configured multiplier must size the retry budget.
+    provider = SequenceProvider(
+        [
+            ('{"write_memory": true, "memories": [{"summary": "The player prom', "length"),
+            ('{"write_memory": false, "memories": [], "reason": "nothing durable"}', "stop"),
+        ]
+    )
+
+    result = await MemoryCurator(truncation_retry_budget_multiplier=3).curate(
+        provider=provider,
+        route=_build_route(),
+        session=_build_session(),
+        scene=_build_scene(),
+        persona=_build_persona(),
+        user_message="I promise I will return before dawn.",
+        assistant_message="Then I will keep the archive door unbarred.",
+    )
+
+    assert result.write_memory is False
+    assert provider.requests[1].max_tokens == provider.requests[0].max_tokens * 3
 
 
 @pytest.mark.asyncio

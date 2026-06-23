@@ -211,10 +211,10 @@ def test_build_ranking_weights_defaults_match_default_ranking_weights(tmp_path: 
 
 def test_routing_threshold_defaults_mirror_module_constants(tmp_path: Path) -> None:
     from app.llm import router
-    from app.orchestration.stages.generation import TRUNCATION_RETRY_BUDGET_MULTIPLIER
 
     settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
 
     assert settings.low_retrieval_confidence == router.LOW_RETRIEVAL_CONFIDENCE
     assert settings.high_scene_complexity == router.HIGH_SCENE_COMPLEXITY
-    assert settings.truncation_retry_budget_multiplier == TRUNCATION_RETRY_BUDGET_MULTIPLIER
+    # Truncation multiplier is config-owned now (no module constant); default is 2x.
+    assert settings.truncation_retry_budget_multiplier == 2

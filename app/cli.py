@@ -104,12 +104,12 @@ def _build_services(
         content_root=str(resolved_content_root),
         provider=_build_local_provider(settings),
         cloud_provider=_build_cloud_provider(settings),
-        critic_agent=_build_critic_agent(),
+        critic_agent=_build_critic_agent(settings),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=recent_dialogue_store,
         memory_store=memory_store,
-        memory_curator=_build_memory_curator(),
+        memory_curator=_build_memory_curator(settings),
         memory_indexer=(
             MemoryIndexer(
                 memory_store=memory_store,

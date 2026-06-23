@@ -50,7 +50,6 @@ from app.orchestration.stages import (
     TurnRoutingStage,
     TurnSessionLoader,
 )
-from app.orchestration.stages.generation import TRUNCATION_RETRY_BUDGET_MULTIPLIER
 from app.persistence.repositories import CanonRepository, SessionRepository, TurnRepository
 from app.rag.embeddings import EmbeddingProvider
 
@@ -132,7 +131,7 @@ class TurnOrchestrator:
         write_dedup_cosine_threshold: float = 1.0,
         low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
         high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
-        truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
+        truncation_retry_budget_multiplier: int = 2,
         containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP,
         memory_consolidation_threshold: int = 0,
         memory_consolidation_max_importance: int = 3,

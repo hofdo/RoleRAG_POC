@@ -60,6 +60,8 @@ async def test_provider_sends_json_schema_response_format_when_schema_present() 
         provider_name="local",
         base_url="http://127.0.0.1:8080/v1",
         api_key="local",
+        timeout_seconds=30.0,
+        max_retries=0,
     )
     captured: dict[str, object] = {}
 
@@ -108,6 +110,8 @@ async def test_provider_leaves_penalties_to_server_for_unstructured_actor_calls(
         provider_name="local",
         base_url="http://127.0.0.1:8080/v1",
         api_key="local",
+        timeout_seconds=30.0,
+        max_retries=0,
     )
     captured: dict[str, object] = {}
 
@@ -139,6 +143,8 @@ async def test_provider_inlines_schema_refs_before_sending() -> None:
         provider_name="local",
         base_url="http://127.0.0.1:8080/v1",
         api_key="local",
+        timeout_seconds=30.0,
+        max_retries=0,
     )
     captured: dict[str, object] = {}
 

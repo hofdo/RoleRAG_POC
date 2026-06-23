@@ -9,9 +9,6 @@ from openai.types.chat import ChatCompletionMessageParam
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse, ProviderTimeoutError
 from app.llm.structured_output import inline_schema_refs
 
-DEFAULT_TIMEOUT_SECONDS = 180.0
-DEFAULT_MAX_RETRIES = 0
-
 
 class OpenAICompatibleProvider(LlmProvider):
     def __init__(
@@ -20,8 +17,11 @@ class OpenAICompatibleProvider(LlmProvider):
         provider_name: str,
         base_url: str,
         api_key: str,
-        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-        max_retries: int = DEFAULT_MAX_RETRIES,
+        # Required, not defaulted: the real values live in Settings (local 300s/1
+        # retry, cloud 120s/1). A constructor default here would silently diverge
+        # from config and mislead any caller that copy-pastes it.
+        timeout_seconds: float,
+        max_retries: int,
     ) -> None:
         self.provider_name = provider_name
         self.timeout_seconds = timeout_seconds

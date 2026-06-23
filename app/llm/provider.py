@@ -44,14 +44,13 @@ class LlmProvider(ABC):
         raise NotImplementedError
 
 
-STRUCTURED_TRUNCATION_RETRY_MULTIPLIER = 2
-
-
 async def generate_with_truncation_retry(
     provider: LlmProvider,
     request: LlmRequest,
     *,
-    multiplier: int = STRUCTURED_TRUNCATION_RETRY_MULTIPLIER,
+    # Default mirrors Settings.truncation_retry_budget_multiplier; composition wires the
+    # configured value in via the critic/curator agents (single source of truth).
+    multiplier: int = 2,
 ) -> LlmResponse:
     """Generate, retrying once with a larger budget when the model stopped on length.
 
@@ -59,6 +58,10 @@ async def generate_with_truncation_retry(
     verbose model that hits max_tokens truncates mid-string and fails the parse. The
     actor path already retries on finish_reason=length; this gives structured calls the
     same protection so a tight budget degrades to a retry, not a silent skip.
+
+    Divergence from the actor path is deliberate: a still-truncated retry is returned
+    here for the caller's Pydantic parse to reject, whereas TurnGenerationStage raises
+    TruncatedProviderResponseError because plain actor text has no schema to fail on.
     """
     response = await provider.generate(request)
     if response.finish_reason != "length":

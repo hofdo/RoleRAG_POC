@@ -78,12 +78,16 @@ def build_file_loader(content_root: Path | str = "data") -> FileDataLoader:
     return FileDataLoader(base_path=content_root)
 
 
-def build_critic_agent() -> CriticAgent:
-    return CriticAgent()
+def build_critic_agent(settings: Settings) -> CriticAgent:
+    return CriticAgent(
+        truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier
+    )
 
 
-def build_memory_curator() -> MemoryCurator:
-    return MemoryCurator()
+def build_memory_curator(settings: Settings) -> MemoryCurator:
+    return MemoryCurator(
+        truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier
+    )
 
 
 def build_structured_failure_sink(settings: Settings) -> StructuredOutputFailureSink | None:
@@ -158,12 +162,12 @@ def build_services(
         content_root=str(resolved_content_root),
         provider=build_local_provider(settings),
         cloud_provider=build_cloud_provider(settings),
-        critic_agent=build_critic_agent(),
+        critic_agent=build_critic_agent(settings),
         session_repository=session_repository,
         turn_repository=turn_repository,
         recent_dialogue_store=recent_dialogue_store,
         memory_store=memory_store,
-        memory_curator=build_memory_curator(),
+        memory_curator=build_memory_curator(settings),
         memory_indexer=(
             MemoryIndexer(
                 memory_store=memory_store,

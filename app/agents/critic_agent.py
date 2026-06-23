@@ -24,6 +24,9 @@ class CriticAgentOutputError(StructuredOutputError):
 
 
 class CriticAgent:
+    def __init__(self, *, truncation_retry_budget_multiplier: int = 2) -> None:
+        self.truncation_retry_budget_multiplier = truncation_retry_budget_multiplier
+
     async def evaluate(
         self,
         *,
@@ -56,7 +59,9 @@ class CriticAgent:
             response_schema=CriticResult.model_json_schema(),
             metadata={"task": "critic"},
         )
-        response = await generate_with_truncation_retry(provider, request)
+        response = await generate_with_truncation_retry(
+            provider, request, multiplier=self.truncation_retry_budget_multiplier
+        )
         try:
             payload = parse_single_json_object(response.text)
         except StructuredOutputParseError as exc:

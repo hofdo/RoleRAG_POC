@@ -12,8 +12,6 @@ from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult, TurnRoutingStage
 from app.orchestration.stages.session import LoadedTurnContext
 
-TRUNCATION_RETRY_BUDGET_MULTIPLIER = 2
-
 
 class EmptyProviderResponseError(RuntimeError):
     def __init__(self, *, provider: str, model: str) -> None:
@@ -51,7 +49,9 @@ class TurnGenerationStage:
         context_budget: ContextBudget,
         recent_dialogue_max_message_chars: int,
         actor_agent: ActorAgent | None = None,
-        truncation_retry_budget_multiplier: int = TRUNCATION_RETRY_BUDGET_MULTIPLIER,
+        # Default mirrors Settings.truncation_retry_budget_multiplier; composition
+        # passes the configured value (single source of truth).
+        truncation_retry_budget_multiplier: int = 2,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider

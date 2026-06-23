@@ -56,6 +56,9 @@ def choose_route(
     low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
     high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
 ) -> ModelRoute:
+    # Structured tasks (critic, memory) pin temperature=0.0 on purpose, overriding
+    # local_temperature: grammar-constrained JSON wants deterministic, greedy decoding,
+    # not the actor's creative sampling. There is intentionally no config knob for this.
     if task == ModelTask.CRITIC:
         return ModelRoute(
             provider=ModelProviderName.LOCAL,
