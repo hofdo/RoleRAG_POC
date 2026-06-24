@@ -80,7 +80,7 @@ graph TD
 
 ### FastAPI API
 
-- exposes the play UI, runtime status, content catalog, session CRUD, turns (JSON + buffered
+- exposes `GET /play` plus runtime status, content catalog, session CRUD, turns (JSON + buffered
   SSE), durable memories, and session canon — see
   [docs/12_api_contract.md](12_api_contract.md) for the full surface
 - does not duplicate orchestration logic

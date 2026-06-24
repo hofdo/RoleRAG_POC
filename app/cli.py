@@ -811,6 +811,58 @@ def inspect_memories(
     )
 
 
+@app.command("turn-history")
+def turn_history(
+    session_id: Annotated[str, typer.Option(help="Session identifier")],
+    turn: Annotated[
+        int | None,
+        typer.Option(help="Filter to a single turn_index"),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(help="Maximum number of turns to show"),
+    ] = None,
+) -> None:
+    connection, sessions, turns, _ = _open_repositories()
+    if sessions.get_session(session_id) is None:
+        connection.close()
+        typer.echo(f"Unknown session id: {session_id}")
+        raise typer.Exit(code=1)
+    stored_turns = turns.list_all_turns(session_id)
+    if turn is not None:
+        stored_turns = [item for item in stored_turns if item.turn_index == turn]
+    if limit is not None:
+        stored_turns = stored_turns[:limit]
+    connection.close()
+    # Turn diagnostics (rankings, stage_timings, critic_status) are not persisted
+    # in StoredTurn, so only stored turn fields are surfaced here.
+    typer.echo(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "turns": [
+                    {
+                        "turn_index": item.turn_index,
+                        "scene_id": item.scene_id,
+                        "persona_id": item.persona_id,
+                        "user_message": item.user_message,
+                        "assistant_message": item.assistant_message,
+                        "route": {
+                            "provider": item.route.provider.value,
+                            "model": item.route.model,
+                            "reason": item.route.reason,
+                        },
+                        "created_at": item.created_at.isoformat(),
+                    }
+                    for item in stored_turns
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
 @app.command("reset-db")
 def reset_db(
     yes: Annotated[bool, typer.Option("--yes", help="Skip confirmation prompt")] = False,

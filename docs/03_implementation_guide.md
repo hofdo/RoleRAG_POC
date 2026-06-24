@@ -59,7 +59,7 @@ authoritative list. Grouped:
 
 - diagnostics: `config`, `health`, `doctor`, `smoke-run`, `validate-content`
 - sessions: `start-session`, `resume`, `turn`, `list-sessions`, `inspect-memories`,
-  `export-session`, `import-session`, `delete-session`, `reset-db`
+  `turn-history`, `export-session`, `import-session`, `delete-session`, `reset-db`
 - retrieval / content: `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`,
   `create-scenario-template`, `route`
 

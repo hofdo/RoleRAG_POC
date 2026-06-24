@@ -18,7 +18,12 @@ from app.domain import (
 )
 from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
-from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
+from app.llm.router import ModelProviderName, ModelRoute
+from app.persistence import (
+    SQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+)
 from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics, RetrievalResult
 from app.rag.models import RagChunk, RagCollection
@@ -799,3 +804,121 @@ def test_cli_reindex_memories_fails_clearly_for_missing_session(tmp_path: Path) 
 
     assert result.exit_code == 1
     assert "missing-session" in result.stdout
+
+
+def _seed_session_with_turns(database_path: Path, *, session_id: str, turn_count: int) -> None:
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    SQLiteSessionRepository(connection).create_session(
+        SessionState(
+            id=session_id,
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turns = SQLiteTurnRepository(connection)
+    for index in range(turn_count):
+        turns.append_turn(
+            session_id=session_id,
+            scene_id="rose-gallery",
+            persona_id="archivist",
+            user_message=f"Question {index}",
+            assistant_message=f"Answer {index}",
+            route=ModelRoute(
+                provider=ModelProviderName.LOCAL,
+                model="local-model",
+                max_tokens=256,
+                temperature=0.7,
+                reason="default local route",
+            ),
+        )
+    connection.close()
+
+
+def test_cli_turn_history_lists_all_turns(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=3)
+
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "demo-session"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["session_id"] == "demo-session"
+    assert [turn["turn_index"] for turn in payload["turns"]] == [1, 2, 3]
+    first = payload["turns"][0]
+    assert first["scene_id"] == "rose-gallery"
+    assert first["persona_id"] == "archivist"
+    assert first["user_message"] == "Question 0"
+    assert first["assistant_message"] == "Answer 0"
+    assert first["route"] == {
+        "provider": "local",
+        "model": "local-model",
+        "reason": "default local route",
+    }
+    assert "T" in first["created_at"]
+    # Stored turns never carry diagnostics, so they must not appear in output.
+    assert "rankings" not in result.stdout
+    assert "stage_timings" not in result.stdout
+    assert "critic_status" not in result.stdout
+
+
+def test_cli_turn_history_filters_by_turn_index(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=3)
+
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "demo-session", "--turn", "2"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert [turn["turn_index"] for turn in payload["turns"]] == [2]
+
+
+def test_cli_turn_history_applies_limit(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=4)
+
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "demo-session", "--limit", "2"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert [turn["turn_index"] for turn in payload["turns"]] == [1, 2]
+
+
+def test_cli_turn_history_unknown_session(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "missing-session"],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+
+    assert result.exit_code == 1
+    assert "Unknown session id: missing-session" in result.stdout
+
+
+def test_cli_turn_history_empty_turns(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=0)
+
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "demo-session"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload == {"session_id": "demo-session", "turns": []}

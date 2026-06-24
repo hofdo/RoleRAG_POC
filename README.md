@@ -229,7 +229,7 @@ Critic evaluation and memory extraction stay local in all modes.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, and `turn`.
+- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, `turn`, and `turn-history`.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
