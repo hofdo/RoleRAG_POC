@@ -1,6 +1,8 @@
 # Personal Python Roleplaying RAG System
 
 > Status: historical design reference. It contains earlier implementation planning and no longer defines the repository's exact current behavior. For the implemented MVP, use [README.md](../README.md), [docs/03_implementation_guide.md](03_implementation_guide.md), and [docs/08_agent_handoff.md](08_agent_handoff.md).
+>
+> **Embedded config values and API request examples below are stale** — e.g. it shows `LOCAL_LLM_MAX_TOKENS=700` (current default is `500`) and a turn-request field `cloud_allowed` (the live field is `request_cloud`). Treat every inline value and request payload here as illustrative only; the authoritative sources are [`.env.example`](../.env.example) / [app/config.py](../app/config.py) for settings and [docs/12_api_contract.md](12_api_contract.md) for the API.
 ## A Practical Implementation Guide for One User, One Local 8B Model, and One Cloud Fallback Model
 
 **Scope:** personal roleplaying engine  
