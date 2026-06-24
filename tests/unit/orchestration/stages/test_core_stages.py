@@ -739,6 +739,7 @@ class RecordingMemoryStore:
     def __init__(self) -> None:
         self.persisted: list[Any] = []
         self.consolidated_ids: list[str] = []
+        self.list_calls = 0
 
     def persist_memories(self, *, session_id: str, memories: list[Any]) -> list[Any]:
         from app.domain import MemoryEpisode
@@ -760,6 +761,7 @@ class RecordingMemoryStore:
         return episodes
 
     def list_memories_for_session(self, session_id: str) -> list[Any]:
+        self.list_calls += 1
         return [episode for episode in self.persisted if episode.session_id == session_id]
 
     def mark_memories_consolidated(self, memory_ids: list[str]) -> None:
@@ -1148,6 +1150,75 @@ async def test_memory_stage_drops_candidates_covered_by_persisted_memories() -> 
     assert second.memory_written is False
     assert len(store.persisted) == 1
     assert any("memory dedup dropped" in warning for warning in second.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_caches_session_summaries_across_turns() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=CoveringCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    async def run_turn() -> Any:
+        return await stage.run(
+            session=context.session,
+            scene=context.scene,
+            persona=context.persona,
+            user_message="I promise to return before dawn.",
+            assistant_message="Iria nods once.",
+            retrieval_confidence=None,
+            scene_complexity=1,
+        )
+
+    for _ in range(3):
+        await run_turn()
+
+    # The per-session cache means the store is loaded at most once across all
+    # three turns, not once per turn.
+    assert store.list_calls <= 1
+    # First turn persists; later turns dedup against the cached summary.
+    assert len(store.persisted) == 1
+    assert stage._summary_cache[context.session.id] == [
+        "The player promised to return before dawn."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_summary_cache_is_per_session() -> None:
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=CoveringCurator(),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    base = _context()
+    other_session = base.session.model_copy(update={"id": "other-session"})
+
+    async def run_turn(session: Any) -> Any:
+        return await stage.run(
+            session=session,
+            scene=base.scene,
+            persona=base.persona,
+            user_message="I promise to return before dawn.",
+            assistant_message="Iria nods once.",
+            retrieval_confidence=None,
+            scene_complexity=1,
+        )
+
+    first = await run_turn(base.session)
+    second = await run_turn(other_session)
+
+    # Each session writes its own memory; no cross-session dedup leakage.
+    assert first.memory_written is True
+    assert second.memory_written is True
+    assert set(stage._summary_cache) == {base.session.id, other_session.id}
 
 
 @pytest.mark.asyncio

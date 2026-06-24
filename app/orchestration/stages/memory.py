@@ -95,6 +95,13 @@ class TurnMemoryStage:
         self.write_dedup_cosine_threshold = write_dedup_cosine_threshold
         self.consolidation_threshold = consolidation_threshold
         self.consolidation_importance_ceiling = consolidation_importance_ceiling
+        # ponytail: single-user ceiling. This cache is per-session-keyed and
+        # in-process only; it mirrors persisted summaries so dedup stops
+        # reloading the whole session every turn. Concurrent out-of-process
+        # writes to the same session are NOT reflected until the entry is
+        # invalidated (consolidation drops it) or the process restarts. Fine
+        # for one-writer-per-session POC scale; revisit if sessions go shared.
+        self._summary_cache: dict[str, list[str]] = {}
 
     async def run(
         self,
@@ -266,6 +273,9 @@ class TurnMemoryStage:
             session_id=session_id,
             memories=candidates,
         )
+        cached = self._summary_cache.get(session_id)
+        if cached is not None:
+            cached.extend(episode.summary for episode in persisted)
         if self.memory_indexer is not None:
             try:
                 self.memory_indexer.index_memories(persisted)
@@ -288,15 +298,20 @@ class TurnMemoryStage:
         """
         assert self.memory_store is not None
         try:
-            # ponytail: full per-turn rescan of all session memories, O(n) per turn,
-            # unbounded by default (session_memory_max_episodes=0, consolidation_threshold=0
-            # are off on purpose — caps regressed 50-turn recall in live acceptance). Fine
-            # at POC scale (a long session is ~tens-low-hundreds of memories). If a session
-            # ever exceeds ~few hundred, cache summaries on the session or enable the cap.
-            existing = [
-                episode.summary
-                for episode in self.memory_store.list_memories_for_session(session_id)
-            ]
+            # Per-session summary cache: reload the full session from the store
+            # only on first miss, then keep the in-process mirror current via
+            # _persist_and_index (append) and _persist_consolidation (invalidate).
+            # See the ponytail note in __init__ for the single-user ceiling.
+            cached = self._summary_cache.get(session_id)
+            if cached is None:
+                cached = [
+                    episode.summary
+                    for episode in self.memory_store.list_memories_for_session(session_id)
+                ]
+                self._summary_cache[session_id] = cached
+            # Work on a copy: the dedup loop mutates the running list, but the
+            # cached mirror must only grow with actually-persisted summaries.
+            existing = list(cached)
         except Exception as exc:
             warnings.append(f"memory dedup skipped: {exc}")
             return candidates
@@ -428,3 +443,8 @@ class TurnMemoryStage:
         original_ids = [memory.id for memory in candidates]
         self.memory_store.mark_memories_consolidated(original_ids)
         self.memory_indexer.unindex(original_ids)
+        # Consolidation removed originals and added one summary; rather than
+        # surgically patch the mirror, drop the entry so the next turn rebuilds
+        # it from the store. Consolidation is infrequent, so the one extra load
+        # is cheap and keeps the cache provably consistent post-rollup.
+        self._summary_cache.pop(session_id, None)
