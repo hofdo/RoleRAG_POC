@@ -95,6 +95,21 @@ def test_scan_reply_flags_paraphrased_confabulation() -> None:
     assert report.flagged is True
 
 
+def test_scan_reply_paraphrase_threshold_is_applied() -> None:
+    # The 0.6 default is a security knob: pin its value and that it is actually applied —
+    # the real bake-off paraphrase leak is flagged at 0.6 but relaxed at a near-1.0 threshold.
+    from app.agents.secret_guard import DEFAULT_PARAPHRASE_OVERLAP
+
+    assert DEFAULT_PARAPHRASE_OVERLAP == 0.6
+    leaked_reply = (
+        "House Varn views Iseult as the daughter they could most afford to lose; "
+        "her elder sister holds the political weight, so Duke Corvane sent the one he could spare."
+    )
+    assert scan_reply(leaked_reply, [_BRAM_SECRET], paraphrase_overlap_threshold=0.6).flagged
+    relaxed = scan_reply(leaked_reply, [_BRAM_SECRET], paraphrase_overlap_threshold=0.99)
+    assert relaxed.paraphrased_facts == ()
+
+
 def test_scan_reply_does_not_flag_in_character_deflection() -> None:
     # Nessa lying to protect the secret must not trip the screen.
     deflection = "My lady is a strong swimmer, my lord; she fears neither river nor rain."
