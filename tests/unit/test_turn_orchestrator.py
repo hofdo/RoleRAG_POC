@@ -153,10 +153,10 @@ class FakeLoader:
 
 def _build_orchestrator(
     tmp_path: Path,
-    provider: FakeProvider,
+    provider: LlmProvider,
     *,
     critic: StubCritic | None = None,
-    memory_curator: StubMemoryCurator | None = None,
+    memory_curator: Any = None,
     memory_indexer: StubMemoryIndexer | None = None,
     actor_context_retriever: StubActorContextRetriever | None = None,
 ) -> TurnOrchestrator:
@@ -243,6 +243,62 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
     }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
+
+
+@pytest.mark.asyncio
+async def test_containment_redacts_hidden_fact_before_persistence_and_memory(
+    tmp_path: Path,
+) -> None:
+    # Pins the security ordering: the output-side containment backstop redacts a verbatim
+    # hidden-fact echo BEFORE the reply is persisted or fed to memory extraction.
+    secret = "The regent's spy is already in the room."  # FakeLoader scene gm_private_summary
+
+    class SecretEchoProvider(LlmProvider):
+        def __init__(self) -> None:
+            self.requests: list[LlmRequest] = []
+
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            self.requests.append(request)
+            return LlmResponse(
+                text=f"Iria leans in. {secret}",
+                provider="fake",
+                model=request.model,
+                usage={},
+                finish_reason="stop",
+            )
+
+    class CapturingCurator:
+        def __init__(self) -> None:
+            self.assistant_message: str | None = None
+
+        async def curate(self, *, assistant_message: str, **_: object) -> Any:
+            from app.domain import MemoryCuratorResult
+
+            self.assistant_message = assistant_message
+            return MemoryCuratorResult(write_memory=False, memories=[], reason="none")
+
+        async def consolidate(self, **_: object) -> str:
+            raise AssertionError("consolidate not expected")
+
+    curator = CapturingCurator()
+    orchestrator = _build_orchestrator(tmp_path, SecretEchoProvider(), memory_curator=curator)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What do you know?")
+    )
+
+    assert secret not in result.text
+    assert any("containment: redacted" in warning for warning in result.warnings)
+    # Memory extraction received the redacted text, not the raw draft.
+    assert curator.assistant_message is not None
+    assert secret not in curator.assistant_message
+    assert curator.assistant_message == result.text
+    # And SQLite persisted the redacted text.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    stored = SQLiteTurnRepository(connection).list_all_turns("demo-session")
+    connection.close()
+    assert stored
+    assert secret not in stored[-1].assistant_message
 
 
 @pytest.mark.asyncio
