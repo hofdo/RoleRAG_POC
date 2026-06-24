@@ -532,6 +532,24 @@ def test_post_turn_rejects_invalid_request_with_422(tmp_path: Path) -> None:
     assert payload["error"]["details"]
 
 
+def test_post_turn_rejects_message_exceeding_max_length(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "x" * 4001},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Request validation failed"
+    assert payload["error"]["details"]
+
+
 def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Path) -> None:
     services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
@@ -761,4 +779,32 @@ def test_post_turn_returns_504_envelope_when_local_provider_times_out(tmp_path: 
     payload = response.json()
     assert payload["error"]["code"] == "provider_timeout"
     assert "timed out" in payload["error"]["message"]
+    assert payload["error"]["details"] == []
+
+
+def test_post_turn_returns_503_envelope_when_local_provider_unavailable(tmp_path: Path) -> None:
+    from app.llm.provider import ProviderUnavailableError
+
+    class UnavailableProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise ProviderUnavailableError(
+                provider="local",
+                model=request.model,
+                base_url="http://127.0.0.1:8080/v1",
+            )
+
+    services, _, _ = _build_services(tmp_path)
+    services.orchestrator.generation_stage.provider = UnavailableProvider()
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"]["code"] == "provider_unavailable"
     assert payload["error"]["details"] == []

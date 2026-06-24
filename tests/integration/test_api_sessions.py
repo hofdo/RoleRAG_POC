@@ -756,6 +756,28 @@ def test_post_sessions_rejects_invalid_request_with_422(tmp_path: Path) -> None:
     assert payload["error"]["details"]
 
 
+def test_post_sessions_rejects_player_name_exceeding_max_length(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "x" * 201,
+            "active_persona_id": "archivist",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["message"] == "Request validation failed"
+    assert payload["error"]["details"]
+
+
 def test_get_session_memories_returns_episode_metadata(tmp_path: Path) -> None:
     from app.api.routes import get_read_services
     from app.domain import MemoryCandidate, Visibility

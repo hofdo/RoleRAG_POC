@@ -29,10 +29,10 @@ class ErrorResponse(BaseModel):
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    world_id: str = Field(min_length=1)
-    scene_id: str = Field(min_length=1)
-    player_name: str = Field(min_length=1)
-    active_persona_id: str = Field(min_length=1)
+    world_id: str = Field(min_length=1, max_length=200)
+    scene_id: str = Field(min_length=1, max_length=200)
+    player_name: str = Field(min_length=1, max_length=200)
+    active_persona_id: str = Field(min_length=1, max_length=200)
 
 
 class CreateSessionResponse(BaseModel):
@@ -100,8 +100,8 @@ class RuntimeStatusResponse(BaseModel):
 class CreateTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    message: str = Field(min_length=1)
-    active_persona_id: str | None = Field(default=None, min_length=1)
+    message: str = Field(min_length=1, max_length=4000)
+    active_persona_id: str | None = Field(default=None, min_length=1, max_length=200)
     request_cloud: bool = False
     cloud_confirmed: bool = False
     force_local: bool = False
