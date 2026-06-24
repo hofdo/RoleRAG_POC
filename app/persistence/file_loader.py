@@ -48,11 +48,41 @@ class DataValidationError(ValueError):
         super().__init__(f"Invalid {entity_type} '{entity_id}' at {path}: {cause}")
 
 
+def _validate_content_id(entity_type: str, entity_id: str) -> None:
+    """Reject ids that could escape the data directory or read arbitrary files.
+
+    Allows ASCII alphanumerics plus '-' and '_' only; rejects path separators,
+    '..', absolute paths, empty/whitespace ids, and control characters.
+    """
+
+    def _reject(reason: str) -> None:
+        raise DataValidationError(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            path=Path(entity_id),
+            cause=ValueError(reason),
+        )
+
+    if not entity_id.strip():
+        _reject("identifier is empty")
+    if "/" in entity_id or "\\" in entity_id:
+        _reject("identifier contains a path separator")
+    if ".." in entity_id:
+        _reject("identifier contains a parent-directory reference")
+    if Path(entity_id).is_absolute():
+        _reject("identifier is an absolute path")
+    if any(ord(char) < 32 or ord(char) == 127 for char in entity_id):
+        _reject("identifier contains control characters")
+    if not all(char.isascii() and (char.isalnum() or char in "-_") for char in entity_id):
+        _reject("identifier contains disallowed characters")
+
+
 class FileDataLoader:
     def __init__(self, *, base_path: Path | str = "data") -> None:
         self.base_path = Path(base_path)
 
     def load_world(self, world_id: str) -> DemoWorldRecord:
+        _validate_content_id("world", world_id)
         return self._load_model(
             entity_type="world",
             entity_id=world_id,
@@ -61,6 +91,7 @@ class FileDataLoader:
         )
 
     def load_persona(self, persona_id: str) -> PersonaCard:
+        _validate_content_id("persona", persona_id)
         return self._load_model(
             entity_type="persona",
             entity_id=persona_id,
@@ -69,6 +100,7 @@ class FileDataLoader:
         )
 
     def load_scene(self, scene_id: str) -> SceneState:
+        _validate_content_id("scene", scene_id)
         filename = f"{scene_id.replace('-', '_')}.json"
         return self._load_model(
             entity_type="scene",

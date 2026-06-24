@@ -156,3 +156,121 @@ def test_file_loader_raises_validation_error_for_invalid_scene(tmp_path: Path) -
 
     assert "rose-gallery" in str(exc_info.value)
     assert "scene" in str(exc_info.value)
+
+
+def test_load_world_rejects_path_traversal(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_world("../../etc/passwd")
+
+    assert exc_info.value.entity_type == "world"
+    assert exc_info.value.entity_id == "../../etc/passwd"
+
+
+def test_load_world_rejects_forward_slash(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_world("a/b")
+
+    assert exc_info.value.entity_type == "world"
+
+
+def test_load_world_rejects_backslash(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError):
+        loader.load_world("x\\y")
+
+
+def test_load_world_rejects_absolute_path(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_world("/abs")
+
+    assert exc_info.value.entity_type == "world"
+
+
+def test_load_world_rejects_control_char(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError):
+        loader.load_world("valid\x00id")
+
+
+def test_load_world_rejects_empty_id(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError):
+        loader.load_world("")
+
+
+def test_load_persona_rejects_traversal(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_persona("../secret")
+
+    assert exc_info.value.entity_type == "persona"
+
+
+def test_load_persona_rejects_whitespace_id(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError):
+        loader.load_persona("  ")
+
+
+def test_load_scene_rejects_traversal(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_scene("/absolute/path")
+
+    assert exc_info.value.entity_type == "scene"
+
+
+def test_load_scene_rejects_backslash(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError):
+        loader.load_scene("bad\\path")
+
+
+def test_valid_ids_still_load(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "worlds" / "demo_world.json",
+        {
+            "id": "demo_world",
+            "name": "Winter Palace Intrigue",
+            "default_scene_id": "rose-gallery",
+            "persona_ids": ["archivist"],
+            "scene_ids": ["rose-gallery"],
+        },
+    )
+    _write_json(
+        tmp_path / "personas" / "archivist.json",
+        {
+            "id": "archivist",
+            "name": "Iria Vale",
+            "role": "npc",
+            "public_description": "A composed palace archivist.",
+            "speaking_style": "Precise and dry.",
+        },
+    )
+    _write_json(
+        tmp_path / "scenes" / "rose_gallery.json",
+        {
+            "id": "rose-gallery",
+            "title": "Rose Gallery",
+            "location": "Winter Palace",
+            "player_visible_summary": "Courtiers drift between mirrors and roses.",
+        },
+    )
+    loader = FileDataLoader(base_path=tmp_path)
+
+    assert loader.load_world("demo_world").id == "demo_world"
+    assert loader.load_persona("archivist").name == "Iria Vale"
+    assert loader.load_scene("rose-gallery").title == "Rose Gallery"
