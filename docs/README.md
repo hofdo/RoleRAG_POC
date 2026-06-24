@@ -125,6 +125,25 @@ flowchart TD
 
 ---
 
+## Single sources of truth
+
+To stop the docs drifting, each kind of fact has one owning location; other docs should link
+rather than restate it.
+
+| Fact | Owner |
+|------|-------|
+| Config values, defaults, retry/truncation budgets | [`.env.example`](../.env.example) + [app/config.py](../app/config.py) |
+| HTTP endpoints, payloads, error codes, `stage_timings` keys, `confirmation_required` flow | [12_api_contract.md](12_api_contract.md) |
+| CLI command inventory | root [README](../README.md) + `python -m app.cli --help` |
+| Qdrant collections, retrieval, durable-memory design | [05_rag_memory_design.md](05_rag_memory_design.md) |
+| Visibility values & safety boundaries | [02_architecture.md](02_architecture.md) |
+| Local/cloud routing rules and cloud modes | [06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md) |
+
+A 13-doc / 402-claim cross-doc duplication audit found the remaining restatement is consistent and
+mostly intentional (safety invariants worth repeating), so it is kept rather than deduped.
+
+---
+
 *Why no separate GitHub wiki:* for a single-developer personal project, a wiki lives in a
 second git repo that drifts from the code. These in-repo docs are the wiki — they version,
 review, and diff alongside the code that they describe.

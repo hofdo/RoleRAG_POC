@@ -548,9 +548,10 @@ Start the server:
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-Implemented endpoints:
+Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) for the full contract):
 
 - `GET /play`
+- `GET /runtime/status`
 - `GET /content/catalog`
 - `GET /sessions`
 - `POST /sessions`
