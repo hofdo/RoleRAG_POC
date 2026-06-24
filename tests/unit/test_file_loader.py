@@ -232,6 +232,15 @@ def test_load_scene_rejects_traversal(tmp_path: Path) -> None:
     assert exc_info.value.entity_type == "scene"
 
 
+def test_load_persona_rejects_backslash(tmp_path: Path) -> None:
+    loader = FileDataLoader(base_path=tmp_path)
+
+    with pytest.raises(DataValidationError) as exc_info:
+        loader.load_persona("a\\b")
+
+    assert exc_info.value.entity_type == "persona"
+
+
 def test_load_scene_rejects_backslash(tmp_path: Path) -> None:
     loader = FileDataLoader(base_path=tmp_path)
 

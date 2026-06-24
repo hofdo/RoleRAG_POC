@@ -49,6 +49,7 @@ RECENT_SESSIONS_LIMIT = 10
 ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
 ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
 ERROR_422_RESPONSE: dict[int | str, dict[str, Any]] = {422: {"model": ErrorResponse}}
+ERROR_503_RESPONSE: dict[int | str, dict[str, Any]] = {503: {"model": ErrorResponse}}
 ERROR_504_RESPONSE: dict[int | str, dict[str, Any]] = {504: {"model": ErrorResponse}}
 SSE_200_RESPONSE: dict[int | str, dict[str, Any]] = {
     200: {
@@ -214,6 +215,7 @@ def list_recent_sessions(
         **ERROR_400_RESPONSE,
         **ERROR_404_RESPONSE,
         **ERROR_422_RESPONSE,
+        **ERROR_503_RESPONSE,
         **ERROR_504_RESPONSE,
     },
 )
@@ -233,6 +235,7 @@ async def create_turn(
         **ERROR_400_RESPONSE,
         **ERROR_404_RESPONSE,
         **ERROR_422_RESPONSE,
+        **ERROR_503_RESPONSE,
         **ERROR_504_RESPONSE,
     },
 )

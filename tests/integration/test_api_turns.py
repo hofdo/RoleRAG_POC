@@ -550,6 +550,21 @@ def test_post_turn_rejects_message_exceeding_max_length(tmp_path: Path) -> None:
     assert payload["error"]["details"]
 
 
+def test_post_turn_rejects_active_persona_id_exceeding_max_length(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello.", "active_persona_id": "x" * 201},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Path) -> None:
     services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services

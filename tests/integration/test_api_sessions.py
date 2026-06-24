@@ -778,6 +778,22 @@ def test_post_sessions_rejects_player_name_exceeding_max_length(tmp_path: Path) 
     assert payload["error"]["details"]
 
 
+def test_post_sessions_rejects_over_long_id_fields(tmp_path: Path) -> None:
+    base = {
+        "world_id": "demo_world",
+        "scene_id": "rose-gallery",
+        "player_name": "Avery",
+        "active_persona_id": "archivist",
+    }
+    for field in ("world_id", "scene_id", "active_persona_id"):
+        app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+        client = TestClient(app)
+        response = client.post("/sessions", json={**base, field: "x" * 201})
+        app.dependency_overrides.clear()
+        assert response.status_code == 422, field
+        assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_get_session_memories_returns_episode_metadata(tmp_path: Path) -> None:
     from app.api.routes import get_read_services
     from app.domain import MemoryCandidate, Visibility
