@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.agents.secret_guard import collect_hidden_facts
 from app.domain import (
     MemoryCandidate,
     MemoryCuratorResult,
@@ -208,6 +209,7 @@ class TurnMemoryStage:
                     error=exc,
                     model=route.model,
                     session_id=session.id,
+                    hidden_facts=collect_hidden_facts(persona, scene),
                 )
             )
             memory_written = self._fallback_after_curator_failure(

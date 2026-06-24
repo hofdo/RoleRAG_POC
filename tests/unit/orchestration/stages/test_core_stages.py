@@ -253,6 +253,39 @@ class RecordingFailureSink:
         )
 
 
+def test_record_structured_failure_redacts_hidden_facts_from_raw_text() -> None:
+    from app.llm.structured_output import StructuredOutputError
+    from app.orchestration.stages.critique import record_structured_failure
+
+    secret = "the regent ordered the poisoning at midnight"
+    sink = RecordingFailureSink()
+    error = StructuredOutputError(
+        "bad", category="parse", raw_text=f'{{"issues": ["He admitted {secret}"]}}'
+    )
+
+    warnings = record_structured_failure(
+        sink=sink, task="critic", error=error, model="local-model", hidden_facts=[secret]
+    )
+
+    assert warnings == ()
+    recorded = sink.records[0]["raw_text"]
+    assert isinstance(recorded, str)
+    assert secret not in recorded
+    assert "[redacted]" in recorded
+
+
+def test_record_structured_failure_keeps_raw_text_without_hidden_facts() -> None:
+    from app.llm.structured_output import StructuredOutputError
+    from app.orchestration.stages.critique import record_structured_failure
+
+    sink = RecordingFailureSink()
+    error = StructuredOutputError("bad", category="parse", raw_text='{"issues": ["x"]}')
+
+    record_structured_failure(sink=sink, task="critic", error=error, model="m")
+
+    assert sink.records[0]["raw_text"] == '{"issues": ["x"]}'
+
+
 class UnusedProvider(LlmProvider):
     async def generate(self, request: LlmRequest) -> LlmResponse:
         raise AssertionError("provider must not be called")

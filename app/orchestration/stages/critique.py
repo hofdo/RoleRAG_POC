@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.agents.secret_guard import collect_hidden_facts, redact_hidden_facts
+from app.agents.secret_guard import collect_hidden_facts, redact_hidden_facts, scan_reply
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
 from app.llm.provider import LlmMessage, LlmProvider
 from app.llm.router import (
@@ -129,6 +130,7 @@ class TurnCritiqueStage:
                     task="critic",
                     error=exc,
                     model=route.model,
+                    hidden_facts=collect_hidden_facts(persona, scene),
                 )
             )
             return CritiqueStageResult(critique=None, warnings=tuple(warnings))
@@ -162,15 +164,23 @@ def record_structured_failure(
     error: StructuredOutputError,
     model: str,
     session_id: str | None = None,
+    hidden_facts: Sequence[str] = (),
 ) -> tuple[str, ...]:
-    """Record a raw structured-output failure; report sink problems as warnings."""
+    """Record a raw structured-output failure; report sink problems as warnings.
+
+    The failed model output may contain confabulated hidden facts, so verbatim
+    hidden-fact echoes are redacted before the raw text is written to the sink.
+    """
     if sink is None:
         return ()
+    raw_text = error.raw_text
+    if hidden_facts and raw_text:
+        raw_text = scan_reply(raw_text, hidden_facts).text
     try:
         sink.record(
             task=task,
             category=error.category,
-            raw_text=error.raw_text,
+            raw_text=raw_text,
             model=model,
             session_id=session_id,
         )
