@@ -23,6 +23,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "cloud_routing",
         "containment",
         "structured_resilience",
+        "retrieval_miss",
     }
     assert all(result.passed for result in report.results)
     retrieval = next(result for result in report.results if result.name == "retrieval")

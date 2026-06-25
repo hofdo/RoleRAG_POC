@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -114,9 +115,24 @@ class EventKeyRetrievalResult(BaseModel):
     selected_ids: dict[str, list[str]] = Field(default_factory=dict)
 
 
-def evaluate_event_key_retrieval(fixture: EvalFixture) -> EventKeyRetrievalResult:
-    temp_dir = Path(tempfile.mkdtemp(prefix="rolerag-event-key-retrieval-"))
-    connection = connect_sqlite(temp_dir / "event-key-retrieval.db")
+@dataclass(frozen=True)
+class SeededRetrievalContext:
+    """A temp store seeded with the durable study events, ready for retrieval."""
+
+    retriever: ActorContextRetriever
+    event_memory_ids: dict[str, str]
+    connection: sqlite3.Connection
+
+
+def seed_event_retrieval_context(fixture: EvalFixture, *, db_name: str) -> SeededRetrievalContext:
+    """Seed the 5 durable events + 2 fillers into a temp store with a keyword embedding.
+
+    Shared by event_key_retrieval and retrieval_miss so both evals exercise the
+    identical candidate set; the caller is responsible for closing the returned
+    connection.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"rolerag-{db_name}-"))
+    connection = connect_sqlite(temp_dir / f"{db_name}.db")
     initialize_database(connection)
     SQLiteSessionRepository(connection).create_session(
         SessionState(
@@ -201,6 +217,18 @@ def evaluate_event_key_retrieval(fixture: EvalFixture) -> EventKeyRetrievalResul
             default_top_k=5,
         )
     )
+    return SeededRetrievalContext(
+        retriever=retriever,
+        event_memory_ids=event_memory_ids,
+        connection=connection,
+    )
+
+
+def evaluate_event_key_retrieval(fixture: EvalFixture) -> EventKeyRetrievalResult:
+    context = seed_event_retrieval_context(fixture, db_name="event-key-retrieval")
+    retriever = context.retriever
+    event_memory_ids = context.event_memory_ids
+    connection = context.connection
     checks: dict[str, bool] = {}
     selected_ids: dict[str, list[str]] = {}
     any_rejected = False

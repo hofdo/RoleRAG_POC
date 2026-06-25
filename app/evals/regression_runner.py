@@ -11,6 +11,7 @@ from app.evals.event_key_retrieval import evaluate_event_key_retrieval
 from app.evals.fixtures import EvalFixture, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
 from app.evals.memory_recall import evaluate_memory_recall
+from app.evals.retrieval_miss import evaluate_retrieval_miss
 from app.evals.retrieval_quality import evaluate_retrieval_quality
 from app.evals.role_consistency import evaluate_role_consistency
 from app.llm.provider import (
@@ -49,6 +50,7 @@ def run_regressions() -> RegressionReport:
         _cloud_routing_result(fixture),
         _containment_result(),
         asyncio.run(_structured_resilience_result()),
+        _retrieval_miss_result(fixture),
     ]
     total_checks = sum(len(result.checks) for result in results)
     return RegressionReport(
@@ -66,6 +68,11 @@ def _retrieval_result(fixture: EvalFixture) -> CategoryResult:
 def _event_key_retrieval_result(fixture: EvalFixture) -> CategoryResult:
     result = evaluate_event_key_retrieval(fixture)
     return CategoryResult(name="event_key_retrieval", passed=result.passed, checks=result.checks)
+
+
+def _retrieval_miss_result(fixture: EvalFixture) -> CategoryResult:
+    result = evaluate_retrieval_miss(fixture)
+    return CategoryResult(name="retrieval_miss", passed=result.passed, checks=result.checks)
 
 
 def _visibility_result(fixture: EvalFixture) -> CategoryResult:
