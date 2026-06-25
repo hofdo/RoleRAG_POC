@@ -20,6 +20,19 @@ except ImportError:  # pragma: no cover - exercised only when optional dependenc
     qdrant_models = None
 
 
+class VectorStoreDimensionMismatch(ValueError):
+    """Raised when a collection already exists with a different vector size."""
+
+    def __init__(self, collection: RagCollection, existing: int, requested: int) -> None:
+        self.collection = collection
+        self.existing = existing
+        self.requested = requested
+        super().__init__(
+            f"collection {collection.value} already initialized with size {existing}, "
+            f"not {requested}"
+        )
+
+
 class VectorStore(Protocol):
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None: ...
 
@@ -59,12 +72,12 @@ class InMemoryVectorStore:
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         existing = self._vector_sizes.get(collection)
         if existing is not None and existing != vector_size:
-            raise ValueError(
-                "collection "
-                f"{collection.value} already initialized with size {existing}, "
-                f"not {vector_size}"
-            )
+            raise VectorStoreDimensionMismatch(collection, existing, vector_size)
         self._vector_sizes[collection] = vector_size
+
+    def drop_collection(self, collection: RagCollection) -> None:
+        self._vector_sizes.pop(collection, None)
+        self._entries.pop(collection, None)
 
     def replace_source(
         self,
@@ -174,14 +187,24 @@ class QdrantVectorStore:
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         models = _require_qdrant_models()
-        if not self.client.collection_exists(collection_name=collection.value):
-            self.client.create_collection(
-                collection_name=collection.value,
-                vectors_config=models.VectorParams(
-                    size=vector_size,
-                    distance=models.Distance.COSINE,
-                ),
-            )
+        if self.client.collection_exists(collection_name=collection.value):
+            existing = self.client.get_collection(
+                collection_name=collection.value
+            ).config.params.vectors.size
+            if existing != vector_size:
+                raise VectorStoreDimensionMismatch(collection, existing, vector_size)
+            return
+        self.client.create_collection(
+            collection_name=collection.value,
+            vectors_config=models.VectorParams(
+                size=vector_size,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+    def drop_collection(self, collection: RagCollection) -> None:
+        if self.client.collection_exists(collection_name=collection.value):
+            self.client.delete_collection(collection_name=collection.value)
 
     def replace_source(
         self,

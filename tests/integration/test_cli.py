@@ -99,9 +99,13 @@ class RecordingVectorStore:
         self.ensure_calls: list[tuple[RagCollection, int]] = []
         self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
+        self.drop_calls: list[RagCollection] = []
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         self.ensure_calls.append((collection, vector_size))
+
+    def drop_collection(self, collection: RagCollection) -> None:
+        self.drop_calls.append(collection)
 
     def replace_source(
         self,
@@ -922,3 +926,52 @@ def test_cli_turn_history_empty_turns(tmp_path: Path) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {"session_id": "demo-session", "turns": []}
+
+
+def test_cli_reset_index_drops_all_collections_by_default() -> None:
+    vector_store = RecordingVectorStore()
+
+    with patch("app.cli._build_vector_store", return_value=vector_store):
+        result = runner.invoke(app, ["reset-index", "--yes"])
+
+    assert result.exit_code == 0
+    assert set(vector_store.drop_calls) == {
+        RagCollection.CANON_LORE,
+        RagCollection.SESSION_MEMORY,
+        RagCollection.PERSONA_MEMORY,
+    }
+    payload = json.loads(result.stdout)
+    assert set(payload["dropped"]) == {
+        RagCollection.CANON_LORE.value,
+        RagCollection.SESSION_MEMORY.value,
+        RagCollection.PERSONA_MEMORY.value,
+    }
+
+
+def test_cli_reset_index_drops_selected_collection() -> None:
+    vector_store = RecordingVectorStore()
+
+    with patch("app.cli._build_vector_store", return_value=vector_store):
+        result = runner.invoke(
+            app,
+            ["reset-index", "--collection", "session_memory", "--yes"],
+        )
+
+    assert result.exit_code == 0
+    assert vector_store.drop_calls == [RagCollection.SESSION_MEMORY]
+    payload = json.loads(result.stdout)
+    assert payload["dropped"] == [RagCollection.SESSION_MEMORY.value]
+
+
+def test_cli_reset_index_rejects_unknown_collection() -> None:
+    vector_store = RecordingVectorStore()
+
+    with patch("app.cli._build_vector_store", return_value=vector_store):
+        result = runner.invoke(
+            app,
+            ["reset-index", "--collection", "unknown_name", "--yes"],
+        )
+
+    assert result.exit_code == 1
+    assert "unknown_name" in result.stdout
+    assert vector_store.drop_calls == []

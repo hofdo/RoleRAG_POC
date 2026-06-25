@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import pytest
+
 from app.domain import Visibility
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
 from app.rag.vector_store import (
     InMemoryVectorStore,
+    QdrantVectorStore,
+    VectorStoreDimensionMismatch,
     _qdrant_point_id,
     _search_qdrant_points,
 )
@@ -167,3 +171,124 @@ def test_in_memory_store_deletes_points_for_session() -> None:
         10,
     )
     assert [chunk.id for chunk in results] == ["memory-2"]
+
+
+def test_in_memory_ensure_collection_raises_dimension_mismatch() -> None:
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 2)
+
+    with pytest.raises(VectorStoreDimensionMismatch) as exc_info:
+        store.ensure_collection(RagCollection.SESSION_MEMORY, 3)
+
+    message = str(exc_info.value)
+    assert "session_memory" in message
+    assert "2" in message
+    assert "3" in message
+
+
+def test_in_memory_drop_collection_clears_state() -> None:
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.CANON_LORE, 2)
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 2)
+    canon_chunk = RagChunk(
+        id="lore-1",
+        source="lore",
+        source_type="lore",
+        text="canon",
+        visibility=Visibility.PLAYER,
+        world_id="demo_world",
+    )
+    session_chunk = RagChunk(
+        id="memory-1",
+        source="memory",
+        source_type="session_memory",
+        text="memory",
+        visibility=Visibility.PLAYER,
+        session_id="session-1",
+    )
+    store.upsert_chunks(RagCollection.CANON_LORE, [canon_chunk], [[1.0, 0.0]])
+    store.upsert_chunks(RagCollection.SESSION_MEMORY, [session_chunk], [[0.0, 1.0]])
+
+    store.drop_collection(RagCollection.CANON_LORE)
+
+    assert (
+        store.search(
+            RagCollection.CANON_LORE,
+            [1.0, 0.0],
+            RetrievalFilter.player_visible(world_id="demo_world"),
+            limit=10,
+        )
+        == []
+    )
+    # The dropped collection can be re-initialized with a different size.
+    store.ensure_collection(RagCollection.CANON_LORE, 5)
+    remaining = store.search(
+        RagCollection.SESSION_MEMORY,
+        [0.0, 1.0],
+        RetrievalFilter.player_visible(session_id="session-1"),
+        limit=10,
+    )
+    assert [chunk.id for chunk in remaining] == ["memory-1"]
+
+
+class _FakeVectors:
+    def __init__(self, size: int) -> None:
+        self.size = size
+
+
+class _FakeParams:
+    def __init__(self, size: int) -> None:
+        self.vectors = _FakeVectors(size)
+
+
+class _FakeConfig:
+    def __init__(self, size: int) -> None:
+        self.params = _FakeParams(size)
+
+
+class _FakeCollectionInfo:
+    def __init__(self, size: int) -> None:
+        self.config = _FakeConfig(size)
+
+
+class _FakeQdrantClient:
+    def __init__(self, *, existing_size: int | None) -> None:
+        self._existing_size = existing_size
+        self.deleted: list[str] = []
+        self.created: list[dict[str, object]] = []
+
+    def collection_exists(self, *, collection_name: str) -> bool:
+        return self._existing_size is not None
+
+    def get_collection(self, *, collection_name: str) -> _FakeCollectionInfo:
+        assert self._existing_size is not None  # only called when the collection exists
+        return _FakeCollectionInfo(self._existing_size)
+
+    def create_collection(self, **kwargs: object) -> None:
+        self.created.append(kwargs)
+
+    def delete_collection(self, *, collection_name: str) -> None:
+        self.deleted.append(collection_name)
+
+
+def test_qdrant_ensure_collection_raises_dimension_mismatch_on_existing_collection() -> None:
+    store = QdrantVectorStore(url="http://localhost:6333")
+    store._client = _FakeQdrantClient(existing_size=1536)
+
+    with pytest.raises(VectorStoreDimensionMismatch) as exc_info:
+        store.ensure_collection(RagCollection.CANON_LORE, 768)
+
+    message = str(exc_info.value)
+    assert "canon_lore" in message
+    assert "1536" in message
+    assert "768" in message
+
+
+def test_qdrant_drop_collection_calls_delete() -> None:
+    store = QdrantVectorStore(url="http://localhost:6333")
+    client = _FakeQdrantClient(existing_size=1536)
+    store._client = client
+
+    store.drop_collection(RagCollection.SESSION_MEMORY)
+
+    assert client.deleted == ["session_memory"]

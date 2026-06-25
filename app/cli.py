@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Protocol, cast
 
 import typer
 
@@ -59,6 +60,10 @@ from app.rag import (
 )
 
 app = typer.Typer(help="RoleRAG CLI")
+
+
+class _SupportsDropCollection(Protocol):
+    def drop_collection(self, collection: RagCollection) -> None: ...
 
 
 async def _run_turn(
@@ -555,6 +560,86 @@ def retrieve_debug(
     )
 
 
+@app.command("embedding-ab")
+def embedding_ab(
+    model: Annotated[
+        list[str],
+        typer.Option(
+            help="FastEmbed model name to benchmark (repeatable). "
+            "Models download on first use.",
+        ),
+    ],
+    baseline: Annotated[
+        str,
+        typer.Option(
+            help="Baseline FastEmbed model name (downloads on first use)",
+        ),
+    ] = "sentence-transformers/all-MiniLM-L6-v2",
+) -> None:
+    """Rank the seeded durable memories with each embedding model (LLM-free).
+
+    For each model (the --baseline plus every --model) a real
+    FastEmbedEmbeddingProvider is built and used to seed the study corpus, then
+    per-event ranks, mean rank, and miss count are printed. Models are auto-
+    downloaded by fastembed on first use, so the first run for a given model is slow.
+    """
+    from app.diagnostics.embedding_ab import measure_embedding_ranks
+    from app.evals.event_key_retrieval import SEEDED_EVENTS
+    from app.rag.embeddings import FastEmbedEmbeddingProvider
+
+    model_names = [baseline, *model]
+    event_keys = [event.key for event in SEEDED_EVENTS]
+    rows: list[tuple[str, dict[str, int | None]]] = []
+    for model_name in model_names:
+        try:
+            ranks = measure_embedding_ranks(
+                embedding_provider=FastEmbedEmbeddingProvider(model_name=model_name),
+            )
+        except ImportError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
+        rows.append((model_name, ranks))
+
+    typer.echo(_render_embedding_ab_table(event_keys, rows))
+
+
+def _render_embedding_ab_table(
+    event_keys: Sequence[str],
+    rows: Sequence[tuple[str, dict[str, int | None]]],
+) -> str:
+    def cell(value: int | None) -> str:
+        return "miss" if value is None else str(value)
+
+    headers = ["model", *event_keys, "mean rank", "miss count"]
+    body: list[list[str]] = []
+    for model_name, ranks in rows:
+        present = [rank for rank in ranks.values() if rank is not None]
+        mean_rank = f"{sum(present) / len(present):.2f}" if present else "n/a"
+        miss_count = sum(1 for rank in ranks.values() if rank is None)
+        body.append(
+            [
+                model_name,
+                *(cell(ranks.get(key)) for key in event_keys),
+                mean_rank,
+                str(miss_count),
+            ]
+        )
+    widths = [
+        max(len(headers[col]), *(len(line[col]) for line in body)) if body else len(headers[col])
+        for col in range(len(headers))
+    ]
+
+    def format_row(cells: Sequence[str]) -> str:
+        return "| " + " | ".join(c.ljust(widths[col]) for col, c in enumerate(cells)) + " |"
+
+    lines = [
+        format_row(headers),
+        "| " + " | ".join("-" * widths[col] for col in range(len(headers))) + " |",
+        *(format_row(line) for line in body),
+    ]
+    return "\n".join(lines)
+
+
 @app.command()
 def turn(
     message: Annotated[str, typer.Option(help="Player message for the demo turn")],
@@ -880,6 +965,39 @@ def reset_db(
     for session_id in session_ids:
         _delete_session_vectors(session_id)
     typer.echo(json.dumps({"deleted_sessions": len(session_ids)}))
+
+
+@app.command("reset-index")
+def reset_index(
+    collection: Annotated[
+        str,
+        typer.Option(
+            help="Vector collection to drop: all|canon_lore|session_memory|persona_memory"
+        ),
+    ] = "all",
+    yes: Annotated[bool, typer.Option("--yes", help="Skip confirmation prompt")] = False,
+) -> None:
+    if collection == "all":
+        targets = list(RagCollection)
+    else:
+        try:
+            targets = [RagCollection(collection)]
+        except ValueError:
+            typer.echo(
+                f"Unknown collection: {collection} "
+                "(choose all, canon_lore, session_memory, or persona_memory)"
+            )
+            raise typer.Exit(code=1) from None
+    if not yes:
+        typer.confirm(
+            "Drop the selected vector index collection(s)? This cannot be undone.",
+            abort=True,
+        )
+    settings = get_settings()
+    vector_store = cast(_SupportsDropCollection, _build_vector_store(settings))
+    for target in targets:
+        vector_store.drop_collection(target)
+    typer.echo(json.dumps({"dropped": [target.value for target in targets]}))
 
 
 def main() -> None:
