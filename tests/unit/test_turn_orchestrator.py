@@ -20,7 +20,7 @@ from app.domain import (
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     DemoWorldRecord,
     SQLiteMemoryRepository,
@@ -189,15 +189,17 @@ def _build_orchestrator(
         memory_curator=memory_curator,
         memory_indexer=memory_indexer,
         actor_context_retriever=actor_context_retriever,
-        retrieval_top_k=3,
-        max_retrieved_chunk_chars=800,
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            retrieval_top_k=3,
+            max_retrieved_chunk_chars=800,
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
 
 
@@ -336,13 +338,15 @@ async def test_turn_orchestrator_uses_stored_content_root_for_turns(tmp_path: Pa
             turn_repository=turn_repository,
             recent_turns=8,
         ),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
 
     await orchestrator.run_turn(
@@ -918,15 +922,17 @@ def test_turn_orchestrator_constructor_forwards_gating_modes(tmp_path: Path) -> 
             turn_repository=turn_repository,
             recent_turns=8,
         ),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="off",
-        critic_gating="auto",
-        curator_gating="auto",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="off",
+            critic_gating="auto",
+            curator_gating="auto",
+        ),
     )
 
     assert orchestrator.critique_stage.gating == "auto"

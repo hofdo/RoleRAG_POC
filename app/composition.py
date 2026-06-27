@@ -10,7 +10,7 @@ from app.diagnostics.structured_failures import StructuredOutputFailureSink
 from app.llm.openai_compatible import OpenAICompatibleProvider
 from app.llm.provider import LlmProvider
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     FileDataLoader,
     SQLiteCanonRepository,
@@ -126,6 +126,35 @@ def build_ranking_weights(settings: Settings) -> RankingWeights:
     )
 
 
+def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnOrchestratorConfig:
+    return TurnOrchestratorConfig(
+        content_root=content_root,
+        local_model=settings.local_llm_model,
+        cloud_model=settings.cloud_llm_model,
+        local_max_tokens=settings.local_llm_max_tokens,
+        local_structured_max_tokens=settings.local_structured_max_tokens,
+        cloud_max_tokens=settings.cloud_llm_max_tokens,
+        local_temperature=settings.local_llm_temperature,
+        cloud_temperature=settings.cloud_llm_temperature,
+        cloud_mode=settings.cloud_mode,
+        retrieval_top_k=settings.rag_default_top_k,
+        max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
+        recent_dialogue_max_message_chars=settings.recent_dialogue_max_message_chars,
+        critic_gating=settings.critic_gating,
+        curator_gating=settings.curator_gating,
+        canon_importance_floor=settings.canon_importance_floor,
+        canon_max_items=settings.canon_max_items,
+        canon_max_chars=settings.canon_max_chars,
+        write_dedup_cosine_threshold=settings.rag_write_dedup_cosine_threshold,
+        low_retrieval_confidence=settings.low_retrieval_confidence,
+        high_scene_complexity=settings.high_scene_complexity,
+        truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier,
+        containment_overlap_threshold=settings.containment_overlap_threshold,
+        memory_consolidation_threshold=settings.memory_consolidation_threshold,
+        memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
+    )
+
+
 def build_actor_context_retriever(
     settings: Settings,
     *,
@@ -165,7 +194,6 @@ def build_services(
     orchestrator = TurnOrchestrator(
         loader=build_file_loader(resolved_content_root),
         loader_factory=build_file_loader,
-        content_root=str(resolved_content_root),
         provider=build_local_provider(settings),
         cloud_provider=build_cloud_provider(settings),
         critic_agent=build_critic_agent(settings),
@@ -194,32 +222,10 @@ def build_services(
             if embedding_provider is not None and vector_store is not None
             else None
         ),
-        retrieval_top_k=settings.rag_default_top_k,
-        max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
-        local_model=settings.local_llm_model,
-        cloud_model=settings.cloud_llm_model,
-        local_max_tokens=settings.local_llm_max_tokens,
-        local_structured_max_tokens=settings.local_structured_max_tokens,
-        cloud_max_tokens=settings.cloud_llm_max_tokens,
-        local_temperature=settings.local_llm_temperature,
-        cloud_temperature=settings.cloud_llm_temperature,
-        cloud_mode=settings.cloud_mode,
-        recent_dialogue_max_message_chars=settings.recent_dialogue_max_message_chars,
         structured_failure_sink=build_structured_failure_sink(settings),
-        critic_gating=settings.critic_gating,
-        curator_gating=settings.curator_gating,
-        canon_importance_floor=settings.canon_importance_floor,
-        canon_max_items=settings.canon_max_items,
-        canon_max_chars=settings.canon_max_chars,
         memory_embedding_provider=embedding_provider,
-        write_dedup_cosine_threshold=settings.rag_write_dedup_cosine_threshold,
-        low_retrieval_confidence=settings.low_retrieval_confidence,
-        high_scene_complexity=settings.high_scene_complexity,
-        truncation_retry_budget_multiplier=settings.truncation_retry_budget_multiplier,
-        containment_overlap_threshold=settings.containment_overlap_threshold,
-        memory_consolidation_threshold=settings.memory_consolidation_threshold,
-        memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
         canon_repository=canon_repository,
+        config=build_orchestrator_config(settings, content_root=str(resolved_content_root)),
     )
     return AppServices(
         connection=connection,

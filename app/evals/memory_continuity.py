@@ -18,7 +18,7 @@ from app.evals.fixtures import (
 )
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
@@ -129,13 +129,15 @@ async def _evaluate_memory_continuity() -> MemoryContinuityResult:
                 embedding_provider=embedding_provider,
                 vector_store=live_vector_store,
             ),
-            local_model=fixture.local_route.model,
-            cloud_model=fixture.cloud_route.model,
-            local_max_tokens=fixture.local_route.max_tokens,
-            cloud_max_tokens=fixture.cloud_route.max_tokens,
-            local_temperature=fixture.local_route.temperature,
-            cloud_temperature=fixture.cloud_route.temperature,
-            cloud_mode="off",
+            config=TurnOrchestratorConfig(
+                local_model=fixture.local_route.model,
+                cloud_model=fixture.cloud_route.model,
+                local_max_tokens=fixture.local_route.max_tokens,
+                cloud_max_tokens=fixture.cloud_route.max_tokens,
+                local_temperature=fixture.local_route.temperature,
+                cloud_temperature=fixture.cloud_route.temperature,
+                cloud_mode="off",
+            ),
         )
 
         turn_results = []

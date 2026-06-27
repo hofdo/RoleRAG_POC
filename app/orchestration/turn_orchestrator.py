@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from time import perf_counter
 
 from app.agents import ActorAgent
@@ -94,53 +95,64 @@ def _stage_timer(timings: dict[str, float], stage: str) -> Iterator[None]:
         timings[stage] = perf_counter() - started
 
 
+@dataclass(frozen=True, kw_only=True)
+class TurnOrchestratorConfig:
+    """Scalar turn tunables, grouped so the orchestrator ctor takes deps + one config.
+
+    Defaults mirror the prior TurnOrchestrator.__init__ defaults exactly (behavior-preserving);
+    composition builds this from Settings via build_orchestrator_config(). Mirrors RankingWeights.
+    """
+
+    local_model: str
+    cloud_model: str
+    local_max_tokens: int
+    cloud_max_tokens: int
+    local_temperature: float
+    cloud_temperature: float
+    cloud_mode: CloudMode | str
+    content_root: str = "data"
+    local_structured_max_tokens: int = 350
+    retrieval_top_k: int = 5
+    max_retrieved_chunk_chars: int = 800
+    recent_dialogue_max_message_chars: int = 900
+    critic_gating: str = "always"
+    curator_gating: str = "always"
+    canon_importance_floor: int = 4
+    canon_max_items: int = 8
+    canon_max_chars: int = 900
+    write_dedup_cosine_threshold: float = 1.0
+    low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE
+    high_scene_complexity: int = HIGH_SCENE_COMPLEXITY
+    truncation_retry_budget_multiplier: int = 2
+    containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP
+    memory_consolidation_threshold: int = 0
+    memory_consolidation_max_importance: int = 3
+
+
 class TurnOrchestrator:
     def __init__(
         self,
         *,
         loader: TurnDataLoader,
-        loader_factory: TurnDataLoaderFactory | None = None,
-        content_root: str = "data",
         provider: LlmProvider,
         critic_agent: CriticEvaluatingAgent,
         session_repository: SessionRepository,
         turn_repository: TurnRepository,
         recent_dialogue_store: RecentDialogueStore,
-        local_model: str,
-        cloud_model: str,
-        local_max_tokens: int,
-        local_structured_max_tokens: int = 350,
-        cloud_max_tokens: int,
-        local_temperature: float,
-        cloud_temperature: float,
-        cloud_mode: CloudMode | str,
+        config: TurnOrchestratorConfig,
+        loader_factory: TurnDataLoaderFactory | None = None,
         cloud_provider: LlmProvider | None = None,
         memory_store: MemoryEpisodeStore | None = None,
         memory_curator: MemoryCuratingAgent | None = None,
         memory_indexer: MemoryIndexing | None = None,
         actor_context_retriever: ActorContextRetrieving | None = None,
-        retrieval_top_k: int = 5,
-        max_retrieved_chunk_chars: int = 800,
-        recent_dialogue_max_message_chars: int = 900,
         structured_failure_sink: StructuredFailureRecording | None = None,
-        critic_gating: str = "always",
-        curator_gating: str = "always",
-        canon_importance_floor: int = 4,
-        canon_max_items: int = 8,
-        canon_max_chars: int = 900,
         memory_embedding_provider: EmbeddingProvider | None = None,
-        write_dedup_cosine_threshold: float = 1.0,
-        low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
-        high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
-        truncation_retry_budget_multiplier: int = 2,
-        containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP,
-        memory_consolidation_threshold: int = 0,
-        memory_consolidation_max_importance: int = 3,
         canon_repository: CanonRepository | None = None,
     ) -> None:
+        self.config = config
         self.loader = loader
         self.loader_factory = loader_factory
-        self.content_root = content_root
         self.provider = provider
         self.cloud_provider = cloud_provider
         self.session_repository = session_repository
@@ -150,43 +162,35 @@ class TurnOrchestrator:
         self.memory_curator = memory_curator
         self.memory_indexer = memory_indexer
         self.context_budget = ContextBudget(
-            retrieved_chunks=retrieval_top_k,
-            max_retrieved_chunk_chars=max_retrieved_chunk_chars,
+            retrieved_chunks=config.retrieval_top_k,
+            max_retrieved_chunk_chars=config.max_retrieved_chunk_chars,
         )
         self.actor_agent = ActorAgent()
-        self.local_model = local_model
-        self.cloud_model = cloud_model
-        self.local_max_tokens = local_max_tokens
-        self.local_structured_max_tokens = local_structured_max_tokens
-        self.cloud_max_tokens = cloud_max_tokens
-        self.local_temperature = local_temperature
-        self.cloud_temperature = cloud_temperature
-        self.recent_dialogue_max_message_chars = recent_dialogue_max_message_chars
-        self.containment_overlap_threshold = containment_overlap_threshold
+        self.containment_overlap_threshold = config.containment_overlap_threshold
 
         self.session_stage = TurnSessionLoader(
             loader=loader,
             loader_factory=loader_factory,
-            content_root=content_root,
+            content_root=config.content_root,
             session_repository=session_repository,
             recent_dialogue_store=recent_dialogue_store,
             memory_store=memory_store,
             canon_repository=canon_repository,
-            canon_importance_floor=canon_importance_floor,
-            canon_max_items=canon_max_items,
-            canon_max_chars=canon_max_chars,
+            canon_importance_floor=config.canon_importance_floor,
+            canon_max_items=config.canon_max_items,
+            canon_max_chars=config.canon_max_chars,
         )
         self.routing_stage = TurnRoutingStage(
-            local_model=local_model,
-            cloud_model=cloud_model,
-            local_max_tokens=local_max_tokens,
-            local_structured_max_tokens=local_structured_max_tokens,
-            cloud_max_tokens=cloud_max_tokens,
-            local_temperature=local_temperature,
-            cloud_temperature=cloud_temperature,
-            cloud_mode=cloud_mode,
-            low_retrieval_confidence=low_retrieval_confidence,
-            high_scene_complexity=high_scene_complexity,
+            local_model=config.local_model,
+            cloud_model=config.cloud_model,
+            local_max_tokens=config.local_max_tokens,
+            local_structured_max_tokens=config.local_structured_max_tokens,
+            cloud_max_tokens=config.cloud_max_tokens,
+            local_temperature=config.local_temperature,
+            cloud_temperature=config.cloud_temperature,
+            cloud_mode=config.cloud_mode,
+            low_retrieval_confidence=config.low_retrieval_confidence,
+            high_scene_complexity=config.high_scene_complexity,
         )
         self.retrieval_stage = TurnRetrievalStage(
             actor_context_retriever=actor_context_retriever,
@@ -197,18 +201,18 @@ class TurnOrchestrator:
             cloud_provider=cloud_provider,
             routing_stage=self.routing_stage,
             context_budget=self.context_budget,
-            recent_dialogue_max_message_chars=recent_dialogue_max_message_chars,
+            recent_dialogue_max_message_chars=config.recent_dialogue_max_message_chars,
             actor_agent=self.actor_agent,
-            truncation_retry_budget_multiplier=truncation_retry_budget_multiplier,
+            truncation_retry_budget_multiplier=config.truncation_retry_budget_multiplier,
         )
         self.critique_stage = TurnCritiqueStage(
             provider=provider,
             critic_agent=critic_agent,
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
-            gating=critic_gating,
-            low_retrieval_confidence=low_retrieval_confidence,
-            high_scene_complexity=high_scene_complexity,
+            gating=config.critic_gating,
+            low_retrieval_confidence=config.low_retrieval_confidence,
+            high_scene_complexity=config.high_scene_complexity,
         )
         self.repair_stage = TurnRepairStage(
             generation_stage=self.generation_stage,
@@ -226,11 +230,11 @@ class TurnOrchestrator:
             memory_indexer=memory_indexer,
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
-            gating=curator_gating,
+            gating=config.curator_gating,
             embedding_provider=memory_embedding_provider,
-            write_dedup_cosine_threshold=write_dedup_cosine_threshold,
-            consolidation_threshold=memory_consolidation_threshold,
-            consolidation_importance_ceiling=memory_consolidation_max_importance,
+            write_dedup_cosine_threshold=config.write_dedup_cosine_threshold,
+            consolidation_threshold=config.memory_consolidation_threshold,
+            consolidation_importance_ceiling=config.memory_consolidation_max_importance,
         )
 
     @property

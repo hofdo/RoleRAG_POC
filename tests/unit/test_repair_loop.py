@@ -18,7 +18,7 @@ from app.domain import (
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import CloudMode, ModelProviderName
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     DemoWorldRecord,
     SQLiteMemoryRepository,
@@ -184,13 +184,15 @@ def _build_orchestrator(
         recent_dialogue_store=RecentDialogueStore(turn_repository=turn_repository, recent_turns=8),
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
         memory_curator=memory_curator,
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode=cloud_mode,
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode=cloud_mode,
+        ),
     )
     return orchestrator, turn_repository, memory_repository
 

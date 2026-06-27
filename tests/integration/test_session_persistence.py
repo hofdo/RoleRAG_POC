@@ -7,7 +7,7 @@ import pytest
 from app.domain import CriticResult, PersonaCard, SceneState, SessionState, TurnInput
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.memory import RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
@@ -108,13 +108,15 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
             turn_repository=turn_repository,
             recent_turns=1,
         ),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
 
     await first.run_turn(turn_input=TurnInput(session_id="session-1", message="First question"))
@@ -130,13 +132,15 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
             turn_repository=turn_repository,
             recent_turns=1,
         ),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
 
     await second.run_turn(turn_input=TurnInput(session_id="session-1", message="Second question"))

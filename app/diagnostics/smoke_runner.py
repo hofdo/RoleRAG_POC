@@ -20,7 +20,7 @@ from app.diagnostics.runtime_checks import (
 from app.domain import TurnInput, Visibility
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     FileDataLoader,
     SQLiteMemoryRepository,
@@ -155,15 +155,17 @@ def run_smoke(*, settings: Settings | None = None, real_runtime: bool = False) -
             vector_store=vector_store,
         ),
         actor_context_retriever=retriever,
-        local_model=resolved_settings.local_llm_model,
-        cloud_model=resolved_settings.cloud_llm_model,
-        local_max_tokens=resolved_settings.local_llm_max_tokens,
-        cloud_max_tokens=resolved_settings.cloud_llm_max_tokens,
-        local_temperature=resolved_settings.local_llm_temperature,
-        cloud_temperature=resolved_settings.cloud_llm_temperature,
-        cloud_mode=resolved_settings.cloud_mode,
-        retrieval_top_k=resolved_settings.rag_default_top_k,
-        max_retrieved_chunk_chars=resolved_settings.rag_max_retrieved_chunk_chars,
+        config=TurnOrchestratorConfig(
+            local_model=resolved_settings.local_llm_model,
+            cloud_model=resolved_settings.cloud_llm_model,
+            local_max_tokens=resolved_settings.local_llm_max_tokens,
+            cloud_max_tokens=resolved_settings.cloud_llm_max_tokens,
+            local_temperature=resolved_settings.local_llm_temperature,
+            cloud_temperature=resolved_settings.cloud_llm_temperature,
+            cloud_mode=resolved_settings.cloud_mode,
+            retrieval_top_k=resolved_settings.rag_default_top_k,
+            max_retrieved_chunk_chars=resolved_settings.rag_max_retrieved_chunk_chars,
+        ),
     )
     steps: list[DiagnosticCheck] = []
     session_id: str | None = None

@@ -17,7 +17,7 @@ from app.domain import (
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import CloudMode, ModelProviderName
 from app.memory import RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
@@ -149,13 +149,15 @@ def _build_orchestrator(
         turn_repository=turn_repository,
         recent_dialogue_store=RecentDialogueStore(turn_repository=turn_repository, recent_turns=8),
         actor_context_retriever=retriever,
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode=cloud_mode,
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode=cloud_mode,
+        ),
     )
 
 

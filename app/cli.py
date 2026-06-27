@@ -39,7 +39,7 @@ from app.domain import TurnInput, TurnOutcome, TurnResult, Visibility
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.llm.router import ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
@@ -107,7 +107,6 @@ def _build_services(
     orchestrator = TurnOrchestrator(
         loader=_build_file_loader(resolved_content_root),
         loader_factory=_build_file_loader,
-        content_root=str(resolved_content_root),
         provider=_build_local_provider(settings),
         cloud_provider=_build_cloud_provider(settings),
         critic_agent=_build_critic_agent(settings),
@@ -134,15 +133,18 @@ def _build_services(
             if embedding_provider is not None and vector_store is not None
             else None
         ),
-        retrieval_top_k=settings.rag_default_top_k,
-        max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
-        local_model=settings.local_llm_model,
-        cloud_model=settings.cloud_llm_model,
-        local_max_tokens=settings.local_llm_max_tokens,
-        cloud_max_tokens=settings.cloud_llm_max_tokens,
-        local_temperature=settings.local_llm_temperature,
-        cloud_temperature=settings.cloud_llm_temperature,
-        cloud_mode=settings.cloud_mode,
+        config=TurnOrchestratorConfig(
+            content_root=str(resolved_content_root),
+            retrieval_top_k=settings.rag_default_top_k,
+            max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
+            local_model=settings.local_llm_model,
+            cloud_model=settings.cloud_llm_model,
+            local_max_tokens=settings.local_llm_max_tokens,
+            cloud_max_tokens=settings.cloud_llm_max_tokens,
+            local_temperature=settings.local_llm_temperature,
+            cloud_temperature=settings.cloud_llm_temperature,
+            cloud_mode=settings.cloud_mode,
+        ),
     )
     return AppServices(
         connection=connection,

@@ -19,7 +19,7 @@ from app.llm.router import CloudMode, ModelProviderName, ModelRoute
 from app.memory import RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
@@ -302,13 +302,15 @@ class EvalFixture:
                 recent_turns=8,
             ),
             actor_context_retriever=self.create_actor_context_retriever(),
-            local_model=self.local_route.model,
-            cloud_model=self.cloud_route.model,
-            local_max_tokens=self.local_route.max_tokens,
-            cloud_max_tokens=self.cloud_route.max_tokens,
-            local_temperature=self.local_route.temperature,
-            cloud_temperature=self.cloud_route.temperature,
-            cloud_mode=cloud_mode,
+            config=TurnOrchestratorConfig(
+                local_model=self.local_route.model,
+                cloud_model=self.cloud_route.model,
+                local_max_tokens=self.local_route.max_tokens,
+                cloud_max_tokens=self.cloud_route.max_tokens,
+                local_temperature=self.local_route.temperature,
+                cloud_temperature=self.cloud_route.temperature,
+                cloud_mode=cloud_mode,
+            ),
         )
         return orchestrator, local_provider, cloud_provider
 

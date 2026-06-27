@@ -8,7 +8,7 @@ from app.agents.memory_curator import MemoryCurator
 from app.domain import CriticResult, PersonaCard, SceneState, SessionState, TurnInput
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     DemoWorldRecord,
     SQLiteMemoryRepository,
@@ -133,13 +133,15 @@ async def test_turn_orchestrator_persists_memory_episodes_after_successful_turn(
         recent_dialogue_store=RecentDialogueStore(turn_repository=turn_repository, recent_turns=8),
         memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
         memory_curator=MemoryCurator(),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
 
     result = await orchestrator.run_turn(

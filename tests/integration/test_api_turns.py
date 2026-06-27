@@ -19,7 +19,7 @@ from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import CloudMode
 from app.main import app
 from app.memory import RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
@@ -196,15 +196,17 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
         memory_store=None,
         memory_curator=None,
         actor_context_retriever=retriever,
-        retrieval_top_k=5,
-        max_retrieved_chunk_chars=800,
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            retrieval_top_k=5,
+            max_retrieved_chunk_chars=800,
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
     return (
         AppServices(
@@ -289,13 +291,15 @@ def _build_in_memory_retrieval_services(
                 vector_store=vector_store,
             )
         ),
-        local_model="local-model",
-        cloud_model="cloud-model",
-        local_max_tokens=700,
-        cloud_max_tokens=1000,
-        local_temperature=0.75,
-        cloud_temperature=0.65,
-        cloud_mode="ask",
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
     )
     return (
         AppServices(
