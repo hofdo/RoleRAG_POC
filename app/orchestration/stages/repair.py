@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
-from app.domain import CriticResult, TurnOutcome
+from app.domain import CriticResult, CriticStatus, TurnOutcome
 from app.llm.provider import LlmMessage
 from app.llm.router import ModelProviderName, ModelRoute, ModelTask
-from app.orchestration.stages.critique import TurnCritiqueStage
-from app.orchestration.stages.generation import TurnGenerationStage
+from app.orchestration.draft_validator import DraftValidationResult
+from app.orchestration.stages.critique import CritiqueStageResult, TurnCritiqueStage
+from app.orchestration.stages.generation import (
+    EmptyProviderResponseError,
+    GenerationStageResult,
+    TruncatedProviderResponseError,
+    TurnGenerationStage,
+)
 from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult, TurnRoutingStage
 from app.orchestration.stages.session import LoadedTurnContext
@@ -24,6 +31,34 @@ class RepairStageResult:
     finish_reason: str | None
     outcome: TurnOutcome
     warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RepairResolution:
+    """The orchestrator-applicable outcome of the critique→repair decision.
+
+    When ``controlled_failure`` is True the caller returns a CONTROLLED_FAILURE turn;
+    otherwise it applies text/route/finish_reason/critic_status and continues. ``repair_duration``
+    is set only when a repair attempt actually ran (so ``stage_timings['repair']`` matches today).
+    """
+
+    text: str
+    route: ModelRoute
+    finish_reason: str | None
+    critic_status: CriticStatus
+    warnings: tuple[str, ...]
+    controlled_failure: bool
+    repair_duration: float | None = None
+
+
+def _validation_repair_instruction(validation: DraftValidationResult) -> str:
+    parts = []
+    if validation.unsupported_entities:
+        names = ", ".join(validation.unsupported_entities)
+        parts.append(f"Remove or replace details not present in the scene: {names}.")
+    if validation.evaded_action:
+        parts.append("Directly address the player's question or action.")
+    return " ".join(parts)
 
 
 class TurnRepairStage:
@@ -144,6 +179,105 @@ class TurnRepairStage:
             cloud_final_route,
             warnings,
             finish_reason=cloud_finish_reason,
+        )
+
+    async def resolve(
+        self,
+        *,
+        context: LoadedTurnContext,
+        user_message: str,
+        generation: GenerationStageResult,
+        validation: DraftValidationResult,
+        critique: CritiqueStageResult,
+        retrieval: RetrievalStageResult,
+        routing: RoutingStageResult,
+    ) -> RepairResolution:
+        """Decide critique→repair end-to-end and return an orchestrator-applicable resolution."""
+        base_status = (
+            CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
+        )
+        effective_critique = critique.critique
+        validator_forced = False
+        if validation.flags and (effective_critique is None or effective_critique.accepted):
+            validator_forced = True
+            effective_critique = CriticResult(
+                accepted=False,
+                issues=list(validation.flags),
+                repair_instruction=_validation_repair_instruction(validation),
+            )
+        if effective_critique is None or effective_critique.accepted:
+            return RepairResolution(
+                text=generation.text,
+                route=generation.route,
+                finish_reason=generation.finish_reason,
+                critic_status=base_status,
+                warnings=(),
+                controlled_failure=False,
+            )
+
+        warnings: list[str] = []
+        repair: RepairStageResult | None = None
+        repair_failure: str | None = None
+        started = perf_counter()
+        try:
+            repair = await self.run(
+                context=context,
+                user_message=user_message,
+                actor_messages=generation.messages,
+                draft=generation.text,
+                route=generation.route,
+                critique=effective_critique,
+                retrieval=retrieval,
+                routing=routing,
+            )
+        except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
+            repair_failure = str(exc)
+        repair_duration = perf_counter() - started
+        if repair is not None:
+            warnings.extend(repair.warnings)
+
+        if repair_failure is not None or (
+            repair is not None and repair.outcome == TurnOutcome.CONTROLLED_FAILURE
+        ):
+            # The validator is heuristic; when it alone forced the repair, an imperfect
+            # original draft beats a controlled failure.
+            if validator_forced:
+                warnings.append(
+                    "draft validation repair failed; returning original draft"
+                    + (f": {repair_failure}" if repair_failure else "")
+                )
+                return RepairResolution(
+                    text=generation.text,
+                    route=generation.route,
+                    finish_reason=generation.finish_reason,
+                    critic_status=base_status,
+                    warnings=tuple(warnings),
+                    controlled_failure=False,
+                    repair_duration=repair_duration,
+                )
+            if repair_failure is not None:
+                warnings.append(f"repair failed: {repair_failure}")
+            return RepairResolution(
+                text=repair.text if repair is not None else CONTROLLED_FAILURE_TEXT,
+                route=repair.route if repair is not None else generation.route,
+                finish_reason=(
+                    repair.finish_reason if repair is not None else generation.finish_reason
+                ),
+                critic_status=CriticStatus.REJECTED,
+                warnings=tuple(warnings),
+                controlled_failure=True,
+                repair_duration=repair_duration,
+            )
+
+        assert repair is not None
+        return RepairResolution(
+            text=repair.text,
+            route=repair.route,
+            finish_reason=repair.finish_reason,
+            critic_status=CriticStatus.REPAIRED,
+            warnings=tuple(warnings),
+            controlled_failure=False,
+            repair_duration=repair_duration,
         )
 
     @staticmethod

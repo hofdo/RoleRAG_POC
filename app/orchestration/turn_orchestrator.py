@@ -12,7 +12,6 @@ from app.agents.secret_guard import (
     scan_reply,
 )
 from app.domain import (
-    CriticResult,
     CriticStatus,
     SessionState,
     TurnDiagnostics,
@@ -29,7 +28,7 @@ from app.llm.router import (
 )
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
-from app.orchestration.draft_validator import DraftValidationResult, validate_draft
+from app.orchestration.draft_validator import validate_draft
 from app.orchestration.stages import (
     CONTROLLED_FAILURE_TEXT,
     ActorContextRetrieving,
@@ -74,16 +73,6 @@ def _visible_texts(
         texts.append(turn.user_message)
         texts.append(turn.assistant_message)
     return texts
-
-
-def _validation_repair_instruction(validation: DraftValidationResult) -> str:
-    parts = []
-    if validation.unsupported_entities:
-        names = ", ".join(validation.unsupported_entities)
-        parts.append(f"Remove or replace details not present in the scene: {names}.")
-    if validation.evaded_action:
-        parts.append("Directly address the player's question or action.")
-    return " ".join(parts)
 
 
 @contextmanager
@@ -357,78 +346,34 @@ class TurnOrchestrator:
             )
         warnings.extend(critique.warnings)
 
-        final_text = generation.text
-        final_route = generation.route
-        final_finish_reason = generation.finish_reason
-        critic_status = (
-            CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
+        resolution = await self.repair_stage.resolve(
+            context=context,
+            user_message=turn_input.message,
+            generation=generation,
+            validation=validation,
+            critique=critique,
+            retrieval=retrieval,
+            routing=routing,
         )
-        effective_critique = critique.critique
-        validator_forced_repair = False
-        if validation.flags and (effective_critique is None or effective_critique.accepted):
-            validator_forced_repair = True
-            effective_critique = CriticResult(
-                accepted=False,
-                issues=list(validation.flags),
-                repair_instruction=_validation_repair_instruction(validation),
+        warnings.extend(resolution.warnings)
+        if resolution.repair_duration is not None:
+            timings["repair"] = resolution.repair_duration
+        if resolution.controlled_failure:
+            return TurnResult(
+                text=resolution.text,
+                route=resolution.route,
+                finish_reason=resolution.finish_reason,
+                memory_written=False,
+                critic_status=resolution.critic_status,
+                warnings=warnings,
+                retrieval=retrieval.diagnostics,
+                stage_timings=timings,
+                outcome=TurnOutcome.CONTROLLED_FAILURE,
             )
-        if effective_critique is not None and not effective_critique.accepted:
-            repair_failure: str | None = None
-            repair = None
-            try:
-                with _stage_timer(timings, "repair"):
-                    repair = await self.repair_stage.run(
-                        context=context,
-                        user_message=turn_input.message,
-                        actor_messages=generation.messages,
-                        draft=generation.text,
-                        route=generation.route,
-                        critique=effective_critique,
-                        retrieval=retrieval,
-                        routing=routing,
-                    )
-            except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
-                repair_failure = str(exc)
-            if repair is not None:
-                warnings.extend(repair.warnings)
-            if repair_failure is not None or (
-                repair is not None and repair.outcome == TurnOutcome.CONTROLLED_FAILURE
-            ):
-                # The validator is heuristic; when it alone forced the repair,
-                # an imperfect original draft beats a controlled failure.
-                if validator_forced_repair:
-                    warnings.append(
-                        "draft validation repair failed; returning original draft"
-                        + (f": {repair_failure}" if repair_failure else "")
-                    )
-                else:
-                    if repair_failure is not None:
-                        warnings.append(f"repair failed: {repair_failure}")
-                    failure_text = (
-                        repair.text if repair is not None else CONTROLLED_FAILURE_TEXT
-                    )
-                    failure_route = repair.route if repair is not None else generation.route
-                    failure_finish = (
-                        repair.finish_reason
-                        if repair is not None
-                        else generation.finish_reason
-                    )
-                    return TurnResult(
-                        text=failure_text,
-                        route=failure_route,
-                        finish_reason=failure_finish,
-                        memory_written=False,
-                        critic_status=CriticStatus.REJECTED,
-                        warnings=warnings,
-                        retrieval=retrieval.diagnostics,
-                        stage_timings=timings,
-                        outcome=TurnOutcome.CONTROLLED_FAILURE,
-                    )
-            elif repair is not None:
-                final_text = repair.text
-                final_route = repair.route
-                final_finish_reason = repair.finish_reason
-                critic_status = CriticStatus.REPAIRED
+        final_text = resolution.text
+        final_route = resolution.route
+        final_finish_reason = resolution.finish_reason
+        critic_status = resolution.critic_status
 
         # Deterministic output-side containment backstop behind the LLM critic: redact
         # verbatim hidden-fact echoes and flag likely paraphrases before the reply is
