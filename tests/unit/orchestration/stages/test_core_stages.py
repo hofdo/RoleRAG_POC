@@ -1216,7 +1216,7 @@ async def test_memory_stage_caches_session_summaries_across_turns() -> None:
     assert store.list_calls <= 1
     # First turn persists; later turns dedup against the cached summary.
     assert len(store.persisted) == 1
-    assert stage._summary_cache[context.session.id] == [
+    assert stage._summary_cache._cache[context.session.id] == [
         "The player promised to return before dawn."
     ]
 
@@ -1251,7 +1251,7 @@ async def test_memory_stage_summary_cache_is_per_session() -> None:
     # Each session writes its own memory; no cross-session dedup leakage.
     assert first.memory_written is True
     assert second.memory_written is True
-    assert set(stage._summary_cache) == {base.session.id, other_session.id}
+    assert set(stage._summary_cache._cache) == {base.session.id, other_session.id}
 
 
 @pytest.mark.asyncio
