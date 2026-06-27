@@ -10,6 +10,7 @@ from app.domain import (
     CriticResult,
     CriticStatus,
     MemoryCandidate,
+    MemoryCuratorResult,
     PersonaCard,
     SceneState,
     SessionState,
@@ -1069,3 +1070,40 @@ async def test_turn_orchestrator_keeps_original_draft_when_validator_only_repair
     assert any("draft validation repair failed" in warning for warning in result.warnings)
     assert result.memory_written is False
     assert orchestrator.turn_repository.count_turns("demo-session") == 1
+
+
+@pytest.mark.asyncio
+async def test_run_turn_persists_diagnostics_matching_result(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    curator = StubMemoryCurator(
+        result=MemoryCuratorResult(
+            write_memory=True,
+            reason="durable promise",
+            memories=[
+                MemoryCandidate(
+                    summary="The player promised to return before dawn.",
+                    visibility=Visibility.PLAYER,
+                    importance=4,
+                    tags=["promise"],
+                    scene_id="rose-gallery",
+                    actor_id="archivist",
+                )
+            ],
+        )
+    )
+    orchestrator = _build_orchestrator(tmp_path, provider, memory_curator=curator)
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input)
+
+    stored = orchestrator.turn_repository.list_recent_turns("demo-session", limit=1)[0]
+    assert stored.diagnostics is not None
+    assert set(stored.diagnostics.stage_timings) == set(result.stage_timings)
+    assert stored.diagnostics.critic_status == result.critic_status
+    assert stored.diagnostics.retrieval == result.retrieval
+    assert stored.diagnostics.warnings == result.warnings
+    assert stored.diagnostics.memory_written == result.memory_written
+    assert stored.diagnostics.finish_reason == result.finish_reason

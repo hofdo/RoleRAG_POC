@@ -14,6 +14,7 @@ from app.domain import (
     CriticResult,
     CriticStatus,
     SessionState,
+    TurnDiagnostics,
     TurnInput,
     TurnOutcome,
     TurnResult,
@@ -443,7 +444,7 @@ class TurnOrchestrator:
             )
 
         with _stage_timer(timings, "persistence"):
-            self.persistence_stage.run(
+            persistence = self.persistence_stage.run(
                 session=context.session,
                 user_message=turn_input.message,
                 assistant_message=final_text,
@@ -460,6 +461,20 @@ class TurnOrchestrator:
                 scene_complexity=routing.scene_complexity,
             )
         warnings.extend(memory.warnings)
+        # Persist turn diagnostics from the same values the TurnResult carries so the
+        # stored record matches the live response (built after the memory stage so
+        # stage_timings is complete).
+        self.turn_repository.update_turn_diagnostics(
+            persistence.turn.id,
+            TurnDiagnostics(
+                retrieval=retrieval.diagnostics,
+                stage_timings=timings,
+                critic_status=critic_status,
+                finish_reason=final_finish_reason,
+                warnings=warnings,
+                memory_written=memory.memory_written,
+            ),
+        )
         return TurnResult(
             text=final_text,
             route=final_route,

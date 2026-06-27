@@ -20,7 +20,12 @@ from app.persistence import (
     connect_sqlite,
     initialize_database,
 )
-from app.persistence.repositories import CanonRepository, MemoryRepository, SessionRepository
+from app.persistence.repositories import (
+    CanonRepository,
+    MemoryRepository,
+    SessionRepository,
+    TurnRepository,
+)
 from app.rag import (
     ActorContextRetriever,
     EmbeddingProvider,
@@ -38,6 +43,7 @@ class AppServices:
     session_repository: SessionRepository
     orchestrator: TurnOrchestrator
     recent_dialogue_store: RecentDialogueStore
+    turn_repository: TurnRepository | None = None
     memory_repository: MemoryRepository | None = None
     canon_repository: CanonRepository | None = None
 
@@ -220,6 +226,7 @@ def build_services(
         session_repository=session_repository,
         orchestrator=orchestrator,
         recent_dialogue_store=recent_dialogue_store,
+        turn_repository=turn_repository,
         memory_repository=memory_repository,
         canon_repository=canon_repository,
     )

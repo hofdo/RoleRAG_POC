@@ -12,6 +12,7 @@ from app.domain import (
     MemoryEpisode,
     SessionState,
     StoredTurn,
+    TurnDiagnostics,
     Visibility,
 )
 from app.llm.router import ModelProviderName, ModelRoute
@@ -46,7 +47,11 @@ class TurnRepository(Protocol):
         route: ModelRoute,
     ) -> StoredTurn: ...
 
+    def update_turn_diagnostics(self, turn_id: int, diagnostics: TurnDiagnostics) -> None: ...
+
     def list_recent_turns(self, session_id: str, limit: int) -> list[StoredTurn]: ...
+
+    def list_all_turns(self, session_id: str) -> list[StoredTurn]: ...
 
     def count_turns(self, session_id: str) -> int: ...
 
@@ -265,6 +270,13 @@ class SQLiteTurnRepository:
             created_at=created_at,
         )
 
+    def update_turn_diagnostics(self, turn_id: int, diagnostics: TurnDiagnostics) -> None:
+        self.connection.execute(
+            "UPDATE turns SET diagnostics_json = ? WHERE id = ?",
+            (diagnostics.model_dump_json(), turn_id),
+        )
+        self.connection.commit()
+
     def list_recent_turns(self, session_id: str, limit: int) -> list[StoredTurn]:
         if limit <= 0:
             return []
@@ -284,6 +296,7 @@ class SQLiteTurnRepository:
                 route_max_tokens,
                 route_temperature,
                 route_requires_user_confirmation,
+                diagnostics_json,
                 created_at
             FROM turns
             WHERE session_id = ?
@@ -311,6 +324,7 @@ class SQLiteTurnRepository:
                 route_max_tokens,
                 route_temperature,
                 route_requires_user_confirmation,
+                diagnostics_json,
                 created_at
             FROM turns
             WHERE session_id = ?
@@ -345,7 +359,19 @@ class SQLiteTurnRepository:
                 requires_user_confirmation=bool(row["route_requires_user_confirmation"]),
             ),
             created_at=parse_datetime(row["created_at"]),
+            diagnostics=self._parse_diagnostics(row),
         )
+
+    @staticmethod
+    def _parse_diagnostics(row: sqlite3.Row) -> TurnDiagnostics | None:
+        # Very old rows predate the diagnostics_json column; sqlite3.Row has no
+        # .get(), so guard on the key being present before reading it.
+        if "diagnostics_json" not in row.keys():
+            return None
+        raw = row["diagnostics_json"]
+        if raw is None:
+            return None
+        return TurnDiagnostics.model_validate_json(raw)
 
 
 class SQLiteMemoryRepository:

@@ -81,6 +81,12 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         column="content_root",
         ddl="ALTER TABLE sessions ADD COLUMN content_root TEXT NOT NULL DEFAULT 'data'",
     )
+    _ensure_column(
+        connection,
+        table="turns",
+        column="diagnostics_json",
+        ddl="ALTER TABLE turns ADD COLUMN diagnostics_json TEXT",
+    )
     connection.commit()
 
 

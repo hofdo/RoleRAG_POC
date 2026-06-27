@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from app.domain import MemoryCandidate, SessionState, Visibility
+from app.domain import (
+    CriticStatus,
+    MemoryCandidate,
+    SessionState,
+    TurnDiagnostics,
+    Visibility,
+)
 from app.llm.router import ModelProviderName, ModelRoute
 from app.persistence.repositories import (
     SQLiteMemoryRepository,
@@ -386,3 +392,44 @@ def test_turn_repository_lists_all_turns_in_order(tmp_path: Path) -> None:
 
     assert [turn.turn_index for turn in listed] == [1, 2, 3]
     assert listed[0].user_message == "player message 1"
+
+
+def test_turn_repository_persists_and_loads_diagnostics(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+
+    # A freshly appended turn has no diagnostics yet.
+    assert turn_repository.list_recent_turns("session-1", limit=1)[0].diagnostics is None
+
+    diagnostics = TurnDiagnostics(
+        retrieval=None,
+        stage_timings={"gen": 0.5, "critique": 0.2},
+        critic_status=CriticStatus.ACCEPTED,
+        finish_reason="stop",
+        warnings=["test"],
+        memory_written=True,
+    )
+    turn_repository.update_turn_diagnostics(turn.id, diagnostics)
+
+    reloaded = turn_repository.list_recent_turns("session-1", limit=1)[0]
+    assert reloaded.diagnostics == diagnostics
+    assert turn_repository.list_all_turns("session-1")[0].diagnostics == diagnostics

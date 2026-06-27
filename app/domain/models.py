@@ -130,6 +130,7 @@ class StoredTurn(BaseModel):
     assistant_message: str
     route: ModelRoute
     created_at: datetime
+    diagnostics: "TurnDiagnostics | None" = None
 
 
 class TurnOutcome(str, Enum):
@@ -172,6 +173,17 @@ class TurnRetrievalDiagnostics(BaseModel):
     rejected: list[RetrievalCandidateDiagnostic] = Field(default_factory=list)
 
 
+class TurnDiagnostics(BaseModel):
+    """Persisted diagnostic record for one completed turn; mirrors the live TurnResult."""
+
+    retrieval: TurnRetrievalDiagnostics | None = None
+    stage_timings: dict[str, float] = Field(default_factory=dict)
+    critic_status: CriticStatus
+    finish_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    memory_written: bool
+
+
 class TurnResult(BaseModel):
     text: str
     route: ModelRoute
@@ -188,3 +200,7 @@ class CriticResult(BaseModel):
     accepted: bool
     issues: list[str] = Field(default_factory=list)
     repair_instruction: str | None = None
+
+
+# StoredTurn forward-references TurnDiagnostics (defined later); resolve it now.
+StoredTurn.model_rebuild()
