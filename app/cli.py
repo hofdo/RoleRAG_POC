@@ -919,8 +919,6 @@ def turn_history(
     if limit is not None:
         stored_turns = stored_turns[:limit]
     connection.close()
-    # Turn diagnostics (rankings, stage_timings, critic_status) are not persisted
-    # in StoredTurn, so only stored turn fields are surfaced here.
     typer.echo(
         json.dumps(
             {
@@ -938,6 +936,11 @@ def turn_history(
                             "reason": item.route.reason,
                         },
                         "created_at": item.created_at.isoformat(),
+                        "diagnostics": (
+                            item.diagnostics.model_dump(mode="json")
+                            if item.diagnostics is not None
+                            else None
+                        ),
                     }
                     for item in stored_turns
                 ],

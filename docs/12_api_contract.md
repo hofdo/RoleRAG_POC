@@ -13,6 +13,7 @@ Available endpoints:
 - `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/turns/{turn_index}`
 - `GET /sessions/{session_id}/memories`
 - `GET /sessions/{session_id}/canon`
 - `POST /sessions/{session_id}/canon`
@@ -145,6 +146,19 @@ internals, or Qdrant diagnostics.
 The local `/play` UI uses this endpoint when a user resumes from the recent-session selector or
 pastes a `session_id` into `Resume session`; the returned `recent_turns` are rendered as transcript
 entries and remain backend-owned.
+
+## Turn Detail
+
+`GET /sessions/{session_id}/turns/{turn_index}` returns the persisted record for a single turn,
+combining the stored turn fields (`turn_index`, `scene_id`, `persona_id`, `user_message`,
+`assistant_message`, `route`, `created_at`) with the diagnostics captured at turn time
+(`finish_reason`, `memory_written`, `critic_status`, `warnings`, `stage_timings`, and an optional
+`retrieval` ranking). The `retrieval` block reuses the same metadata-only candidate shape as the
+turn-execution response (`query`, `selected`, `rejected`), so no chunk text is exposed. Turns
+persisted before diagnostics existed report empty diagnostic defaults.
+
+It returns `404 session_not_found` for an unknown session and `404 turn_not_found` for an unknown
+`turn_index`.
 
 ## Session Memories
 

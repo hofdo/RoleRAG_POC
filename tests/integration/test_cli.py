@@ -9,11 +9,15 @@ from typer.testing import CliRunner
 from app.cli import app
 from app.domain import (
     CriticResult,
+    CriticStatus,
     MemoryCandidate,
     PersonaCard,
+    RetrievalCandidateDiagnostic,
     RetrievedChunk,
     SceneState,
     SessionState,
+    TurnDiagnostics,
+    TurnRetrievalDiagnostics,
     Visibility,
 )
 from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
@@ -839,6 +843,91 @@ def _seed_session_with_turns(database_path: Path, *, session_id: str, turn_count
             ),
         )
     connection.close()
+
+
+def _seed_session_with_diagnostics_turn(database_path: Path, *, session_id: str) -> None:
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    SQLiteSessionRepository(connection).create_session(
+        SessionState(
+            id=session_id,
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turns = SQLiteTurnRepository(connection)
+    stored = turns.append_turn(
+        session_id=session_id,
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="What happened?",
+        assistant_message="A great deal.",
+        route=ModelRoute(
+            provider=ModelProviderName.LOCAL,
+            model="local-model",
+            max_tokens=256,
+            temperature=0.7,
+            reason="default local route",
+        ),
+    )
+    turns.update_turn_diagnostics(
+        stored.id,
+        TurnDiagnostics(
+            retrieval=TurnRetrievalDiagnostics(
+                query="What happened?",
+                selected=[
+                    RetrievalCandidateDiagnostic(
+                        id="chunk-1",
+                        source="rose-gallery",
+                        source_type="scene",
+                        collection="scene_lore",
+                        visibility=Visibility.PLAYER,
+                        tags=["history"],
+                        original_score=0.9,
+                        adjusted_score=0.95,
+                        applied_boosts={"scene": 0.05},
+                        selected_rank=1,
+                    )
+                ],
+            ),
+            stage_timings={"retrieval": 1.5, "generation": 2.0},
+            critic_status=CriticStatus.ACCEPTED,
+            finish_reason="stop",
+            warnings=["clamped temperature"],
+            memory_written=True,
+        ),
+    )
+    connection.close()
+
+
+def test_cli_turn_history_surfaces_diagnostics_after_persisted_turn(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_diagnostics_turn(database_path, session_id="demo-session")
+
+    result = runner.invoke(
+        app,
+        ["turn-history", "--session-id", "demo-session"],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    diagnostics = payload["turns"][0]["diagnostics"]
+    assert diagnostics is not None
+    assert diagnostics["finish_reason"] == "stop"
+    assert diagnostics["memory_written"] is True
+    assert diagnostics["critic_status"] == "accepted"
+    assert diagnostics["warnings"] == ["clamped temperature"]
+    assert diagnostics["stage_timings"] == {"retrieval": 1.5, "generation": 2.0}
+    retrieval = diagnostics["retrieval"]
+    assert retrieval["query"] == "What happened?"
+    assert retrieval["selected"][0]["id"] == "chunk-1"
+    assert retrieval["selected"][0]["selected_rank"] == 1
+    # Retrieval diagnostics are metadata-only and never carry chunk text.
+    assert "chunk_text" not in result.stdout
+    assert "text" not in retrieval["selected"][0]
 
 
 def test_cli_turn_history_lists_all_turns(tmp_path: Path) -> None:

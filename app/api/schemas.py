@@ -218,3 +218,19 @@ class GetSessionResponse(BaseModel):
     active_scene_id: str
     active_persona_id: str
     recent_turns: list[RecentTurnResponse]
+
+
+class TurnDetailResponse(BaseModel):
+    turn_index: int
+    scene_id: str
+    persona_id: str
+    user_message: str
+    assistant_message: str
+    route: RouteResponse
+    created_at: datetime
+    finish_reason: str | None = None
+    memory_written: bool
+    critic_status: str
+    warnings: list[str]
+    stage_timings: dict[str, float] = Field(default_factory=dict)
+    retrieval: RetrievalDiagnosticsResponse | None = None

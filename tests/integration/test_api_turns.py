@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.api.routes import get_turn_services
+from app.api.routes import get_read_services, get_turn_services
 from app.composition import AppServices
 from app.domain import (
     CriticResult,
@@ -215,6 +215,7 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
                 turn_repository=turn_repository,
                 recent_turns=8,
             ),
+            turn_repository=turn_repository,
         ),
         provider,
         retriever,
@@ -302,6 +303,7 @@ def _build_in_memory_retrieval_services(
             session_repository=session_repository,
             orchestrator=orchestrator,
             recent_dialogue_store=recent_dialogue_store,
+            turn_repository=turn_repository,
         ),
         provider,
     )
@@ -823,3 +825,91 @@ def test_post_turn_returns_503_envelope_when_local_provider_unavailable(tmp_path
     payload = response.json()
     assert payload["error"]["code"] == "provider_unavailable"
     assert payload["error"]["details"] == []
+
+
+def test_api_get_turn_detail_returns_stored_fields_and_diagnostics(tmp_path: Path) -> None:
+    services, _ = _build_in_memory_retrieval_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "What does the gallery archive mirror mark?"},
+    )
+    assert create.status_code == 200
+
+    response = client.get("/sessions/session-1/turns/1")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["turn_index"] == 1
+    assert payload["scene_id"] == "rose-gallery"
+    assert payload["persona_id"] == "archivist"
+    assert payload["user_message"] == "What does the gallery archive mirror mark?"
+    assert payload["assistant_message"]
+    assert payload["route"] == {
+        "provider": "local",
+        "model": "local-model",
+        "reason": "default local route",
+    }
+    assert "T" in payload["created_at"]
+    assert payload["finish_reason"] == "stop"
+    assert payload["memory_written"] is False
+    assert payload["critic_status"] == "accepted"
+    assert payload["warnings"] == []
+    assert {"retrieval", "routing", "generation", "critique"} <= set(payload["stage_timings"])
+
+    retrieval = payload["retrieval"]
+    assert retrieval is not None
+    assert retrieval["query"]
+    candidates = retrieval["selected"] + retrieval["rejected"]
+    assert candidates
+    for candidate in candidates:
+        # Retrieval diagnostics are metadata-only and never carry chunk text.
+        assert "text" not in candidate
+        assert "chunk_text" not in candidate
+        assert set(candidate) <= {
+            "id",
+            "source",
+            "source_type",
+            "collection",
+            "visibility",
+            "tags",
+            "original_score",
+            "adjusted_score",
+            "applied_boosts",
+            "selected_rank",
+        }
+
+
+def test_api_get_turn_detail_returns_404_for_unknown_session(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.get("/sessions/nonexistent/turns/1")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "session_not_found"
+
+
+def test_api_get_turn_detail_returns_404_for_unknown_turn_index(tmp_path: Path) -> None:
+    services, _ = _build_in_memory_retrieval_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "What does the gallery archive mirror mark?"},
+    )
+    assert create.status_code == 200
+
+    response = client.get("/sessions/session-1/turns/999")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "turn_not_found"

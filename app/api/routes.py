@@ -29,12 +29,13 @@ from app.api.schemas import (
     RouteResponse,
     RuntimeStatusResponse,
     SessionMemoriesResponse,
+    TurnDetailResponse,
     to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
-from app.domain import SessionState, TurnInput, TurnOutcome, TurnResult
+from app.domain import SessionState, StoredTurn, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.persistence import (
     ContentCatalogError,
@@ -331,6 +332,36 @@ def get_session(
 
 
 @router.get(
+    "/sessions/{session_id}/turns/{turn_index}",
+    response_model=TurnDetailResponse,
+    responses=ERROR_404_RESPONSE,
+)
+def get_turn_detail(
+    session_id: str,
+    turn_index: int,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> TurnDetailResponse:
+    _require_session(services, session_id)
+    if services.turn_repository is None:
+        raise RuntimeError("Read services must include a turn repository")
+    stored_turn = next(
+        (
+            turn
+            for turn in services.turn_repository.list_all_turns(session_id)
+            if turn.turn_index == turn_index
+        ),
+        None,
+    )
+    if stored_turn is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="turn_not_found",
+            message=f"Unknown turn index: {turn_index}",
+        )
+    return _to_turn_detail_response(stored_turn)
+
+
+@router.get(
     "/sessions/{session_id}/memories",
     response_model=SessionMemoriesResponse,
     responses=ERROR_404_RESPONSE,
@@ -482,6 +513,33 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         warnings=result.warnings,
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
         stage_timings=result.stage_timings,
+    )
+
+
+def _to_turn_detail_response(turn: StoredTurn) -> TurnDetailResponse:
+    diagnostics = turn.diagnostics
+    return TurnDetailResponse(
+        turn_index=turn.turn_index,
+        scene_id=turn.scene_id,
+        persona_id=turn.persona_id,
+        user_message=turn.user_message,
+        assistant_message=turn.assistant_message,
+        route=RouteResponse(
+            provider=turn.route.provider.value,
+            model=turn.route.model,
+            reason=turn.route.reason,
+        ),
+        created_at=turn.created_at,
+        finish_reason=diagnostics.finish_reason if diagnostics is not None else None,
+        memory_written=diagnostics.memory_written if diagnostics is not None else False,
+        critic_status=diagnostics.critic_status.value if diagnostics is not None else "",
+        warnings=diagnostics.warnings if diagnostics is not None else [],
+        stage_timings=diagnostics.stage_timings if diagnostics is not None else {},
+        retrieval=(
+            to_retrieval_diagnostics_response(diagnostics.retrieval)
+            if diagnostics is not None
+            else None
+        ),
     )
 
 

@@ -558,6 +558,7 @@ Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) fo
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
 - `GET /sessions/{session_id}`
+- `GET /sessions/{session_id}/turns/{turn_index}`
 - `GET /sessions/{session_id}/memories`
 - `GET /sessions/{session_id}/canon`
 - `POST /sessions/{session_id}/canon`
