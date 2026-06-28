@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.domain import RetrievedChunk, Visibility
 from app.rag.diagnostics import ChunkRetrievalDiagnostic
 from app.rag.models import RagCollection, RetrievalFilter
@@ -394,6 +396,7 @@ def _session_candidate(
     *,
     created_at: datetime | None,
     score: float = 0.50,
+    importance: int | None = None,
 ) -> tuple[RagCollection, RetrievedChunk]:
     return (
         RagCollection.SESSION_MEMORY,
@@ -404,6 +407,7 @@ def _session_candidate(
             text="The player made a durable commitment.",
             session_id="session-1",
             created_at=created_at,
+            importance=importance,
         ),
     )
 
@@ -414,8 +418,12 @@ _RANK_CONTEXT = RetrievalRankingContext(
 
 
 def test_recency_boost_prefers_newer_among_distinct_timestamps() -> None:
-    older = _session_candidate("older", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    newer = _session_candidate("newer", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc))
+    older = _session_candidate(
+        "older", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), importance=5
+    )
+    newer = _session_candidate(
+        "newer", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc), importance=5
+    )
 
     chunks, diagnostics = rerank_chunks(
         context=_RANK_CONTEXT,
@@ -426,8 +434,37 @@ def test_recency_boost_prefers_newer_among_distinct_timestamps() -> None:
 
     assert [chunk.id for chunk in chunks] == ["newer", "older"]
     boosts = {diag.id: diag.applied_boosts for diag in diagnostics.selected}
-    assert boosts["newer"]["recency"] == 0.1
+    assert boosts["newer"]["recency"] == 0.1  # importance 5 -> full factor
     assert "recency" not in boosts["older"]
+
+
+def test_recency_boost_scales_with_importance() -> None:
+    # Two equally-recent memories: the important one earns a larger recency lift than the trivial
+    # one, and an unimportant memory cannot ride recency over an older high-importance memory.
+    important_new = _session_candidate(
+        "important-new", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc), importance=5
+    )
+    trivial_new = _session_candidate(
+        "trivial-new", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc), importance=1
+    )
+    older = _session_candidate(
+        "older", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), importance=5
+    )
+
+    _, diagnostics = rerank_chunks(
+        context=_RANK_CONTEXT,
+        candidates=[important_new, trivial_new, older],
+        top_k=3,
+        weights=RankingWeights(recency_weight=0.1),
+    )
+
+    boosts = {
+        diag.id: diag.applied_boosts
+        for diag in [*diagnostics.selected, *diagnostics.rejected]
+    }
+    assert boosts["important-new"]["recency"] == pytest.approx(0.1)  # 0.1 * 1.0 * (5/5)
+    assert boosts["trivial-new"]["recency"] == pytest.approx(0.02)  # 0.1 * 1.0 * (1/5)
+    assert "recency" not in boosts["older"]  # oldest distinct timestamp -> rank 0
 
 
 def test_recency_no_boost_when_all_timestamps_equal() -> None:
@@ -451,12 +488,12 @@ def test_recency_no_boost_when_all_timestamps_equal() -> None:
 
 def test_recency_no_boost_for_chunks_without_created_at() -> None:
     dated_new = _session_candidate(
-        "dated-new", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc)
+        "dated-new", created_at=datetime(2026, 6, 1, tzinfo=timezone.utc), importance=5
     )
     dated_old = _session_candidate(
-        "dated-old", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+        "dated-old", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), importance=5
     )
-    undated = _session_candidate("undated", created_at=None)
+    undated = _session_candidate("undated", created_at=None, importance=5)
 
     _, diagnostics = rerank_chunks(
         context=_RANK_CONTEXT,

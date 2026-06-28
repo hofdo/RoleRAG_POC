@@ -206,7 +206,7 @@ def _rank_chunk(
     )
     if lexical_boost > 0.0:
         applied_boosts["lexical"] = lexical_boost
-    recency_boost = weights.recency_weight * recency_rank
+    recency_boost = weights.recency_weight * recency_rank * _recency_importance_factor(chunk)
     if recency_boost > 0.0:
         applied_boosts["recency"] = recency_boost
     adjusted_score = chunk.score + sum(applied_boosts.values())
@@ -217,6 +217,20 @@ def _rank_chunk(
         adjusted_score=adjusted_score,
         applied_boosts=applied_boosts,
     )
+
+
+def _recency_importance_factor(chunk: RetrievedChunk) -> float:
+    """Scale the recency boost by importance so recency lifts a recent *important* memory more
+    than a recent trivial one, and never lifts an unimportant or timeless (lore) chunk over an
+    older high-importance memory. Importance 1-5 -> 0.2-1.0; missing importance (canon lore,
+    legacy rows) -> 0.0, so recency only ever reorders scored episodic memories.
+
+    This is what makes the recency boost recall-safe: a newer low-value memory cannot out-rank an
+    older promise/key fact, because its importance factor shrinks the recency lift toward zero.
+    """
+    if chunk.importance is None:
+        return 0.0
+    return min(chunk.importance, 5) / 5.0
 
 
 def _lexical_overlap_boost(

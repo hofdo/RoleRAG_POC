@@ -72,7 +72,10 @@ class Settings(BaseSettings):
     rag_importance_step_boost: float = Field(default=0.015, ge=0.0)
     rag_lexical_match_step_boost: float = Field(default=0.05, ge=0.0)
     rag_lexical_match_max_boost: float = Field(default=0.25, ge=0.0)
-    # Recency boost weight; 0.0 keeps ranking byte-identical to pre-recency behavior.
+    # Recency boost weight, scaled by memory importance (recent + important ranks highest; lore
+    # and unimportant memories are never lifted by recency). 0.0 keeps ranking byte-identical.
+    # Opt-in: enable a small value (~0.02-0.04) and validate 50-turn recall via live-smoke before
+    # relying on it -- offline evals do not fully exercise long-session recency reordering.
     rag_recency_weight: float = Field(default=0.0, ge=0.0)
     # Memories below this importance are persisted to SQLite but not indexed for
     # retrieval. 1 indexes everything (no behavior change).
