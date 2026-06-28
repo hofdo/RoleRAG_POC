@@ -20,7 +20,8 @@ Order: value + independence, decisions last. Each item gate-verified
 - [x] **#17** critic error → fail closed (CONTROLLED_FAILURE) instead of serving unvalidated text
 - [~] **#9** ~~memory-extraction cloud retry~~ — **DROPPED**: conflicts with the deliberate
   `memory_extraction_stays_local` / `critic_stays_local` invariant; deterministic fallback already covers it
-- [ ] **#16** auto-ingest lore on scenario load (removes manual setup footgun)
+- [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`;
+  API create_session left as a follow-up)
 - [ ] **#19** structured `TurnResult.errors` (class/stage/message/suggestion) vs free-form warnings
 - [ ] **#15** web/SSE robustness tests (404/MIME, malformed frames, mid-retrieval Qdrant fail)
 - [ ] **#22** web `/play` turn-detail modal (ranked chunks + boosts + timings; unblocked by #8)
