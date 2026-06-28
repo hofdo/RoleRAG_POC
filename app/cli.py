@@ -105,9 +105,10 @@ def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
             ),
         )
-    except FileNotFoundError:
-        return  # scenario has no lore manifest; nothing to ingest
     except Exception as exc:  # degrade gracefully: a session must still be creatable offline
+        # Includes a manifest that references a missing document -- warn rather than swallow,
+        # so a typo'd lore path does not silently leave retrieval empty. (The no-manifest case
+        # already returned above.)
         typer.echo(f"warning: scenario lore auto-ingest skipped: {exc}", err=True)
         return
     total = sum(result.chunk_count for result in results)

@@ -208,7 +208,10 @@ export function formatRetrievalDiagnostics(retrieval) {
     visibility: candidate.visibility,
     originalScore: candidate.original_score,
     adjustedScore: candidate.adjusted_score,
-    boosts: candidate.applied_boosts ?? [],
+    // applied_boosts is a dict {name: weight} on the wire; render as "name 0.040" labels.
+    boosts: Object.entries(candidate.applied_boosts ?? {}).map(
+      ([name, weight]) => `${name} ${weight.toFixed(3)}`,
+    ),
   });
   return {
     query: retrieval.query ?? null,

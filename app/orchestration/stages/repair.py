@@ -114,6 +114,13 @@ class TurnRepairStage:
             retrieved_chunks=retrieval.chunks,
         )
         warnings.extend(repaired_critique.warnings)
+        if repaired_critique.failed:
+            # The re-check critic errored: same fail-closed rule as the initial critique (#17).
+            # Don't serve the unvalidated repaired draft, and don't escalate to cloud (we have no
+            # validated issues to repair against).
+            return self._controlled_failure(
+                repaired_route, warnings, finish_reason=repaired_finish_reason
+            )
         if repaired_critique.critique is None or repaired_critique.critique.accepted:
             return RepairStageResult(
                 text=repaired_text,
@@ -167,6 +174,11 @@ class TurnRepairStage:
             retrieved_chunks=retrieval.chunks,
         )
         warnings.extend(cloud_critique.warnings)
+        if cloud_critique.failed:
+            # Cloud re-check critic errored too: fail closed rather than serve unvalidated text.
+            return self._controlled_failure(
+                cloud_final_route, warnings, finish_reason=cloud_finish_reason
+            )
         if cloud_critique.critique is None or cloud_critique.critique.accepted:
             return RepairStageResult(
                 text=cloud_text,

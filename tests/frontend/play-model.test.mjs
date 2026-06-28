@@ -413,7 +413,7 @@ test("retrieval diagnostics format into ranked rows with scores and boosts", () 
         visibility: "player",
         original_score: 0.4,
         adjusted_score: 0.9,
-        applied_boosts: ["scene_match", "recency"],
+        applied_boosts: { scene: 0.04, recency: 0.02 },
         selected_rank: 1,
       },
     ],
@@ -425,7 +425,7 @@ test("retrieval diagnostics format into ranked rows with scores and boosts", () 
         visibility: "player",
         original_score: 0.3,
         adjusted_score: 0.3,
-        applied_boosts: [],
+        applied_boosts: {},
         selected_rank: null,
       },
     ],
@@ -440,7 +440,7 @@ test("retrieval diagnostics format into ranked rows with scores and boosts", () 
       visibility: "player",
       originalScore: 0.4,
       adjustedScore: 0.9,
-      boosts: ["scene_match", "recency"],
+      boosts: ["scene 0.040", "recency 0.020"],
     },
   ]);
   assert.equal(formatted.rejected.length, 1);

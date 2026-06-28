@@ -142,9 +142,10 @@ class TurnOutcome(str, Enum):
 class CriticStatus(str, Enum):
     """How critic validation concluded for the returned text.
 
-    SKIPPED means validation was deliberately not run for a low-risk turn (critic gating);
-    the draft is served unvalidated by design. A critic that ERRORS no longer maps to SKIPPED:
-    it fails the turn closed (REJECTED + CONTROLLED_FAILURE) rather than serving unvalidated text.
+    SKIPPED means the critic did not run -- either the gate judged the turn low-risk (and the
+    draft is served unvalidated by design), or there was no draft to validate (CONFIRMATION_REQUIRED
+    or a generation failure before critique). A critic that ERRORS no longer maps to SKIPPED: it
+    fails the turn closed (REJECTED + CONTROLLED_FAILURE) rather than serving unvalidated text.
     """
 
     ACCEPTED = "accepted"

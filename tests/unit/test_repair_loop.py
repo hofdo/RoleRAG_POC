@@ -48,10 +48,10 @@ class SequencedFakeProvider(LlmProvider):
 class FakeCritic:
     def __init__(
         self,
-        results: list[CriticResult] | None = None,
+        results: list[CriticResult | Exception] | None = None,
         error: Exception | None = None,
     ) -> None:
-        self.results = results or [CriticResult(accepted=True)]
+        self.results: list[CriticResult | Exception] = results or [CriticResult(accepted=True)]
         self.error = error
         self.calls: list[dict[str, Any]] = []
 
@@ -59,7 +59,10 @@ class FakeCritic:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return self.results[len(self.calls) - 1]
+        result = self.results[len(self.calls) - 1]
+        if isinstance(result, Exception):
+            raise result  # lets a test error on a specific call (e.g. a repair re-check)
+        return result
 
     def build_local_repair_messages(
         self,
@@ -439,3 +442,33 @@ async def test_critic_status_is_rejected_when_critic_fails(tmp_path: Path) -> No
     )
 
     assert result.critic_status == CriticStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_repair_recheck_critic_error_fails_closed(tmp_path: Path) -> None:
+    from app.domain import TurnOutcome
+
+    # Initial draft is rejected (normal), repair regenerates, then the re-check critic ERRORS.
+    # A failed re-check must fail closed like the initial critique (#17) -- never serve the
+    # unvalidated repaired draft.
+    orchestrator, turn_repository, _ = _build_orchestrator(
+        tmp_path,
+        provider=SequencedFakeProvider(["Rejected draft", "Repaired but unvalidated draft"]),
+        critic=FakeCritic(
+            [
+                CriticResult(accepted=False, issues=["leak"], repair_instruction="Fix it."),
+                ValueError("critic output invalid on re-check"),
+            ]
+        ),
+        cloud_mode=CloudMode.OFF,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="Tell me.")
+    )
+
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert result.critic_status == CriticStatus.REJECTED
+    assert "Repaired but unvalidated draft" not in result.text
+    assert "could not produce a response" in result.text.lower()
+    assert turn_repository.count_turns("demo-session") == 0

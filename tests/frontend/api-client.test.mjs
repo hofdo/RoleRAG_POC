@@ -299,7 +299,7 @@ test("createBufferedTurn captures retrieval diagnostics from the final frame", a
         visibility: "player",
         original_score: 0.4,
         adjusted_score: 0.9,
-        applied_boosts: ["scene_match"],
+        applied_boosts: { scene: 0.04 },
         selected_rank: 1,
       },
     ],
