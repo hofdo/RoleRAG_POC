@@ -60,5 +60,5 @@ auth/multi-user/streaming/tracing · corpus-scale micro-opts.
 
 ## Side projects (none built)
 
-★ Transcript Exporter (weekend, zero backend) → Memory Graph / RAG Inspector (needs #8) →
-voice I/O → Discord bot → analytics dashboard. Deferred: authoring studio, branching/replay, SPA.
+Full tiered list with effort + dependencies: [SIDE_PROJECTS.md](SIDE_PROJECTS.md).
+Best first: ★ Transcript Exporter (weekend, zero backend).

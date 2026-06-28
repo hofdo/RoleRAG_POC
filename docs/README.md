@@ -105,6 +105,13 @@ flowchart TD
 | [10_next_steps_after_mvp](10_next_steps_after_mvp.md) | Safe post-1.0 candidate work |
 | [12_api_contract](12_api_contract.md) | HTTP surface: endpoints, shapes, errors, exposure boundaries |
 
+## Planning & roadmap
+
+| Doc | What it covers |
+|-----|----------------|
+| [BACKLOG](BACKLOG.md) | Working backlog: done / open / skipped improvements, tagged `(#N)` in commits |
+| [SIDE_PROJECTS](SIDE_PROJECTS.md) | Tiered side-project ideas built on top of the engine (effort + dependencies) |
+
 ## Reports & history (point-in-time, not current state)
 
 | Doc | Snapshot |
