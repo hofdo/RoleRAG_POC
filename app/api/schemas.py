@@ -5,7 +5,7 @@ from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain import TurnRetrievalDiagnostics
+from app.domain import TurnError, TurnRetrievalDiagnostics
 
 ErrorLocation: TypeAlias = str | int
 
@@ -148,6 +148,7 @@ class CreateTurnResponse(BaseModel):
     memory_written: bool
     critic_status: str
     warnings: list[str]
+    errors: list[TurnError] = Field(default_factory=list)
     retrieval: RetrievalDiagnosticsResponse | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
 
@@ -162,6 +163,7 @@ class StreamFinalPayload(BaseModel):
     memory_written: bool
     critic_status: str
     warnings: list[str]
+    errors: list[TurnError] = Field(default_factory=list)
     retrieval: RetrievalDiagnosticsResponse | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
 
@@ -174,6 +176,7 @@ class StreamConfirmationPayload(BaseModel):
     status: str = "confirmation_required"
     route: RouteResponse
     warnings: list[str]
+    errors: list[TurnError] = Field(default_factory=list)
 
 
 class RecentTurnResponse(BaseModel):
@@ -232,5 +235,6 @@ class TurnDetailResponse(BaseModel):
     memory_written: bool
     critic_status: str
     warnings: list[str]
+    errors: list[TurnError] = Field(default_factory=list)
     stage_timings: dict[str, float] = Field(default_factory=dict)
     retrieval: RetrievalDiagnosticsResponse | None = None

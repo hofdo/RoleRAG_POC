@@ -198,6 +198,17 @@ class TurnResult(BaseModel):
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
 
 
+class TurnError(BaseModel):
+    """Structured view of a turn warning: a consumer can branch on category/stage instead of
+    string-matching free-form text. Derived from the warning strings (which are preserved), so
+    this adds structure without changing how stages report problems."""
+
+    category: str  # kind of problem: degraded, gated, fallback, security, provider_unavailable...
+    stage: str  # pipeline stage: retrieval, generation, critique, repair, memory, containment...
+    message: str  # the original warning text
+    suggestion: str | None = None  # optional remediation hint
+
+
 class CriticResult(BaseModel):
     accepted: bool
     issues: list[str] = Field(default_factory=list)

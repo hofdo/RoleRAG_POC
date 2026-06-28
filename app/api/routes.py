@@ -37,6 +37,7 @@ from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.domain import SessionState, StoredTurn, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
+from app.orchestration.turn_errors import classify_warnings
 from app.persistence import (
     ContentCatalogError,
     DataFileNotFoundError,
@@ -511,6 +512,7 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         memory_written=result.memory_written,
         critic_status=result.critic_status.value,
         warnings=result.warnings,
+        errors=classify_warnings(result.warnings),
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
         stage_timings=result.stage_timings,
     )
@@ -534,6 +536,7 @@ def _to_turn_detail_response(turn: StoredTurn) -> TurnDetailResponse:
         memory_written=diagnostics.memory_written if diagnostics is not None else False,
         critic_status=diagnostics.critic_status.value if diagnostics is not None else "",
         warnings=diagnostics.warnings if diagnostics is not None else [],
+        errors=classify_warnings(diagnostics.warnings if diagnostics is not None else []),
         stage_timings=diagnostics.stage_timings if diagnostics is not None else {},
         retrieval=(
             to_retrieval_diagnostics_response(diagnostics.retrieval)

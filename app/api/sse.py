@@ -14,6 +14,7 @@ from app.api.schemas import (
     to_retrieval_diagnostics_response,
 )
 from app.domain import TurnOutcome, TurnResult
+from app.orchestration.turn_errors import classify_warnings
 
 
 def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -> list[str]:
@@ -30,6 +31,7 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                 StreamConfirmationPayload(
                     route=route,
                     warnings=result.warnings,
+                    errors=classify_warnings(result.warnings),
                 ),
             )
         ]
@@ -44,6 +46,7 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                     memory_written=result.memory_written,
                     critic_status=result.critic_status.value,
                     warnings=result.warnings,
+                    errors=classify_warnings(result.warnings),
                     retrieval=retrieval,
                     stage_timings=result.stage_timings,
                 ),
@@ -59,6 +62,7 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                 memory_written=result.memory_written,
                 critic_status=result.critic_status.value,
                 warnings=result.warnings,
+                errors=classify_warnings(result.warnings),
                 retrieval=retrieval,
                 stage_timings=result.stage_timings,
             ),

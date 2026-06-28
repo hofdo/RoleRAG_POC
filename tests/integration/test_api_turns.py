@@ -343,6 +343,7 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         "memory_written": False,
         "critic_status": "accepted",
         "warnings": [],
+        "errors": [],
         "retrieval": None,
     }
     assert len(provider.requests) == 1
@@ -457,6 +458,29 @@ def test_post_turn_returns_retrieval_failure_warning_in_success_response(tmp_pat
     app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["warnings"] == ["retrieval skipped: qdrant offline"]
+
+
+def test_post_turn_includes_structured_errors_derived_from_warnings(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    services.orchestrator.actor_context_retriever = FailingRetriever()
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["warnings"] == ["retrieval skipped: qdrant offline"]
+    assert len(payload["errors"]) == 1
+    error = payload["errors"][0]
+    assert error["category"] == "degraded"
+    assert error["stage"] == "retrieval"
+    assert error["message"] == "retrieval skipped: qdrant offline"
+    assert "vector store (Qdrant)" in error["suggestion"]
 
 
 def test_post_turn_cloud_request_in_ask_mode_returns_confirmation_required(
@@ -600,6 +624,7 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 "memory_written": False,
                 "critic_status": "accepted",
                 "warnings": [],
+                "errors": [],
                 "retrieval": None,
             },
         ),
