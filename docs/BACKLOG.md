@@ -29,9 +29,12 @@ Order: value + independence, decisions last. Each item gate-verified
   parseFrame → ApiError; mid-retrieval already covered)
 - [x] **#22** web `/play` retrieval-inspection modal (current turn; query + selected/rejected +
   scores + boosts). Historical per-turn via #8's endpoint = future extension
-- [ ] **#6** importance-aware recency boost — **GATED**: recall-regression risk → decision-batch
-- [ ] **#19** structured `TurnResult.errors` — **DEFERRED**: contract-breaking + YAGNI → decision-batch
-- [ ] **#29** decide `session_memory_max_episodes` default — **DECISION** → decision-batch
+- [x] **#6** importance-aware recency boost — **opt-in** (`RAG_RECENCY_WEIGHT`, default 0.0,
+  byte-identical); recency scaled by importance so it can't displace older high-importance memories;
+  offline sweep 85/85, validate via live-smoke before enabling
+- [ ] **#19** structured `TurnResult.errors` — open (contract-breaking + YAGNI; user left open)
+- [ ] **#29** `session_memory_max_episodes` default — open (data says a hard cap regresses recall;
+  recommend doc-only, user left open)
 
 ## Open — A tier (quick wins, not in this loop)
 
