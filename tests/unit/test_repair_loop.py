@@ -159,6 +159,7 @@ def _build_orchestrator(
     cloud_mode: CloudMode = CloudMode.ASK,
     cloud_provider: SequencedFakeProvider | None = None,
     memory_curator: RecordingMemoryCurator | None = None,
+    critic_gating: str = "always",
 ) -> tuple[TurnOrchestrator, SQLiteTurnRepository, SQLiteMemoryRepository]:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
@@ -192,6 +193,7 @@ def _build_orchestrator(
             local_temperature=0.75,
             cloud_temperature=0.65,
             cloud_mode=cloud_mode,
+            critic_gating=critic_gating,
         ),
     )
     return orchestrator, turn_repository, memory_repository
@@ -333,12 +335,14 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_returns_warning_and_persists_latest_draft_when_critic_fails(
+async def test_orchestrator_fails_closed_and_persists_nothing_when_critic_fails(
     tmp_path: Path,
 ) -> None:
+    from app.domain import TurnOutcome
+
     orchestrator, turn_repository, _ = _build_orchestrator(
         tmp_path,
-        provider=SequencedFakeProvider(["Draft survives critic failure"]),
+        provider=SequencedFakeProvider(["Unvalidated draft"]),
         critic=FakeCritic(error=ValueError("invalid critic output")),
     )
 
@@ -346,11 +350,14 @@ async def test_orchestrator_returns_warning_and_persists_latest_draft_when_criti
         turn_input=TurnInput(session_id="demo-session", message="Tell me the truth.")
     )
 
-    turns = turn_repository.list_recent_turns("demo-session", 10)
-    assert result.text == "Draft survives critic failure"
-    assert result.warnings == ["critic skipped: invalid critic output"]
-    assert len(turns) == 1
-    assert turns[0].assistant_message == "Draft survives critic failure"
+    # The critic could not validate, so the draft is withheld rather than served unvalidated.
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert result.critic_status == CriticStatus.REJECTED
+    assert "could not produce a response" in result.text.lower()
+    assert result.memory_written is False
+    assert "critic skipped: invalid critic output" in result.warnings
+    assert "draft withheld: critic validation unavailable" in result.warnings
+    assert turn_repository.count_turns("demo-session") == 0
 
 
 @pytest.mark.asyncio
@@ -418,12 +425,12 @@ async def test_critic_status_is_rejected_when_repair_is_exhausted(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_critic_status_is_skipped_when_critic_fails(tmp_path: Path) -> None:
+async def test_critic_status_is_rejected_when_critic_fails(tmp_path: Path) -> None:
     from app.domain import CriticStatus
 
     orchestrator, _, _ = _build_orchestrator(
         tmp_path,
-        provider=SequencedFakeProvider(["Draft survives critic failure"]),
+        provider=SequencedFakeProvider(["Unvalidated draft"]),
         critic=FakeCritic(error=ValueError("invalid critic output")),
     )
 
@@ -431,4 +438,4 @@ async def test_critic_status_is_skipped_when_critic_fails(tmp_path: Path) -> Non
         turn_input=TurnInput(session_id="demo-session", message="Hello.")
     )
 
-    assert result.critic_status == CriticStatus.SKIPPED
+    assert result.critic_status == CriticStatus.REJECTED

@@ -374,6 +374,7 @@ async def test_critique_stage_categorizes_structured_failure_and_records_raw_tex
     )
 
     assert result.critique is None
+    assert result.failed is True  # an errored critic fails the turn closed downstream
     assert result.warnings == ("critic skipped: invalid structured output (schema)",)
     assert sink.records == [
         {
@@ -1314,6 +1315,7 @@ async def test_critique_stage_auto_gating_skips_low_risk_turn() -> None:
     )
 
     assert result.critique is None
+    assert result.failed is False  # a deliberate gate is not a failure; the draft still serves
     assert result.warnings == ("critic gated: low-risk turn",)
     assert critic.calls == 0
 

@@ -193,6 +193,18 @@ class TurnRepairStage:
         routing: RoutingStageResult,
     ) -> RepairResolution:
         """Decide critique→repair end-to-end and return an orchestrator-applicable resolution."""
+        if critique.failed:
+            # The critic ERRORED, so the secret-leak gate never ran. Refuse to serve the
+            # unvalidated draft (and write no memory/world state) rather than risk a leak.
+            # Re-running generation would not help: the validator is what is broken, not the draft.
+            return RepairResolution(
+                text=CONTROLLED_FAILURE_TEXT,
+                route=generation.route,
+                finish_reason=generation.finish_reason,
+                critic_status=CriticStatus.REJECTED,
+                warnings=("draft withheld: critic validation unavailable",),
+                controlled_failure=True,
+            )
         base_status = (
             CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
         )

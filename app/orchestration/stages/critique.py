@@ -52,6 +52,9 @@ class CriticEvaluatingAgent(Protocol):
 class CritiqueStageResult:
     critique: CriticResult | None
     warnings: tuple[str, ...]
+    # True when the critic ERRORED (could not validate), as opposed to a deliberate gated skip.
+    # A failed critique fails the turn closed downstream; a gated one still serves the draft.
+    failed: bool = False
 
 
 class TurnCritiqueStage:
@@ -133,11 +136,12 @@ class TurnCritiqueStage:
                     hidden_facts=collect_hidden_facts(persona, scene),
                 )
             )
-            return CritiqueStageResult(critique=None, warnings=tuple(warnings))
+            return CritiqueStageResult(critique=None, warnings=tuple(warnings), failed=True)
         except Exception as exc:
             return CritiqueStageResult(
                 critique=None,
                 warnings=(f"critic skipped: {exc}",),
+                failed=True,
             )
 
     def _is_risky_turn(
