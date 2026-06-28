@@ -28,7 +28,7 @@ from app.content import (
     create_scenario_template,
     validate_content,
 )
-from app.content.validator import ContentValidationStatus, LoreManifest
+from app.content.validator import ContentValidationStatus
 from app.diagnostics import (
     RuntimeDiagnosticsReport,
     SmokeRunSummary,
@@ -57,6 +57,7 @@ from app.rag import (
     RetrievalResult,
     build_retrieval_query,
     ingest_document,
+    ingest_lore_manifest,
 )
 
 app = typer.Typer(help="RoleRAG CLI")
@@ -83,6 +84,34 @@ _build_memory_curator = build_memory_curator
 _build_embedding_provider = build_embedding_provider
 _build_vector_store = build_vector_store
 _build_actor_context_retriever = build_actor_context_retriever
+
+
+def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
+    """Best-effort: index the scenario's lore so retrieval works without a separate ingest step.
+
+    Never blocks session creation. A scenario with no manifest is silent; an unreachable vector
+    store or missing embedding backend only warns (run ingest-scenario-lore later). Idempotent,
+    so re-running start-session re-indexes the same lore without duplicating it.
+    """
+    if not (content_root / "documents" / "manifest.json").exists():
+        return  # no lore manifest -> nothing to index; skip building embedding/vector providers
+    try:
+        results = ingest_lore_manifest(
+            content_root,
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+            chunking_config=ChunkingConfig(
+                chunk_size_chars=settings.rag_chunk_size_chars,
+                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+            ),
+        )
+    except FileNotFoundError:
+        return  # scenario has no lore manifest; nothing to ingest
+    except Exception as exc:  # degrade gracefully: a session must still be creatable offline
+        typer.echo(f"warning: scenario lore auto-ingest skipped: {exc}", err=True)
+        return
+    total = sum(result.chunk_count for result in results)
+    typer.echo(f"auto-ingested {total} lore chunk(s) from {len(results)} document(s)", err=True)
 
 
 def _build_services(
@@ -308,6 +337,10 @@ def start_session(
         Path | None,
         typer.Option(help="Content root containing scenario files"),
     ] = None,
+    skip_lore_ingest: Annotated[
+        bool,
+        typer.Option("--skip-lore-ingest", help="Do not auto-index scenario lore on start"),
+    ] = False,
 ) -> None:
     settings = get_settings()
     resolved_content_root = content_root or settings.content_root
@@ -330,6 +363,10 @@ def start_session(
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc
     services.close()
+    # Auto-index lore so retrieval works immediately; ingest-scenario-lore is no longer a
+    # mandatory separate step (it stays available for re-indexing without starting a session).
+    if not skip_lore_ingest:
+        _auto_ingest_scenario_lore(settings, Path(resolved_content_root))
     typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
@@ -429,33 +466,15 @@ def ingest_scenario_lore(
         validation_report = validate_content(content_root=content_root)
         if validation_report.status == ContentValidationStatus.FAIL:
             raise ValueError("content validation failed")
-        manifest_path = content_root / "documents" / "manifest.json"
-        if not manifest_path.exists():
-            raise FileNotFoundError(f"missing lore manifest: {manifest_path}")
-        manifest = LoreManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-        embedding_provider = _build_embedding_provider(settings)
-        vector_store = _build_vector_store(settings)
-        results = [
-            ingest_document(
-                IngestionRequest(
-                    path=content_root / "documents" / document.path,
-                    collection=RagCollection.CANON_LORE,
-                    source_type=document.source_type,
-                    visibility=document.visibility,
-                    tags=document.tags,
-                    world_id=document.world_id,
-                    scene_id=document.scene_id,
-                    persona_id=document.persona_id,
-                ),
-                embedding_provider=embedding_provider,
-                vector_store=vector_store,
-                chunking_config=ChunkingConfig(
-                    chunk_size_chars=settings.rag_chunk_size_chars,
-                    chunk_overlap_chars=settings.rag_chunk_overlap_chars,
-                ),
-            )
-            for document in manifest.documents
-        ]
+        results = ingest_lore_manifest(
+            content_root,
+            embedding_provider=_build_embedding_provider(settings),
+            vector_store=_build_vector_store(settings),
+            chunking_config=ChunkingConfig(
+                chunk_size_chars=settings.rag_chunk_size_chars,
+                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+            ),
+        )
     except (FileNotFoundError, ImportError, ValueError) as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=1) from exc

@@ -352,7 +352,7 @@ def test_cli_turn_prompts_for_confirmation_in_ask_mode(tmp_path: Path) -> None:
     ):
         runner.invoke(
             app,
-            ["start-session", "--session-id", "demo-session"],
+            ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
         result = runner.invoke(
@@ -390,6 +390,7 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
                 "demo-session",
                 "--player-name",
                 "Avery",
+                "--skip-lore-ingest",
             ],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
@@ -431,6 +432,7 @@ def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
             "custom-opening",
             "--active-persona-id",
             "custom-narrator",
+            "--skip-lore-ingest",
         ],
         env={"DATABASE_PATH": str(database_path)},
     )
@@ -444,6 +446,43 @@ def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
     assert json.loads(start_result.stdout)["content_root"] == str(pack_root)
     assert resume_result.exit_code == 0
     assert json.loads(resume_result.stdout)["content_root"] == str(pack_root)
+
+
+def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
+    # start-session indexes the scenario's lore automatically, so the player does not have to
+    # remember a separate ingest-scenario-lore step before the first turn.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "auto-ingest-session",
+                "--content-root",
+                str(pack_root),
+                "--world-id",
+                "custom_world",
+                "--scene-id",
+                "custom-opening",
+                "--active-persona-id",
+                "custom-narrator",
+            ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["id"] == "auto-ingest-session"
+    # The scenario pack's lore document was indexed without a separate command.
+    assert len(vector_store.replace_calls) == 1
+    _, source, _, _ = vector_store.replace_calls[0]
+    assert source.endswith("documents/lore.md")
 
 
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
@@ -460,6 +499,7 @@ def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
                 "demo-session",
                 "--player-name",
                 "Avery",
+                "--skip-lore-ingest",
             ],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
@@ -611,7 +651,7 @@ def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunk
     ):
         runner.invoke(
             app,
-            ["start-session", "--session-id", "demo-session"],
+            ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
         result = runner.invoke(
@@ -660,7 +700,7 @@ def test_cli_retrieve_debug_uses_in_memory_retrieval_and_omits_chunk_text(tmp_pa
     ):
         runner.invoke(
             app,
-            ["start-session", "--session-id", "demo-session"],
+            ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
             env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
         )
         result = runner.invoke(

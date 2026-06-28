@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from app.content.validator import LoreDocumentMetadata, LoreManifest
 from app.domain import RetrievedChunk, Visibility
-from app.rag.ingestion import IngestionRequest, ingest_document
+from app.rag.ingestion import IngestionRequest, ingest_document, ingest_lore_manifest
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
 
 
@@ -105,6 +106,68 @@ def test_ingest_document_attaches_required_metadata_and_replaces_source(tmp_path
     assert all(chunk.world_id == "demo_world" for chunk in chunks)
     assert all(chunk.source == str(document) for chunk in chunks)
     assert all(chunk.id for chunk in chunks)
+
+
+def _write_scenario(tmp_path: Path) -> Path:
+    documents = tmp_path / "documents"
+    documents.mkdir()
+    (documents / "lore_a.md").write_text(
+        "# A\n\nThe gallery has mirrored columns.", encoding="utf-8"
+    )
+    (documents / "lore_b.md").write_text(
+        "# B\n\nThe west door stays guarded.", encoding="utf-8"
+    )
+    manifest = LoreManifest(
+        documents=[
+            LoreDocumentMetadata(
+                path="lore_a.md",
+                visibility=Visibility.PLAYER,
+                source_type="lore",
+                world_id="demo_world",
+            ),
+            LoreDocumentMetadata(
+                path="lore_b.md",
+                visibility=Visibility.GM,
+                source_type="lore",
+                world_id="demo_world",
+            ),
+        ]
+    )
+    (documents / "manifest.json").write_text(manifest.model_dump_json(), encoding="utf-8")
+    return tmp_path
+
+
+def test_ingest_lore_manifest_ingests_every_document(tmp_path: Path) -> None:
+    content_root = _write_scenario(tmp_path)
+    vector_store = RecordingVectorStore()
+
+    results = ingest_lore_manifest(
+        content_root,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+    )
+
+    assert len(results) == 2
+    assert len(vector_store.replace_calls) == 2
+    sources = {source for _, source, _, _ in vector_store.replace_calls}
+    assert sources == {
+        str(content_root / "documents" / "lore_a.md"),
+        str(content_root / "documents" / "lore_b.md"),
+    }
+    # Per-document visibility from the manifest is carried onto the chunks.
+    visibilities = {
+        chunk.visibility for _, _, chunks, _ in vector_store.replace_calls for chunk in chunks
+    }
+    assert visibilities == {Visibility.PLAYER, Visibility.GM}
+
+
+def test_ingest_lore_manifest_raises_when_manifest_missing(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="missing lore manifest"):
+        ingest_lore_manifest(
+            tmp_path,
+            embedding_provider=FakeEmbeddingProvider(),
+            vector_store=RecordingVectorStore(),
+        )
 
 
 def test_ingest_document_rejects_empty_documents(tmp_path: Path) -> None:

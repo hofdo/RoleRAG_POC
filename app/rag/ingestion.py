@@ -76,6 +76,46 @@ def ingest_document(
     )
 
 
+def ingest_lore_manifest(
+    content_root: Path,
+    *,
+    embedding_provider: EmbeddingProvider,
+    vector_store: VectorStore,
+    chunking_config: ChunkingConfig | None = None,
+) -> list[IngestionResult]:
+    """Ingest every document listed in ``<content_root>/documents/manifest.json`` into CANON_LORE.
+
+    Idempotent: ``ingest_document`` replaces a source's chunks by path, so re-running on every
+    session start cannot duplicate lore. Raises ``FileNotFoundError`` when no manifest exists
+    (the caller decides whether a manifest-less scenario is an error or simply has no lore).
+    """
+    # Local import keeps the app.content -> app.rag dependency one-directional at module load.
+    from app.content.validator import LoreManifest
+
+    manifest_path = content_root / "documents" / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"missing lore manifest: {manifest_path}")
+    manifest = LoreManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    return [
+        ingest_document(
+            IngestionRequest(
+                path=content_root / "documents" / document.path,
+                collection=RagCollection.CANON_LORE,
+                source_type=document.source_type,
+                visibility=document.visibility,
+                tags=document.tags,
+                world_id=document.world_id,
+                scene_id=document.scene_id,
+                persona_id=document.persona_id,
+            ),
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+            chunking_config=chunking_config,
+        )
+        for document in manifest.documents
+    ]
+
+
 def _chunk_id(*, source: str, text: str, index: int) -> str:
     digest = sha256(f"{source}:{index}:{text}".encode("utf-8")).hexdigest()
     return f"chunk-{digest[:16]}"
