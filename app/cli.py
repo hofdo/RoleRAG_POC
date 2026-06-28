@@ -109,10 +109,18 @@ def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
         # Includes a manifest that references a missing document -- warn rather than swallow,
         # so a typo'd lore path does not silently leave retrieval empty. (The no-manifest case
         # already returned above.)
-        typer.echo(f"warning: scenario lore auto-ingest skipped: {exc}", err=True)
+        typer.secho(
+            f"warning: scenario lore auto-ingest skipped: {exc}",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
         return
     total = sum(result.chunk_count for result in results)
-    typer.echo(f"auto-ingested {total} lore chunk(s) from {len(results)} document(s)", err=True)
+    typer.secho(
+        f"auto-ingested {total} lore chunk(s) from {len(results)} document(s)",
+        fg=typer.colors.GREEN,
+        err=True,
+    )
 
 
 def _build_services(
@@ -316,7 +324,7 @@ def create_scenario_template_command(
             overwrite=overwrite,
         )
     except (FileExistsError, ValueError, OSError) as exc:
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     _echo_json(result)
 
@@ -361,7 +369,7 @@ def start_session(
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
         services.close()
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     services.close()
     # Auto-index lore so retrieval works immediately; ingest-scenario-lore is no longer a
@@ -381,7 +389,7 @@ def resume(
         session = services.orchestrator.resume_session(session_id)
     except SessionNotFoundError as exc:
         services.close()
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     services.close()
     typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True))
@@ -450,7 +458,7 @@ def ingest(
             ),
         )
     except (FileNotFoundError, ImportError, ValueError) as exc:
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
@@ -477,7 +485,7 @@ def ingest_scenario_lore(
             ),
         )
     except (FileNotFoundError, ImportError, ValueError) as exc:
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     typer.echo(
         json.dumps(
@@ -516,7 +524,7 @@ def reindex_memories(
         ).reindex_session(session_id)
     except Exception as exc:
         connection.close()
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     connection.close()
     typer.echo(
@@ -570,7 +578,7 @@ def retrieve_debug(
         ValueError,
     ) as exc:
         services.close()
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     services.close()
     typer.echo(
@@ -715,15 +723,15 @@ def turn(
             )
     except (ProviderTimeoutError, ProviderUnavailableError) as exc:
         services.close()
-        typer.echo(f"Error: {exc}", err=True)
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
     except (DataFileNotFoundError, DataValidationError, SessionNotFoundError, ValueError) as exc:
         services.close()
-        typer.echo(str(exc))
+        typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
     services.close()
     for warning in result.warnings:
-        typer.echo(f"Warning: {warning}", err=True)
+        typer.secho(f"Warning: {warning}", fg=typer.colors.YELLOW, err=True)
     typer.echo(result.text)
 
 
@@ -747,7 +755,9 @@ def _delete_session_vectors(session_id: str) -> None:
         vector_store = _build_vector_store(settings)
         vector_store.delete_session_points(RagCollection.SESSION_MEMORY, session_id)
     except Exception as exc:
-        typer.echo(f"Warning: session vector cleanup skipped: {exc}", err=True)
+        typer.secho(
+            f"Warning: session vector cleanup skipped: {exc}", fg=typer.colors.YELLOW, err=True
+        )
 
 
 @app.command("list-sessions")
