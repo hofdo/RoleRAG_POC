@@ -15,7 +15,7 @@ from app.memory.deterministic_extractor import (
     extract_explicit_durable_events,
     is_covered_by_summaries,
 )
-from app.orchestration.stages.critique import record_structured_failure
+from app.orchestration.stages.critique import record_structured_failure, validate_gating
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.memory_consolidation import MemoryConsolidator
 from app.orchestration.stages.memory_dedup import MemoryDeduplicator
@@ -64,7 +64,7 @@ class TurnMemoryStage:
         self.memory_indexer = memory_indexer
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
-        self.gating = gating
+        self.gating = validate_gating(gating)
         self._summary_cache = SessionSummaryCache()
         self._deduplicator = MemoryDeduplicator(
             cache=self._summary_cache,

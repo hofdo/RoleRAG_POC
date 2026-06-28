@@ -17,6 +17,15 @@ from app.llm.structured_output import StructuredOutputError
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.routing import TurnRoutingStage
 
+GATING_MODES: frozenset[str] = frozenset({"always", "auto"})
+
+
+def validate_gating(gating: str) -> str:
+    """Reject an unknown gating mode at construction instead of silently treating it as 'always'."""
+    if gating not in GATING_MODES:
+        raise ValueError(f"gating must be one of {sorted(GATING_MODES)}, got {gating!r}")
+    return gating
+
 
 class CriticEvaluatingAgent(Protocol):
     async def evaluate(
@@ -73,7 +82,7 @@ class TurnCritiqueStage:
         self.critic_agent = critic_agent
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
-        self.gating = gating
+        self.gating = validate_gating(gating)
         self.low_retrieval_confidence = low_retrieval_confidence
         self.high_scene_complexity = high_scene_complexity
 

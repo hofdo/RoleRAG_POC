@@ -1320,6 +1320,28 @@ async def test_critique_stage_auto_gating_skips_low_risk_turn() -> None:
     assert critic.calls == 0
 
 
+def test_critique_stage_rejects_unknown_gating_mode() -> None:
+    with pytest.raises(ValueError, match="gating must be one of"):
+        TurnCritiqueStage(
+            provider=UnusedProvider(),
+            critic_agent=_EchoingCriticAgent(CriticResult(accepted=True)),
+            routing_stage=_routing(),
+            gating="sometimes",
+        )
+
+
+def test_memory_stage_rejects_unknown_gating_mode() -> None:
+    with pytest.raises(ValueError, match="gating must be one of"):
+        TurnMemoryStage(
+            provider=UnusedProvider(),
+            memory_store=None,
+            memory_curator=None,
+            memory_indexer=None,
+            routing_stage=_routing(),
+            gating="never",
+        )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "signals",
