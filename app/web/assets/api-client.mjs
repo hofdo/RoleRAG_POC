@@ -283,7 +283,15 @@ function parseFrame(result, frame) {
   if (dataLines.length === 0) {
     return false;
   }
-  return applyEvent(result, eventName, JSON.parse(dataLines.join("\n")));
+  let payload;
+  try {
+    payload = JSON.parse(dataLines.join("\n"));
+  } catch {
+    // A corrupt frame (proxy truncation, backend bug) must surface as a typed stream error,
+    // not a raw SyntaxError that escapes the ApiError contract the UI handles.
+    throw new ApiError("invalid_stream", "The backend event stream sent a malformed frame.", 502);
+  }
+  return applyEvent(result, eventName, payload);
 }
 
 async function parseEventStream(response) {

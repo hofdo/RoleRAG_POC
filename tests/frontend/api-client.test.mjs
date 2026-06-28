@@ -341,6 +341,24 @@ test("createBufferedTurn attaches an abort signal so hung streams time out", asy
   assert.equal(receivedSignal.aborted, false);
 });
 
+test("createBufferedTurn rejects a malformed SSE frame as a typed ApiError", async () => {
+  // A frame whose data payload is not valid JSON must surface as an ApiError, not a raw
+  // SyntaxError that escapes the UI's error handling.
+  const fetchImpl = async () => new Response(
+    'event: text\ndata: {not valid json\n\n',
+    { headers: { "content-type": "text/event-stream" } },
+  );
+
+  await assert.rejects(
+    createBufferedTurn("session-1", { message: "Hi.", request_cloud: false }, { fetchImpl }),
+    (error) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.code, "invalid_stream");
+      return true;
+    },
+  );
+});
+
 test("createBufferedTurn surfaces confirmation_required frames as terminal", async () => {
   const fetchImpl = async () => new Response(
     'event: confirmation_required\ndata: {"status":"confirmation_required","route":{"provider":"cloud","model":"cloud-model","reason":"user requested cloud"},"warnings":[]}\n\n',
