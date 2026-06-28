@@ -22,6 +22,7 @@ import {
   describeRecentSessionsStatus,
   describeRuntimeStatus,
   formatRecentSessionOption,
+  formatRetrievalDiagnostics,
   isConfirmationRequired,
   resumeSession,
   selectedRecentSessionId,
@@ -59,6 +60,10 @@ const elements = {
   sendTurn: document.querySelector("#send-turn"),
   transcript: document.querySelector("#transcript"),
   debugState: document.querySelector("#debug-state"),
+  inspectRetrieval: document.querySelector("#inspect-retrieval"),
+  retrievalModal: document.querySelector("#retrieval-modal"),
+  retrievalQuery: document.querySelector("#retrieval-query"),
+  retrievalBody: document.querySelector("#retrieval-body"),
   memoryList: document.querySelector("#memory-list"),
 };
 
@@ -280,9 +285,15 @@ async function refreshMemories(sessionId) {
 
 function renderDebugState() {
   elements.debugState.replaceChildren();
+  elements.inspectRetrieval.disabled = true;
   if (!state.debug) {
     return;
   }
+  const retrieval = state.debug.retrieval;
+  const detailCount = retrieval
+    ? (retrieval.selected?.length ?? 0) + (retrieval.rejected?.length ?? 0)
+    : 0;
+  elements.inspectRetrieval.disabled = detailCount === 0;
   addDebugRow("Session ID", state.debug.sessionId);
   addDebugRow("Transport", state.debug.transport);
   addDebugRow("request_cloud", state.debug.requestCloud);
@@ -295,6 +306,68 @@ function renderDebugState() {
   addDebugRow("stage_timings", state.debug.stageTimings);
   addDebugRow("Warnings", state.debug.warnings.length ? state.debug.warnings.join("; ") : "none");
 }
+
+function formatScore(value) {
+  return typeof value === "number" ? value.toFixed(3) : "-";
+}
+
+function buildRetrievalTable(title, rows) {
+  const section = document.createElement("section");
+  const heading = document.createElement("h3");
+  heading.textContent = `${title} (${rows.length})`;
+  section.append(heading);
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = "None.";
+    section.append(empty);
+    return section;
+  }
+  const table = document.createElement("table");
+  table.className = "retrieval-table";
+  const header = document.createElement("tr");
+  for (const label of ["#", "Source", "Collection", "Vis", "Score", "Adjusted", "Boosts"]) {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    header.append(cell);
+  }
+  table.append(header);
+  for (const row of rows) {
+    const tableRow = document.createElement("tr");
+    const cells = [
+      row.rank ?? "-",
+      row.source,
+      row.collection,
+      row.visibility,
+      formatScore(row.originalScore),
+      formatScore(row.adjustedScore),
+      row.boosts.length ? row.boosts.join(", ") : "-",
+    ];
+    for (const value of cells) {
+      const cell = document.createElement("td");
+      cell.textContent = String(value);
+      tableRow.append(cell);
+    }
+    table.append(tableRow);
+  }
+  section.append(table);
+  return section;
+}
+
+function renderRetrievalModal() {
+  const detail = formatRetrievalDiagnostics(state.debug?.retrieval ?? null);
+  elements.retrievalQuery.textContent = detail.query
+    ? `Query: ${detail.query}`
+    : "No retrieval query recorded for this turn.";
+  elements.retrievalBody.replaceChildren(
+    buildRetrievalTable("Selected", detail.selected),
+    buildRetrievalTable("Rejected", detail.rejected),
+  );
+  elements.retrievalModal.showModal();
+}
+
+elements.inspectRetrieval.addEventListener("click", () => {
+  renderRetrievalModal();
+});
 
 elements.sessionForm.addEventListener("submit", async (event) => {
   event.preventDefault();

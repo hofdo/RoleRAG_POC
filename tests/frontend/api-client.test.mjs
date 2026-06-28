@@ -284,7 +284,39 @@ test("createBufferedTurn handles split chunks, repeated text, and terminal metad
     memory_written: true,
     critic_status: "accepted",
     warnings: ["index delayed"],
+    retrieval: null,
   });
+});
+
+test("createBufferedTurn captures retrieval diagnostics from the final frame", async () => {
+  const retrieval = {
+    query: "What does the gallery mirror mark?",
+    selected: [
+      {
+        id: "public-lore",
+        source: "demo_lore.md",
+        collection: "canon_lore",
+        visibility: "player",
+        original_score: 0.4,
+        adjusted_score: 0.9,
+        applied_boosts: ["scene_match"],
+        selected_rank: 1,
+      },
+    ],
+    rejected: [],
+  };
+  const fetchImpl = async () => new Response(
+    'event: text\ndata: {"text":"A reply."}\n\n'
+      + `event: final\ndata: {"route":{"provider":"local","model":"local-model","reason":"default local route"},"finish_reason":"stop","memory_written":false,"critic_status":"accepted","warnings":[],"retrieval":${JSON.stringify(retrieval)}}\n\n`,
+    { headers: { "content-type": "text/event-stream" } },
+  );
+
+  const turn = await createBufferedTurn("session-1", {
+    message: "What does the mirror mark?",
+    request_cloud: false,
+  }, { fetchImpl });
+
+  assert.deepEqual(turn.retrieval, retrieval);
 });
 
 test("createBufferedTurn renders safe failure text without rejected drafts", async () => {

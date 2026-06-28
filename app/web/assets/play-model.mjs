@@ -191,6 +191,29 @@ export function buildDebugState({ sessionId, transport, requestCloud, turn }) {
     criticStatus: turn.critic_status,
     warnings: turn.warnings,
     stageTimings: formatStageTimings(turn.stage_timings),
+    retrieval: turn.retrieval ?? null,
+  };
+}
+
+export function formatRetrievalDiagnostics(retrieval) {
+  // Shape the metadata-only retrieval diagnostics (no chunk text) into display rows for the
+  // turn-detail modal: why each chunk ranked where it did (scores + applied boosts).
+  if (!retrieval) {
+    return { query: null, selected: [], rejected: [] };
+  }
+  const row = (candidate) => ({
+    rank: candidate.selected_rank ?? null,
+    source: candidate.source,
+    collection: candidate.collection,
+    visibility: candidate.visibility,
+    originalScore: candidate.original_score,
+    adjustedScore: candidate.adjusted_score,
+    boosts: candidate.applied_boosts ?? [],
+  });
+  return {
+    query: retrieval.query ?? null,
+    selected: (retrieval.selected ?? []).map(row),
+    rejected: (retrieval.rejected ?? []).map(row),
   };
 }
 

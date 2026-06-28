@@ -15,6 +15,7 @@ import {
   describeRecentSessionsStatus,
   describeRuntimeStatus,
   formatRecentSessionOption,
+  formatRetrievalDiagnostics,
   RECENT_SESSIONS_UNAVAILABLE_TEXT,
   RUNTIME_STATUS_UNAVAILABLE_TEXT,
   resumeSession,
@@ -380,6 +381,7 @@ test("debug state includes route metadata, warnings, memory, transport, and clou
     criticStatus: "repaired",
     warnings: ["index delayed"],
     stageTimings: "generation 12.3s; critique 8.1s; memory 0.4s",
+    retrieval: null,
   });
 });
 
@@ -398,6 +400,59 @@ test("debug state formats missing stage timings as none", () => {
     },
   });
   assert.equal(debug.stageTimings, "none");
+});
+
+test("retrieval diagnostics format into ranked rows with scores and boosts", () => {
+  const formatted = formatRetrievalDiagnostics({
+    query: "What does the gallery mirror mark?",
+    selected: [
+      {
+        id: "public-lore",
+        source: "demo_lore.md",
+        collection: "canon_lore",
+        visibility: "player",
+        original_score: 0.4,
+        adjusted_score: 0.9,
+        applied_boosts: ["scene_match", "recency"],
+        selected_rank: 1,
+      },
+    ],
+    rejected: [
+      {
+        id: "wrong-world",
+        source: "other_lore.md",
+        collection: "canon_lore",
+        visibility: "player",
+        original_score: 0.3,
+        adjusted_score: 0.3,
+        applied_boosts: [],
+        selected_rank: null,
+      },
+    ],
+  });
+
+  assert.equal(formatted.query, "What does the gallery mirror mark?");
+  assert.deepEqual(formatted.selected, [
+    {
+      rank: 1,
+      source: "demo_lore.md",
+      collection: "canon_lore",
+      visibility: "player",
+      originalScore: 0.4,
+      adjustedScore: 0.9,
+      boosts: ["scene_match", "recency"],
+    },
+  ]);
+  assert.equal(formatted.rejected.length, 1);
+  assert.equal(formatted.rejected[0].source, "other_lore.md");
+});
+
+test("retrieval diagnostics tolerate a null payload", () => {
+  assert.deepEqual(formatRetrievalDiagnostics(null), {
+    query: null,
+    selected: [],
+    rejected: [],
+  });
 });
 
 test("memory panel rows format summaries with visibility and importance", () => {

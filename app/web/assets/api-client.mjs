@@ -265,6 +265,7 @@ function applyEvent(result, eventName, payload) {
     result.memory_written = payload.memory_written;
     result.critic_status = payload.critic_status;
     result.warnings = payload.warnings;
+    result.retrieval = payload.retrieval ?? null;
     return true;
   }
   return false;
@@ -306,6 +307,7 @@ async function parseEventStream(response) {
     memory_written: false,
     critic_status: "skipped",
     warnings: [],
+    retrieval: null,
   };
   const decoder = new TextDecoder();
   let buffer = "";

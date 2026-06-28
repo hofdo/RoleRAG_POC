@@ -126,6 +126,9 @@
         <details class="card developer-panel">
           <summary>Developer panel</summary>
           <dl id="debug-state" class="debug-grid"></dl>
+          <button id="inspect-retrieval" type="button" class="secondary" disabled>
+            Inspect retrieval
+          </button>
         </details>
 
         <details class="card developer-panel">
@@ -134,6 +137,14 @@
         </details>
       </section>
     </main>
+    <dialog id="retrieval-modal" class="retrieval-modal" aria-label="Turn retrieval detail">
+      <form method="dialog" class="retrieval-modal__head">
+        <h2>Turn retrieval detail</h2>
+        <button value="close" class="secondary">Close</button>
+      </form>
+      <p id="retrieval-query" class="retrieval-query"></p>
+      <div id="retrieval-body" class="retrieval-body"></div>
+    </dialog>
     <script type="module" src="/play/assets/play-ui.mjs"></script>
   </body>
 </html>
