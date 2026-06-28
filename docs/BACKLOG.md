@@ -32,9 +32,11 @@ Order: value + independence, decisions last. Each item gate-verified
 - [x] **#6** importance-aware recency boost — **opt-in** (`RAG_RECENCY_WEIGHT`, default 0.0,
   byte-identical); recency scaled by importance so it can't displace older high-importance memories;
   offline sweep 85/85, validate via live-smoke before enabling
-- [ ] **#19** structured `TurnResult.errors` — open (contract-breaking + YAGNI; user left open)
-- [ ] **#29** `session_memory_max_episodes` default — open (data says a hard cap regresses recall;
-  recommend doc-only, user left open)
+- [x] **#19** structured turn errors — additive `errors` (category/stage/message/suggestion) on the
+  API/SSE turn responses, derived from the warning strings via `classify_warnings()`; non-breaking
+  (warnings preserved, TurnResult unchanged, no 78-site churn). Frontend display = future extension
+- [x] **#29** documented why `session_memory_max_episodes` default is 0 (a hard cap regressed
+  50-turn recall); no code change
 
 ## A tier (quick wins)
 
