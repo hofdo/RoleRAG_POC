@@ -22,8 +22,11 @@ Order: value + independence, decisions last. Each item gate-verified
   `memory_extraction_stays_local` / `critic_stays_local` invariant; deterministic fallback already covers it
 - [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`;
   API create_session left as a follow-up)
-- [ ] **#19** structured `TurnResult.errors` (class/stage/message/suggestion) vs free-form warnings
-- [ ] **#15** web/SSE robustness tests (404/MIME, malformed frames, mid-retrieval Qdrant fail)
+- [~] **#19** structured `TurnResult.errors` — **DEFERRED to decision-batch**: `warnings: list[str]`
+  spans 78 sites + 4 API schemas + persistence; contract-breaking + taxonomy decision; YAGNI for a
+  single-user POC until a UI consumer needs it
+- [x] **#15** web/SSE robustness tests + client malformed-frame hardening (404/MIME/traversal;
+  parseFrame → ApiError; mid-retrieval already covered)
 - [ ] **#22** web `/play` turn-detail modal (ranked chunks + boosts + timings; unblocked by #8)
 - [ ] **#6** importance-aware recency boost — **GATED**: recall-regression risk → break for feedback
 - [ ] **#29** decide `session_memory_max_episodes` default — **DECISION** → break for feedback
