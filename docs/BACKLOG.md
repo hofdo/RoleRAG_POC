@@ -27,9 +27,11 @@ Order: value + independence, decisions last. Each item gate-verified
   single-user POC until a UI consumer needs it
 - [x] **#15** web/SSE robustness tests + client malformed-frame hardening (404/MIME/traversal;
   parseFrame → ApiError; mid-retrieval already covered)
-- [ ] **#22** web `/play` turn-detail modal (ranked chunks + boosts + timings; unblocked by #8)
-- [ ] **#6** importance-aware recency boost — **GATED**: recall-regression risk → break for feedback
-- [ ] **#29** decide `session_memory_max_episodes` default — **DECISION** → break for feedback
+- [x] **#22** web `/play` retrieval-inspection modal (current turn; query + selected/rejected +
+  scores + boosts). Historical per-turn via #8's endpoint = future extension
+- [ ] **#6** importance-aware recency boost — **GATED**: recall-regression risk → decision-batch
+- [ ] **#19** structured `TurnResult.errors` — **DEFERRED**: contract-breaking + YAGNI → decision-batch
+- [ ] **#29** decide `session_memory_max_episodes` default — **DECISION** → decision-batch
 
 ## Open — A tier (quick wins, not in this loop)
 
