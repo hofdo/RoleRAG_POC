@@ -86,7 +86,10 @@ class Settings(BaseSettings):
     rag_write_dedup_cosine_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     # Cap on the number of session memories kept in the retrievable vector index
     # (lowest importance-then-recency evicted from the index; SQLite keeps all).
-    # 0 = unbounded (no behavior change).
+    # 0 = unbounded, and that is the deliberate default: enabling a hard cap measurably
+    # REGRESSED 50-turn recall in testing (evicted memories stop being retrievable even
+    # though dual-query + importance ranking keep the index usable unbounded at POC scale).
+    # Only set a cap if a specific corpus-size problem appears, and re-run live-smoke recall.
     session_memory_max_episodes: int = Field(default=0, ge=0)
     # Memory consolidation ("sleep cycle"): once this many old, low-importance,
     # non-durable memories accumulate, roll them into one summary (LLM with a
