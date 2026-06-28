@@ -17,8 +17,9 @@ QE follow-ups (503 OpenAPI, C2/C3 named cap tests).
 Order: value + independence, decisions last. Each item gate-verified
 (`ruff && mypy && pytest && regression_runner && smoke-run`) and committed before the next.
 
-- [ ] **#17** critic structured-output failure → route to repair instead of silent `critique=None` (safety gap)
-- [ ] **#9** memory-extraction cloud retry before deterministic fallback
+- [x] **#17** critic error → fail closed (CONTROLLED_FAILURE) instead of serving unvalidated text
+- [~] **#9** ~~memory-extraction cloud retry~~ — **DROPPED**: conflicts with the deliberate
+  `memory_extraction_stays_local` / `critic_stays_local` invariant; deterministic fallback already covers it
 - [ ] **#16** auto-ingest lore on scenario load (removes manual setup footgun)
 - [ ] **#19** structured `TurnResult.errors` (class/stage/message/suggestion) vs free-form warnings
 - [ ] **#15** web/SSE robustness tests (404/MIME, malformed frames, mid-retrieval Qdrant fail)
