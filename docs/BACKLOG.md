@@ -36,10 +36,20 @@ Order: value + independence, decisions last. Each item gate-verified
 - [ ] **#29** `session_memory_max_episodes` default — open (data says a hard cap regresses recall;
   recommend doc-only, user left open)
 
-## Open — A tier (quick wins, not in this loop)
+## A tier (quick wins)
 
-#18 narrow broad `except Exception` · #24 validate gating strings at construction ·
-#26 roleplay-aware stopwords · #27 CLI color/icons · #28 extract test-scenarios module.
+- [x] **#24** validate gating strings at stage construction (bad value → ValueError, not silent no-op)
+- [x] **#27** CLI color: errors red / warnings yellow / success green (`typer.secho`, auto-strips in tests)
+- [~] **#28** ~~extract test-scenarios module~~ — **SKIP (misread)**: `ROSE_GALLERY_MESSAGES`/`STORY_EVENTS`
+  are production live-checkpoint data in `app/diagnostics/live_checkpoint.py`, already centralized +
+  importable by tests. Moving them would be wrong (not test-only) + pure churn
+- [~] **#26** ~~roleplay-aware stopwords~~ — **SKIP**: reverses a documented choice (framing words like
+  ask/tell deliberately excluded so "I ask whether she…" doesn't boost unrelated chunks); the stemmer
+  splits ask/tell/say variants anyway, so re-including them matches inconsistently. Benefit unprovable
+  offline, risk is live-only
+- [~] **#18** ~~narrow broad `except Exception`~~ — **SKIP**: the ~20 handlers are intentional
+  resilience boundaries (memory/retrieval/critique/diagnostics best-effort degrade-to-warning).
+  Narrowing them would let an unexpected type crash a turn — harms robustness for no benefit
 
 ## Not doing (personal-use scope)
 
