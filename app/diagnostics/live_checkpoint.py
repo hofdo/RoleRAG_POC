@@ -25,7 +25,7 @@ from app.rag.retriever import build_retrieval_query
 from app.rag.vector_store import QdrantVectorStore
 
 MIN_TURN_COUNT = 5
-MAX_TURN_COUNT = 50
+MAX_TURN_COUNT = 100
 DEFAULT_TURN_COUNT = 8
 
 ROSE_GALLERY_MESSAGES = (
@@ -79,6 +79,56 @@ ROSE_GALLERY_MESSAGES = (
     "I ask Iria what she will do if the envoy returns before dawn.",
     "I ask which ally should receive the first page copied from the ledger.",
     "I ask Iria to repeat the safe signal we agreed to use at the west door.",
+    "I ask Iria whether the midnight bell has already rung in the lower halls.",
+    "I trace the conservatory passage behind the roses and ask where it ends.",
+    "I ask which neutral courtier might be swayed by the ledger's contents.",
+    "I tell Iria to watch the eastern stair while I approach the archive.",
+    "I ask whether the regent's secretary carried anything sealed tonight.",
+    "I test the west door with three soft taps and wait for her answer.",
+    "I ask Iria to confirm the blue wax seal on the note just delivered.",
+    "I ask how long the guards' midnight rotation leaves the corridor empty.",
+    "I lift the third rose pedestal and check that the spare key remains hidden.",
+    "I ask Iria which page of the ledger names the winter succession plot.",
+    "I ask whether the silver compass still rests where I entrusted it.",
+    "I ask her to describe the envoy's face when he first entered the gallery.",
+    "I ask what sound the hidden archive latch makes when it gives way.",
+    "I tell Iria I will copy a single page and leave the seal unbroken.",
+    "I ask which ally should receive that copied page before dawn.",
+    "I ask whether the ballroom crowd has thinned enough to cross unseen.",
+    "I study the envoy's discarded note and compare its hand to the ledger.",
+    "I ask Iria to recall the exact rule we set for trusting any message.",
+    "I ask whether the regent has summoned anyone to the gallery tonight.",
+    "I ask which mirror would warn us first if someone climbs the eastern stair.",
+    "I ask Iria to repeat where I hid the spare archive key.",
+    "I ask what distraction could clear the west corridor for a full minute.",
+    "I tell Iria the three-tap signal still stands if we must part.",
+    "I ask whether the archivists left any cipher beside the sealed ledger.",
+    "I ask which servant can carry the copied page without drawing notice.",
+    "I ask Iria how the regent first learned of the old archive's existence.",
+    "I ask whether the clock's silenced chime was meant as a signal to someone.",
+    "I ask her to name the courtier who changed their route after the envoy left.",
+    "I tell Iria I trust only the blue-sealed messages from this point on.",
+    "I ask whether the conservatory door can be barred from the inside.",
+    "I ask what the regent fears most about the winter succession record.",
+    "I ask Iria to keep the silver compass hidden until I send the safe signal.",
+    "I ask which corridor the secretary used when he slipped away just now.",
+    "I inspect the brass clock face again for the scratch the envoy left.",
+    "I ask whether dawn light will reach the archive before the guards return.",
+    "I ask Iria to confirm the order in which tonight's suspicious guests arrived.",
+    "I ask what proof would turn a neutral courtier against the regent.",
+    "I tell Iria to send the servants away before we open the latch.",
+    "I ask whether anyone disturbed the third rose pedestal since I hid the key.",
+    "I ask which page the regent would destroy first if he reached the ledger.",
+    "I ask Iria to listen for three taps if I am delayed at the archive.",
+    "I ask whether the eastern stair is finally clear of watchers.",
+    "I ask her to recall the promise I made about returning before dawn.",
+    "I ask which message tonight carried no blue seal and should be doubted.",
+    "I tell Iria I will return the copied page to her by the west door.",
+    "I ask whether the regent's envoy has reentered the palace gates.",
+    "I ask Iria for the safe signal one last time before I leave the gallery.",
+    "I ask which ally waits beyond the conservatory to carry our evidence.",
+    "I tell Iria that if the bell rings twice, she must hide the compass and flee.",
+    "I ask Iria what she will remember of this night when the regent is gone.",
 )
 
 
@@ -198,15 +248,15 @@ def resolve_turn_count(value: str | None, legacy_value: str | None = None) -> in
     try:
         turn_count = int(raw_value)
     except ValueError as exc:
-        raise ValueError("LIVE_TURN_COUNT must be an integer from 5 through 50") from exc
+        raise ValueError("LIVE_TURN_COUNT must be an integer from 5 through 100") from exc
     if not MIN_TURN_COUNT <= turn_count <= MAX_TURN_COUNT:
-        raise ValueError("LIVE_TURN_COUNT must be an integer from 5 through 50")
+        raise ValueError("LIVE_TURN_COUNT must be an integer from 5 through 100")
     return turn_count
 
 
 def conversation_messages(turn_count: int) -> tuple[str, ...]:
     if not MIN_TURN_COUNT <= turn_count <= MAX_TURN_COUNT:
-        raise ValueError("turn_count must be from 5 through 50")
+        raise ValueError("turn_count must be from 5 through 100")
     return ROSE_GALLERY_MESSAGES[:turn_count]
 
 

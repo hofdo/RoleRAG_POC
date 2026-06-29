@@ -136,24 +136,24 @@ def _run(
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("5", 5), ("8", 8), ("12", 12), ("20", 20), ("50", 50)],
+    [("5", 5), ("8", 8), ("12", 12), ("20", 20), ("50", 50), ("100", 100)],
 )
 def test_resolve_turn_count_accepts_supported_values(value: str, expected: int) -> None:
     assert resolve_turn_count(value) == expected
 
 
-@pytest.mark.parametrize("value", ["4", "51", "eight", "5.5"])
+@pytest.mark.parametrize("value", ["4", "101", "eight", "5.5"])
 def test_resolve_turn_count_rejects_invalid_values(value: str) -> None:
-    with pytest.raises(ValueError, match="5 through 50"):
+    with pytest.raises(ValueError, match="5 through 100"):
         resolve_turn_count(value)
 
 
 def test_all_lengths_share_the_same_story_prefix() -> None:
-    fifty = conversation_messages(50)
-    for count in (5, 8, 12, 20, 50):
-        assert conversation_messages(count) == fifty[:count]
-    assert "promise to return before dawn" in fifty[2]
-    assert len(fifty) == 50
+    full = conversation_messages(100)
+    for count in (5, 8, 12, 20, 50, 100):
+        assert conversation_messages(count) == full[:count]
+    assert "promise to return before dawn" in full[2]
+    assert len(full) == 100
 
 
 def test_structured_warnings_are_strict_or_report_only() -> None:
