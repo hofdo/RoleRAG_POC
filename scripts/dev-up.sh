@@ -103,14 +103,27 @@ if [[ -d frontend ]]; then
   fi
 fi
 
-echo "== API + UI =="
-if curl -fsS "http://127.0.0.1:${API_PORT}/runtime/status" >/dev/null 2>&1; then
-  echo "Reusing running API on port ${API_PORT} (restart it to pick up a fresh SPA build)."
-else
+start_api() {
   nohup .venv/bin/uvicorn app.main:app --port "${API_PORT}" \
     > "${RUN_DIR}/uvicorn.log" 2>&1 &
   echo $! > "${RUN_DIR}/uvicorn.pid"
   wait_for_url "API" "http://127.0.0.1:${API_PORT}/runtime/status" 60
+}
+
+echo "== API + UI =="
+if curl -fsS "http://127.0.0.1:${API_PORT}/runtime/status" >/dev/null 2>&1; then
+  # app.main mounts /app at import time, so an API started before the build won't serve it.
+  # If we built a SPA but the running API doesn't serve /app, it's stale — restart it.
+  if [[ "${spa_built}" == 1 ]] && ! curl -fsS "http://127.0.0.1:${API_PORT}/app/" >/dev/null 2>&1; then
+    echo "Running API predates the SPA build; restarting to mount /app…"
+    lsof -ti:"${API_PORT}" | xargs kill 2>/dev/null || true
+    sleep 1
+    start_api
+  else
+    echo "Reusing running API on port ${API_PORT}."
+  fi
+else
+  start_api
 fi
 
 echo
