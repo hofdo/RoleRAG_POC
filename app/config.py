@@ -124,7 +124,7 @@ class Settings(BaseSettings):
 
     recent_dialogue_turns: int = Field(default=8, ge=0)
     recent_dialogue_max_message_chars: int = Field(default=900, ge=1)
-    live_turn_count: int = Field(default=8, ge=5, le=50)
+    live_turn_count: int = Field(default=8, ge=5, le=100)
     live_long_turn_count: int = Field(default=0, ge=0)
     live_fail_on_structured_warnings: bool = True
 
