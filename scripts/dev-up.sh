@@ -82,9 +82,30 @@ else
   wait_for_url "Local model" "${MODELS_URL}" 180
 fi
 
+# Build the Angular SPA before the API starts: app.main mounts /app at import time,
+# so the build output must exist before uvicorn boots to be served.
+spa_built=0
+echo "== Frontend (Angular SPA) =="
+if [[ -d frontend ]]; then
+  if command -v npm >/dev/null 2>&1; then
+    if [[ ! -d frontend/node_modules ]]; then
+      echo "Installing frontend deps (first run; may take a minute)…"
+      (cd frontend && npm ci) || { echo "npm ci failed." >&2; exit 1; }
+    fi
+    echo "Building SPA (served at /app)…"
+    if (cd frontend && npx ng build --base-href=/app/) > "${RUN_DIR}/ng-build.log" 2>&1; then
+      spa_built=1
+    else
+      echo "Frontend build failed; see ${RUN_DIR}/ng-build.log (API will still serve legacy /play)." >&2
+    fi
+  else
+    echo "npm not found; skipping SPA build (legacy /play UI only)."
+  fi
+fi
+
 echo "== API + UI =="
 if curl -fsS "http://127.0.0.1:${API_PORT}/runtime/status" >/dev/null 2>&1; then
-  echo "Reusing running API on port ${API_PORT}."
+  echo "Reusing running API on port ${API_PORT} (restart it to pick up a fresh SPA build)."
 else
   nohup .venv/bin/uvicorn app.main:app --port "${API_PORT}" \
     > "${RUN_DIR}/uvicorn.log" 2>&1 &
@@ -93,5 +114,7 @@ else
 fi
 
 echo
-echo "RoleRAG is up:  http://127.0.0.1:${API_PORT}/play"
+echo "RoleRAG is up:"
+[[ "${spa_built}" == 1 ]] && echo "  SPA:     http://127.0.0.1:${API_PORT}/app/"
+echo "  Legacy:  http://127.0.0.1:${API_PORT}/play"
 echo "Logs: ${RUN_DIR}/  |  Stop everything: scripts/dev-down.sh"

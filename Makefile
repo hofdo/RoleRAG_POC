@@ -13,7 +13,7 @@ up: ## Run app + Qdrant in Docker (model server must run on the host, port 8080)
 down: ## Stop and remove the Docker stack
 	docker compose down
 
-dev: ## Start the full stack on the host (Qdrant + llama-server + API) via dev-up.sh
+dev: ## Start the full stack on the host (Qdrant + llama-server + SPA build + API) via dev-up.sh
 	bash scripts/dev-up.sh
 
 dev-down: ## Stop everything dev-up started
