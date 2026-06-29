@@ -121,6 +121,7 @@ flowchart TD
 | [13_live_model_quality_assessment](13_live_model_quality_assessment.md) | 2026-06-08 live model quality findings |
 | [14_local_model_comparison_2026-06-08](14_local_model_comparison_2026-06-08.md) | 2026-06-08 small-vs-26B model comparison |
 | [15_v1_acceptance_report](15_v1_acceptance_report.md) | 1.0 acceptance baseline |
+| [16_mtp_speculative_decoding_2026-06-29](16_mtp_speculative_decoding_2026-06-29.md) | MTP draft vs baseline speed test (100 turns): ~10–14% lossless speedup |
 
 ## Background research (design-time references)
 
