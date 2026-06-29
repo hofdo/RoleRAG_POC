@@ -21,6 +21,8 @@ from app.api.schemas import (
     CreateTurnRequest,
     CreateTurnResponse,
     ErrorResponse,
+    EvalRunsResponse,
+    EvalRunSummary,
     GetSessionResponse,
     MemoryEpisodeResponse,
     RecentSessionResponse,
@@ -35,6 +37,7 @@ from app.api.schemas import (
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
+from app.diagnostics.eval_runs import load_eval_runs
 from app.domain import SessionState, StoredTurn, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.orchestration.turn_errors import classify_warnings
@@ -112,6 +115,16 @@ def get_runtime_status(
             and _has_text(settings.cloud_llm_model)
             and is_usable_cloud_api_key(settings.cloud_llm_api_key)
         ),
+    )
+
+
+@router.get("/diagnostics/eval-runs", response_model=EvalRunsResponse)
+def get_eval_runs() -> EvalRunsResponse:
+    # Read-only: scans EVAL_RESULTS_DIR for per-run conversation-checkpoint.json artifacts.
+    base, runs = load_eval_runs()
+    return EvalRunsResponse(
+        results_dir=str(base),
+        runs=[EvalRunSummary(**run) for run in runs],
     )
 
 

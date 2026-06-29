@@ -238,3 +238,21 @@ class TurnDetailResponse(BaseModel):
     errors: list[TurnError] = Field(default_factory=list)
     stage_timings: dict[str, float] = Field(default_factory=dict)
     retrieval: RetrievalDiagnosticsResponse | None = None
+
+
+class EvalRunSummary(BaseModel):
+    id: str
+    status: str
+    turn_count: int
+    recall_misses: int
+    extraction_misses: int
+    retrieval_misses: int
+    total_seconds: float
+    p50_seconds: float
+    p95_seconds: float
+    warning_total: int
+
+
+class EvalRunsResponse(BaseModel):
+    results_dir: str
+    runs: list[EvalRunSummary] = Field(default_factory=list)
