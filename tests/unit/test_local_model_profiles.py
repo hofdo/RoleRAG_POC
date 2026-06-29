@@ -100,4 +100,34 @@ def test_unknown_profile_is_rejected() -> None:
     )
 
     assert result.returncode != 0
-    assert "small or 26b" in result.stderr
+    assert "small, 26b, or 26b-mtp" in result.stderr
+
+
+def _profile_model_path(profile: str, *, mtp_dir: str = "/models/mtp") -> str:
+    script = f"""
+source {PROFILE_LIBRARY!s}
+LOCAL_MODEL_PROFILE={profile}
+MODEL_26B_MTP_DIR={mtp_dir}
+resolve_local_model_profile
+printf '%s' "${{PROFILE_MODEL_PATH}}"
+"""
+    result = subprocess.run(["bash", "-c", script], check=True, capture_output=True)
+    return result.stdout.decode()
+
+
+def test_26b_mtp_profile_serves_local_files_with_speculative_draft() -> None:
+    model, args = _profile("26b-mtp")
+
+    assert model == ""  # served from a local -m path, not pulled via -hf
+    assert args[args.index("-c") + 1] == "16384"  # bumped context for the MTP build
+    assert args[args.index("--spec-type") + 1] == "draft-mtp"
+    assert args[args.index("--spec-draft-n-max") + 1] == "3"
+    assert args[args.index("-md") + 1].endswith("mtp-gemma-4-26B-A4B-it.gguf")
+    # Sampling stays app-controlled (the router sets temperature per request).
+    assert "--temp" not in args
+
+
+def test_26b_mtp_profile_model_path_honors_dir_override() -> None:
+    path = _profile_model_path("26b-mtp", mtp_dir="/models/mtp")
+
+    assert path == "/models/mtp/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf"

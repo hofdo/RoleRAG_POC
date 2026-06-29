@@ -27,6 +27,8 @@ LLAMA_CPP_SERVER_PATH="${LLAMA_CPP_SERVER_PATH:-llama-server}"
 LLAMA_CPP_MODEL_PATH="${LLAMA_CPP_MODEL_PATH:-}"
 LOCAL_MODEL_PROFILE="${LOCAL_MODEL_PROFILE:-small}"
 resolve_local_model_profile
+# A profile may pin a local main-model path (e.g. 26b-mtp); the launcher prefers -m over -hf.
+LLAMA_CPP_MODEL_PATH="${LLAMA_CPP_MODEL_PATH:-${PROFILE_MODEL_PATH:-}}"
 LLAMA_CPP_HF_MODEL="${LLAMA_CPP_HF_MODEL:-${PROFILE_HF_MODEL}}"
 LLAMA_CPP_HOST="${LLAMA_CPP_HOST:-127.0.0.1}"
 LLAMA_CPP_PORT="${LLAMA_CPP_PORT:-8080}"

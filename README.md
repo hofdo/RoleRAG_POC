@@ -436,8 +436,14 @@ CLOUD_MODE=off \
 Managed llama.cpp startup uses `llama-server` from `PATH` and `LOCAL_MODEL_PROFILE=small` by
 default. `LOCAL_MODEL_PROFILE=26b` selects
 `HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:Q4_K_M`.
-Both named profiles use `--jinja`, disabled reasoning/thinking, full GPU offload, an 8192-token
-context, flash attention, q8_0 K cache, q4_0 V cache, and seed `424242`.
+`LOCAL_MODEL_PROFILE=26b-mtp` serves the same 26B base from local GGUF files with an MTP
+speculative-draft model for faster decode (`-md … --spec-type draft-mtp --spec-draft-n-max 3`,
+16384-token context); point `MODEL_26B_MTP_DIR` at the directory holding
+`Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf` and `mtp-gemma-4-26B-A4B-it.gguf`
+(default `~/models/gemma4-26b-qat-balanced-mtp`). Sampling stays app-controlled (the router sets
+temperature per request), so the profile carries no `--temp`/`--top-k`/etc.
+All named profiles use `--jinja`, disabled reasoning/thinking, full GPU offload, flash attention,
+q8_0 K cache, q4_0 V cache, and seed `424242` (8192-token context for `small`/`26b`).
 `LLAMA_CPP_SERVER_PATH` can select another binary. `LLAMA_CPP_MODEL_PATH` switches
 startup from `-hf` to a local `-m` GGUF path. It also accepts `LLAMA_CPP_HOST` and
 `LLAMA_CPP_PORT`, optional `LLAMA_CPP_CTX_SIZE` for `-c`, optional

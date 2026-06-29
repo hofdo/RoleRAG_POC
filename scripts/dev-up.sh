@@ -66,8 +66,14 @@ else
   fi
   resolve_local_model_profile
   echo "Starting llama-server (profile: ${LOCAL_MODEL_PROFILE:-small})."
+  # A profile may pin a local main-model path (e.g. 26b-mtp); prefer -m, else pull via -hf.
+  if [[ -n "${PROFILE_MODEL_PATH:-}" ]]; then
+    model_source_args=(-m "${PROFILE_MODEL_PATH}")
+  else
+    model_source_args=(-hf "${PROFILE_HF_MODEL}")
+  fi
   nohup llama-server \
-    -hf "${PROFILE_HF_MODEL}" \
+    "${model_source_args[@]}" \
     --host 127.0.0.1 --port "${LOCAL_LLM_PORT}" \
     --alias "${LOCAL_LLM_MODEL}" \
     "${PROFILE_LLAMA_ARGS[@]}" \
