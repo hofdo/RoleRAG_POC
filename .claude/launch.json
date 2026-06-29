@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rolerag-spa",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd frontend && npx ng serve --host 127.0.0.1 --port 4200"],
+      "port": 4200
+    }
+  ]
+}
