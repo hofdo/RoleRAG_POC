@@ -1,0 +1,76 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell__bar {
+  display: flex;
+  align-items: baseline;
+  gap: 2rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.shell__brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(201, 162, 75, 0.35);
+}
+
+.shell__nav {
+  display: flex;
+  gap: 1.5rem;
+
+  a {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--muted);
+    text-decoration: none;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-bottom: 3px;
+    transition: color 0.15s ease;
+
+    .sigil {
+      color: var(--accent);
+      text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+
+    &:hover {
+      color: var(--text);
+    }
+
+    /* Active = the single cyan live-wire underline (slides in via transform) */
+    &.is-active {
+      color: var(--text);
+    }
+    &.is-active::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: var(--wire);
+      box-shadow: 0 0 6px color-mix(in srgb, var(--wire) 50%, transparent);
+    }
+  }
+}
+
+.shell__main {
+  flex: 1;
+  padding: 1.75rem;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}

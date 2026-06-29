@@ -1,0 +1,227 @@
+/* ============================================================================
+   RoleRAG — "Grimoire Console" design system
+   Literary-grimoire base (warm ink-on-vellum gold) + a single cyan live-wire,
+   sigil small-caps section labels, and a rare gilt drop-cap for persona prose.
+   Synthesized by the design-direction judge panel (Phase 5).
+   ============================================================================ */
+
+:root {
+  /* Palette — warm dark, single gold accent + oxblood/olive, one cyan live-wire */
+  --bg: #14110a;
+  --surface: #1c1710;
+  --surface-2: #262017;
+  --text: #ece3d0;
+  --muted: #9a8e78;
+  --border: #38301f;
+  --accent: #c9a24b; /* gilt gold */
+  --accent-2: #8a3a2c; /* oxblood */
+  --danger: #b4493a;
+  --success: #7d8c4e;
+  --wire: #2be6d6; /* the ONLY non-gold hue — marks "the live thing right now" */
+
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'Spectral', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Bookish radii — never fully round, so dense tables read as a hand-set page */
+  --r-chip: 3px;
+  --r-card: 9px;
+
+  --shadow-card: 0 2px 14px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.6;
+  /* Top "lamp glow" so the app feels lit, not flat-black */
+  background:
+    radial-gradient(120% 80% at 50% -10%, #211a10 0%, var(--bg) 58%) fixed,
+    var(--bg);
+  position: relative;
+}
+
+/* Zero-asset vellum grain (inline feTurbulence), barely-there overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Keep app content above the grain layer */
+app-root {
+  position: relative;
+  z-index: 1;
+}
+
+/* --- Typography --------------------------------------------------------- */
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.12;
+  margin: 0 0 0.4em;
+  letter-spacing: 0.01em;
+}
+
+h1 {
+  font-size: 2.4rem;
+}
+h2 {
+  font-size: 1.55rem;
+  color: var(--text);
+}
+h3 {
+  font-size: 1.2rem;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* --- Signature: sigil + small-caps marginal label ----------------------- */
+/* Use on any section heading. data-sigil sets the leading mono glyph. */
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+}
+
+/* --- Signature: the single live-wire ------------------------------------ */
+.is-live {
+  border-left: 2px solid var(--wire);
+}
+.is-live.streaming {
+  box-shadow: -6px 0 10px -6px color-mix(in srgb, var(--wire) 55%, transparent);
+  animation: wire-breathe 2.4s ease-in-out infinite;
+}
+@keyframes wire-breathe {
+  0%,
+  100% {
+    box-shadow: -6px 0 10px -6px color-mix(in srgb, var(--wire) 30%, transparent);
+  }
+  50% {
+    box-shadow: -8px 0 16px -6px color-mix(in srgb, var(--wire) 70%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-live.streaming {
+    animation: none;
+  }
+}
+
+/* --- Form controls ------------------------------------------------------ */
+
+select,
+input,
+textarea,
+button {
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-chip);
+  padding: 0.4rem 0.6rem;
+}
+
+textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+select:focus,
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #1a1306;
+  border-color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: filter 0.15s ease;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* Secondary / ghost buttons opt in with .ghost */
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+/* --- Tables ------------------------------------------------------------- */
+
+table {
+  border-collapse: collapse;
+}
+th,
+td {
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* --- Scrollbar ---------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
