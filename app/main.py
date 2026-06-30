@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -43,6 +44,12 @@ app.add_exception_handler(RequestValidationError, request_validation_error_handl
 app.include_router(api_router)
 app.include_router(web_router)
 app.mount("/play/assets", StaticFiles(directory=ASSETS_DIRECTORY), name="play-assets")
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    # The SPA is the default UI when built; fall back to the legacy /play page otherwise.
+    return RedirectResponse("/app/" if _SPA_DIRECTORY.is_dir() else "/play")
 
 if _SPA_DIRECTORY.is_dir():
     # html=True serves index.html at /app/; _SpaStaticFiles adds the deep-link fallback so a
