@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from app.diagnostics.eval_runs import load_eval_runs
+from app.diagnostics.eval_runs import load_eval_run, load_eval_runs
 
 
-def _write_checkpoint(run_dir: Path, payload: dict, *, nested: bool = False) -> None:
+def _write_checkpoint(run_dir: Path, payload: dict[str, Any], *, nested: bool = False) -> None:
     target = run_dir / "raw" if nested else run_dir
     target.mkdir(parents=True, exist_ok=True)
     (target / "conversation-checkpoint.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -54,3 +55,17 @@ def test_load_eval_runs_skips_incomplete_and_missing_base(tmp_path: Path) -> Non
 
     _missing_base, missing_runs = load_eval_runs(tmp_path / "does-not-exist")
     assert missing_runs == []
+
+
+def test_load_eval_run_returns_payload_and_blocks_traversal(tmp_path: Path) -> None:
+    _write_checkpoint(
+        tmp_path / "run-a",
+        {"status": "pass", "quality_metrics": {"callback_recall_misses": 2}},
+        nested=True,
+    )
+    payload = load_eval_run("run-a", tmp_path)
+    assert payload is not None
+    assert payload["quality_metrics"]["callback_recall_misses"] == 2
+    assert load_eval_run("nope", tmp_path) is None
+    # An untrusted run_id that escapes the results dir must be rejected.
+    assert load_eval_run("../../etc", tmp_path) is None

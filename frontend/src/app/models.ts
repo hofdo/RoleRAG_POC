@@ -202,3 +202,29 @@ export interface EvalRunsResponse {
   results_dir: string;
   runs: EvalRunSummary[];
 }
+
+export interface SessionTurnDetailsResponse {
+  session_id: string;
+  turns: TurnDetailResponse[];
+}
+
+// Eval drill-down = the raw conversation-checkpoint.json. Loosely typed: the UI reads a few
+// headline fields and tolerates everything else.
+export interface EvalRunDetail {
+  status?: string;
+  warning_counts?: Record<string, number>;
+  quality_metrics?: {
+    callback_recall_misses?: number;
+    memory_extraction_misses?: number;
+    retrieval_selection_misses?: number;
+    latency?: { total_seconds?: number; p50_seconds?: number; p95_seconds?: number };
+  };
+  turns?: Array<{
+    turn_index?: number;
+    duration_seconds?: number;
+    stage_timings?: Record<string, number>;
+    finish_reason?: string | null;
+    warnings?: string[];
+  }>;
+  [key: string]: unknown;
+}

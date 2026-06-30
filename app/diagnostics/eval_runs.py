@@ -50,6 +50,25 @@ def _summarize(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def load_eval_run(run_id: str, results_dir: Path | None = None) -> dict[str, Any] | None:
+    """Return the full conversation-checkpoint payload for a single run, or None if absent.
+
+    run_id is untrusted (URL path segment): reject any value that escapes the results dir.
+    """
+    base = results_dir if results_dir is not None else default_results_dir()
+    run_dir = (base / run_id).resolve()
+    if not run_dir.is_relative_to(base.resolve()):
+        return None
+    checkpoint = _find_checkpoint(run_dir)
+    if checkpoint is None:
+        return None
+    try:
+        payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def load_eval_runs(results_dir: Path | None = None) -> tuple[Path, list[dict[str, Any]]]:
     """Return (results_dir, run summaries sorted by run id). Missing dir → empty list."""
     base = results_dir if results_dir is not None else default_results_dir()

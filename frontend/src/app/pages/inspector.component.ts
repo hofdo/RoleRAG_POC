@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ApiService } from '../api.service';
 import { formatRetrievalDiagnostics, formatRecentSessionOption, formatStageTimings } from '../play-model';
-import type { RecentSessionResponse, RecentTurnResponse, TurnDetailResponse } from '../models';
+import type { RecentSessionResponse, TurnDetailResponse } from '../models';
 
 // Phase 2: per-session turn timeline → drill into one turn's retrieval ranking (selected vs
 // rejected chunks, scores, applied boosts), stage timings, critic status and structured errors.
@@ -37,7 +37,7 @@ import type { RecentSessionResponse, RecentTurnResponse, TurnDetailResponse } fr
                 type="button"
                 [class.active]="selectedIndex() === t.turn_index"
                 [class.is-live]="selectedIndex() === t.turn_index"
-                (click)="selectTurn(t.turn_index)"
+                (click)="selectTurn(t)"
               >
                 <span class="idx">#{{ t.turn_index }}</span>
                 <span class="msg">{{ t.user_message }}</span>
@@ -149,7 +149,7 @@ export class InspectorComponent implements OnInit {
 
   readonly sessions = signal<RecentSessionResponse[]>([]);
   readonly selectedId = signal<string>('');
-  readonly turns = signal<RecentTurnResponse[]>([]);
+  readonly turns = signal<TurnDetailResponse[]>([]);
   readonly selectedIndex = signal<number | null>(null);
   readonly selectedTurn = signal<TurnDetailResponse | null>(null);
   readonly loading = signal<boolean>(false);
@@ -186,8 +186,9 @@ export class InspectorComponent implements OnInit {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const detail = await this.api.getSession(sessionId);
-      this.turns.set([...detail.recent_turns].sort((a, b) => a.turn_index - b.turn_index));
+      // One bulk fetch of every turn's full diagnostics; selecting a turn is then in-memory.
+      const response = await this.api.getSessionTurnDetails(sessionId);
+      this.turns.set(response.turns);
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Failed to load session.');
     } finally {
@@ -195,16 +196,8 @@ export class InspectorComponent implements OnInit {
     }
   }
 
-  async selectTurn(turnIndex: number): Promise<void> {
-    const sessionId = this.selectedId();
-    if (!sessionId) return;
-    this.selectedIndex.set(turnIndex);
-    this.error.set(null);
-    try {
-      this.selectedTurn.set(await this.api.getTurnDetail(sessionId, turnIndex));
-    } catch (error) {
-      this.error.set(error instanceof Error ? error.message : 'Failed to load turn.');
-      this.selectedTurn.set(null);
-    }
+  selectTurn(turn: TurnDetailResponse): void {
+    this.selectedIndex.set(turn.turn_index);
+    this.selectedTurn.set(turn);
   }
 }

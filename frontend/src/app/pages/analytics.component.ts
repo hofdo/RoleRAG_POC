@@ -147,11 +147,8 @@ export class AnalyticsComponent implements OnInit {
     if (!sessionId) return;
     this.loading.set(true);
     try {
-      const detail = await this.api.getSession(sessionId);
-      const turns = await Promise.all(
-        detail.recent_turns.map((t) => this.api.getTurnDetail(sessionId, t.turn_index)),
-      );
-      this.summary.set(aggregateTurns(turns));
+      const response = await this.api.getSessionTurnDetails(sessionId);
+      this.summary.set(aggregateTurns(response.turns));
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Failed to load analytics.');
     } finally {

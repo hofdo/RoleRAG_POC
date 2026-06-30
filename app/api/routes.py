@@ -31,13 +31,14 @@ from app.api.schemas import (
     RouteResponse,
     RuntimeStatusResponse,
     SessionMemoriesResponse,
+    SessionTurnDetailsResponse,
     TurnDetailResponse,
     to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
-from app.diagnostics.eval_runs import load_eval_runs
+from app.diagnostics.eval_runs import load_eval_run, load_eval_runs
 from app.domain import SessionState, StoredTurn, TurnInput, TurnOutcome, TurnResult
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.orchestration.turn_errors import classify_warnings
@@ -126,6 +127,19 @@ def get_eval_runs() -> EvalRunsResponse:
         results_dir=str(base),
         runs=[EvalRunSummary(**run) for run in runs],
     )
+
+
+@router.get("/diagnostics/eval-runs/{run_id}")
+def get_eval_run(run_id: str) -> dict[str, Any]:
+    # Read-only: full conversation-checkpoint.json for one run (drill-down).
+    payload = load_eval_run(run_id)
+    if payload is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="eval_run_not_found",
+            message=f"Unknown eval run: {run_id}",
+        )
+    return payload
 
 
 @router.get(
@@ -373,6 +387,30 @@ def get_turn_detail(
             message=f"Unknown turn index: {turn_index}",
         )
     return _to_turn_detail_response(stored_turn)
+
+
+@router.get(
+    "/sessions/{session_id}/turn-details",
+    response_model=SessionTurnDetailsResponse,
+    responses=ERROR_404_RESPONSE,
+)
+def get_session_turn_details(
+    session_id: str,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> SessionTurnDetailsResponse:
+    # One call returns every stored turn's full diagnostics, so Analytics/Inspector don't
+    # fan out N requests over /turns/{i}.
+    _require_session(services, session_id)
+    if services.turn_repository is None:
+        raise RuntimeError("Read services must include a turn repository")
+    turns = sorted(
+        services.turn_repository.list_all_turns(session_id),
+        key=lambda turn: turn.turn_index,
+    )
+    return SessionTurnDetailsResponse(
+        session_id=session_id,
+        turns=[_to_turn_detail_response(turn) for turn in turns],
+    )
 
 
 @router.get(

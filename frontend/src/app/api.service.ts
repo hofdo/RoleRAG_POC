@@ -7,11 +7,13 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   CreateTurnRequest,
+  EvalRunDetail,
   EvalRunsResponse,
   GetSessionResponse,
   RecentSessionsResponse,
   RuntimeStatus,
   SessionMemoriesResponse,
+  SessionTurnDetailsResponse,
   TurnDetailResponse,
   TurnResult,
 } from './models';
@@ -198,6 +200,15 @@ export class ApiService {
 
   getTurnDetail(sessionId: string, turnIndex: number): Promise<TurnDetailResponse> {
     return requestJson(`/sessions/${encodeURIComponent(sessionId)}/turns/${turnIndex}`);
+  }
+
+  // One call for every turn's diagnostics (Analytics/Inspector) instead of N per-turn fetches.
+  getSessionTurnDetails(sessionId: string): Promise<SessionTurnDetailsResponse> {
+    return requestJson(`/sessions/${encodeURIComponent(sessionId)}/turn-details`);
+  }
+
+  getEvalRun(runId: string): Promise<EvalRunDetail> {
+    return requestJson(`/diagnostics/eval-runs/${encodeURIComponent(runId)}`);
   }
 
   getCanon(sessionId: string): Promise<CanonFactsResponse> {

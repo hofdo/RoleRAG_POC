@@ -256,3 +256,8 @@ class EvalRunSummary(BaseModel):
 class EvalRunsResponse(BaseModel):
     results_dir: str
     runs: list[EvalRunSummary] = Field(default_factory=list)
+
+
+class SessionTurnDetailsResponse(BaseModel):
+    session_id: str
+    turns: list[TurnDetailResponse] = Field(default_factory=list)

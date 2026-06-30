@@ -1,6 +1,7 @@
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ApiService } from '../api.service';
-import type { EvalRunSummary } from '../models';
+import { formatStageTimings } from '../play-model';
+import type { EvalRunDetail, EvalRunSummary } from '../models';
 
 // Phase 4: trend recall / latency / pass-fail across eval runs. Reads the backend
 // GET /diagnostics/eval-runs endpoint, which scans EVAL_RESULTS_DIR for per-run
@@ -23,7 +24,7 @@ import type { EvalRunSummary } from '../models';
       </p>
 
       @if (runs().length) {
-        <table class="runs">
+        <table class="runs runs--list">
           <thead>
             <tr>
               <th>Run</th><th>Status</th><th>Turns</th>
@@ -33,7 +34,11 @@ import type { EvalRunSummary } from '../models';
           </thead>
           <tbody>
             @for (run of runs(); track run.id) {
-              <tr [class.fail]="run.status !== 'pass'">
+              <tr
+                [class.fail]="run.status !== 'pass'"
+                [class.is-live]="selectedRunId() === run.id"
+                (click)="openRun(run.id)"
+              >
                 <td>{{ run.id }}</td>
                 <td>{{ run.status }}</td>
                 <td>{{ run.turn_count }}</td>
@@ -66,6 +71,68 @@ import type { EvalRunSummary } from '../models';
             <span class="bar-val">{{ run.p95_seconds.toFixed(1) }}</span>
           </div>
         }
+
+        @if (selectedRunId()) {
+          <div class="run-detail">
+            <header class="run-detail__head">
+              <h2 class="section-label">Run {{ selectedRunId() }}</h2>
+              <button type="button" class="ghost" (click)="closeRun()">Close</button>
+            </header>
+            @if (loadingDetail()) {
+              <p class="hint">Loading run…</p>
+            }
+            @if (selectedRun(); as run) {
+              <dl class="meta">
+                <div><dt>Status</dt><dd>{{ run.status ?? '—' }}</dd></div>
+                <div>
+                  <dt>Latency p50/p95/total (s)</dt>
+                  <dd>
+                    {{ run.quality_metrics?.latency?.p50_seconds ?? 0 }} /
+                    {{ run.quality_metrics?.latency?.p95_seconds ?? 0 }} /
+                    {{ run.quality_metrics?.latency?.total_seconds ?? 0 }}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Recall / extract / retr misses</dt>
+                  <dd>
+                    {{ run.quality_metrics?.callback_recall_misses ?? 0 }} /
+                    {{ run.quality_metrics?.memory_extraction_misses ?? 0 }} /
+                    {{ run.quality_metrics?.retrieval_selection_misses ?? 0 }}
+                  </dd>
+                </div>
+              </dl>
+
+              @if (warningEntries(run.warning_counts).length) {
+                <h3 class="section-label">Warning counts</h3>
+                <ul class="warnings">
+                  @for (w of warningEntries(run.warning_counts); track w.name) {
+                    <li>{{ w.name }}: {{ w.value }}</li>
+                  }
+                </ul>
+              }
+
+              @if (run.turns?.length) {
+                <h3 class="section-label">Per-turn</h3>
+                <table class="runs">
+                  <thead>
+                    <tr><th>#</th><th>Dur s</th><th>Finish</th><th>Warn</th><th>Stages</th></tr>
+                  </thead>
+                  <tbody>
+                    @for (t of run.turns ?? []; track $index) {
+                      <tr>
+                        <td>{{ t.turn_index }}</td>
+                        <td>{{ (t.duration_seconds ?? 0).toFixed(1) }}</td>
+                        <td>{{ t.finish_reason ?? '—' }}</td>
+                        <td>{{ t.warnings?.length ?? 0 }}</td>
+                        <td class="stages">{{ stageTimings(t.stage_timings) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+            }
+          </div>
+        }
       }
     </section>
   `,
@@ -95,6 +162,14 @@ import type { EvalRunSummary } from '../models';
       .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--r-chip); }
       .bar-fill.err { background: var(--danger); }
       .bar-val { text-align: right; font-variant-numeric: tabular-nums; }
+      .runs--list tbody tr { cursor: pointer; }
+      .run-detail { margin-top: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 1rem; box-shadow: var(--shadow-card); }
+      .run-detail__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+      .meta div { display: flex; gap: 0.5rem; margin: 0.15rem 0; font-size: 0.85rem; }
+      .meta dt { width: 16rem; color: var(--muted); }
+      .meta dd { margin: 0; }
+      .warnings { margin: 0.25rem 0; padding-left: 1.25rem; font-size: 0.85rem; }
+      .stages { font-family: var(--font-mono); font-size: 0.72rem; text-align: left; }
     `,
   ],
 })
@@ -106,6 +181,10 @@ export class EvalComponent implements OnInit {
   readonly loading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
+  readonly selectedRunId = signal<string | null>(null);
+  readonly selectedRun = signal<EvalRunDetail | null>(null);
+  readonly loadingDetail = signal<boolean>(false);
+
   readonly maxRecall = computed(() => Math.max(0, ...this.runs().map((r) => r.recall_misses)));
   readonly maxP95 = computed(() => Math.max(0, ...this.runs().map((r) => r.p95_seconds)));
 
@@ -115,6 +194,32 @@ export class EvalComponent implements OnInit {
 
   pct(value: number, max: number): number {
     return max > 0 ? (value / max) * 100 : 0;
+  }
+
+  async openRun(runId: string): Promise<void> {
+    this.selectedRunId.set(runId);
+    this.selectedRun.set(null);
+    this.loadingDetail.set(true);
+    try {
+      this.selectedRun.set(await this.api.getEvalRun(runId));
+    } catch (error) {
+      this.error.set(error instanceof Error ? error.message : 'Failed to load run detail.');
+    } finally {
+      this.loadingDetail.set(false);
+    }
+  }
+
+  closeRun(): void {
+    this.selectedRunId.set(null);
+    this.selectedRun.set(null);
+  }
+
+  stageTimings(timings: Record<string, number> | undefined): string {
+    return formatStageTimings(timings);
+  }
+
+  warningEntries(counts: Record<string, number> | undefined): { name: string; value: number }[] {
+    return Object.entries(counts ?? {}).map(([name, value]) => ({ name, value }));
   }
 
   private async load(): Promise<void> {
