@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test:frontend": "node --test tests/frontend/*.test.mjs",
-    "test:live-ui": "playwright test tests/e2e/live-play.spec.mjs --project=chromium"
+    "test:live-ui": "playwright test tests/e2e/live-play.spec.mjs --project=chromium",
+    "test:e2e-spa": "playwright test tests/e2e/spa-play.spec.mjs --project=chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"

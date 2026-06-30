@@ -171,6 +171,16 @@ textarea:focus {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
+/* Keyboard focus ring (the live-wire cyan) — visible on all interactive elements. */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--wire);
+  outline-offset: 2px;
+}
+
 button {
   cursor: pointer;
   background: var(--accent);

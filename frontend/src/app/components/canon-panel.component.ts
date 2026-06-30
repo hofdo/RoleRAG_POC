@@ -20,6 +20,7 @@ import { SessionStore } from '../session-store';
                 type="button"
                 class="del ghost"
                 title="Delete fact"
+                aria-label="Delete canon fact"
                 (click)="remove(fact.id)"
               >&#10005;</button>
             </li>

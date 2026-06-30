@@ -4,7 +4,7 @@
     <nav class="shell__nav">
       @for (item of nav; track item.path) {
         <a [routerLink]="item.path" routerLinkActive="is-active">
-          <span class="sigil">{{ item.sigil }}</span>{{ item.label }}
+          <span class="sigil" aria-hidden="true">{{ item.sigil }}</span>{{ item.label }}
         </a>
       }
     </nav>
