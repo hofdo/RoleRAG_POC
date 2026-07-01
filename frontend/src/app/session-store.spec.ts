@@ -34,13 +34,30 @@ const confirmationTurn: TurnResult = {
 class FakeApi {
   calls: { sessionId: string; request: CreateTurnRequest }[] = [];
   next: TurnResult = completedTurn('hello');
+  failPanels = false;
 
   createBufferedTurn(sessionId: string, request: CreateTurnRequest): Promise<TurnResult> {
     this.calls.push({ sessionId, request });
     return Promise.resolve(this.next);
   }
   getSessionMemories(): Promise<{ session_id: string; memories: [] }> {
+    if (this.failPanels) return Promise.reject(new Error('backend down'));
     return Promise.resolve({ session_id: 's1', memories: [] });
+  }
+  getCanon(_sessionId: string): Promise<{ session_id: string; facts: [] }> {
+    if (this.failPanels) return Promise.reject(new Error('backend down'));
+    return Promise.resolve({ session_id: 's1', facts: [] });
+  }
+  addCanonFact(
+    _sessionId: string,
+    request: { text: string },
+  ): Promise<{ id: string; text: string }> {
+    if (this.failPanels) return Promise.reject(new Error('backend down'));
+    return Promise.resolve({ id: 'f1', text: request.text });
+  }
+  deleteCanonFact(_sessionId: string, _factId: string): Promise<void> {
+    if (this.failPanels) return Promise.reject(new Error('backend down'));
+    return Promise.resolve();
   }
 }
 
@@ -117,5 +134,59 @@ describe('SessionStore turn flow', () => {
     store.session.set(null);
     await store.sendMessage('nope', false);
     expect(api.calls).toEqual([]);
+  });
+});
+
+describe('SessionStore panel errors', () => {
+  it('surfaces a memory refresh failure and keeps the previous list', async () => {
+    const { store, api } = setup();
+    store.memories.set([{ summary: 'kept' } as never]);
+
+    api.failPanels = true;
+    await store.refreshMemories();
+
+    expect(store.memoryError()).toContain('backend down');
+    expect(store.memories().length).toBe(1);
+  });
+
+  it('clears the memory error on a later successful refresh', async () => {
+    const { store, api } = setup();
+    api.failPanels = true;
+    await store.refreshMemories();
+
+    api.failPanels = false;
+    await store.refreshMemories();
+
+    expect(store.memoryError()).toBeNull();
+  });
+
+  it('surfaces a rejected canon add without appending the fact', async () => {
+    const { store, api } = setup();
+    api.failPanels = true;
+
+    await store.addCanon('the door is locked');
+
+    expect(store.canonError()).toContain('Fact not added');
+    expect(store.canonFacts()).toEqual([]);
+  });
+
+  it('appends a canon fact only after the server confirms it', async () => {
+    const { store } = setup();
+
+    await store.addCanon('the door is locked');
+
+    expect(store.canonFacts().map((fact) => fact.text)).toEqual(['the door is locked']);
+    expect(store.canonError()).toBeNull();
+  });
+
+  it('surfaces a rejected canon delete and keeps the fact', async () => {
+    const { store, api } = setup();
+    await store.addCanon('the door is locked');
+
+    api.failPanels = true;
+    await store.deleteCanon('f1');
+
+    expect(store.canonError()).toContain('Fact not deleted');
+    expect(store.canonFacts().length).toBe(1);
   });
 });

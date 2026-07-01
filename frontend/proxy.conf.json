@@ -1,6 +1,6 @@
 {
-  "/sessions": { "target": "http://127.0.0.1:18080", "secure": false, "changeOrigin": true },
-  "/content": { "target": "http://127.0.0.1:18080", "secure": false, "changeOrigin": true },
-  "/runtime": { "target": "http://127.0.0.1:18080", "secure": false, "changeOrigin": true },
-  "/diagnostics": { "target": "http://127.0.0.1:18080", "secure": false, "changeOrigin": true }
+  "/sessions": { "target": "http://127.0.0.1:8000", "secure": false, "changeOrigin": true },
+  "/content": { "target": "http://127.0.0.1:8000", "secure": false, "changeOrigin": true },
+  "/runtime": { "target": "http://127.0.0.1:8000", "secure": false, "changeOrigin": true },
+  "/diagnostics": { "target": "http://127.0.0.1:8000", "secure": false, "changeOrigin": true }
 }

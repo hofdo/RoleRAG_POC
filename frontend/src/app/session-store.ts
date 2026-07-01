@@ -54,6 +54,9 @@ export class SessionStore {
   readonly busy = signal<boolean>(false);
   readonly turnError = signal<string | null>(null);
   readonly loadError = signal<string | null>(null);
+  // Side-panel failures surface here instead of silently showing stale data.
+  readonly memoryError = signal<string | null>(null);
+  readonly canonError = signal<string | null>(null);
   // Set when CLOUD_MODE=ask and the router wants cloud: holds the message to resubmit on confirm.
   readonly pendingConfirm = signal<{ message: string } | null>(null);
   readonly lastDebug = signal<TurnDebug | null>(null);
@@ -201,8 +204,10 @@ export class SessionStore {
     try {
       const response = await this.api.getSessionMemories(sessionId);
       this.memories.set(response.memories);
-    } catch {
-      // Memory panel is non-critical; leave the previous list on failure.
+      this.memoryError.set(null);
+    } catch (error) {
+      // Keep the previous list, but say it may be stale instead of failing silently.
+      this.memoryError.set(`Refresh failed — list may be stale. ${errorMessage(error)}`);
     }
   }
 
@@ -212,23 +217,36 @@ export class SessionStore {
     try {
       const response = await this.api.getCanon(sessionId);
       this.canonFacts.set(response.facts);
-    } catch {
-      // Non-critical.
+      this.canonError.set(null);
+    } catch (error) {
+      this.canonError.set(`Load failed — list may be stale. ${errorMessage(error)}`);
     }
   }
 
+  // Mutations update the list only after the server confirms, so a failure needs no
+  // rollback — it just has to be visible.
   async addCanon(text: string): Promise<void> {
     const sessionId = this.sessionId();
     const trimmed = text.trim();
     if (!sessionId || !trimmed) return;
-    const fact = await this.api.addCanonFact(sessionId, { text: trimmed });
-    this.canonFacts.update((facts) => [...facts, fact]);
+    try {
+      const fact = await this.api.addCanonFact(sessionId, { text: trimmed });
+      this.canonFacts.update((facts) => [...facts, fact]);
+      this.canonError.set(null);
+    } catch (error) {
+      this.canonError.set(`Fact not added. ${errorMessage(error)}`);
+    }
   }
 
   async deleteCanon(factId: string): Promise<void> {
     const sessionId = this.sessionId();
     if (!sessionId) return;
-    await this.api.deleteCanonFact(sessionId, factId);
-    this.canonFacts.update((facts) => facts.filter((fact) => fact.id !== factId));
+    try {
+      await this.api.deleteCanonFact(sessionId, factId);
+      this.canonFacts.update((facts) => facts.filter((fact) => fact.id !== factId));
+      this.canonError.set(null);
+    } catch (error) {
+      this.canonError.set(`Fact not deleted. ${errorMessage(error)}`);
+    }
   }
 }

@@ -17,6 +17,10 @@ import { SessionStore } from '../session-store';
         </button>
       </header>
 
+      @if (store.memoryError(); as error) {
+        <p class="memory-panel__error" role="alert">{{ error }}</p>
+      }
+
       @if (store.sessionId()) {
         @if (store.memoryLines().length) {
           <ul class="memory-panel__list">
@@ -49,6 +53,7 @@ import { SessionStore } from '../session-store';
     .memory-panel__list { margin: 0; padding-left: 1.25rem; color: var(--text); }
     .memory-panel__item { margin: 0.25rem 0; }
     .memory-panel__empty, .memory-panel__hint { margin: 0; color: var(--muted); font-style: italic; }
+    .memory-panel__error { margin: 0; color: var(--danger); font-size: 0.85rem; }
   `],
 })
 export class MemoryPanelComponent {

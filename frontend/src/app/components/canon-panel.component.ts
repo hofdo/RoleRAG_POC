@@ -9,6 +9,10 @@ import { SessionStore } from '../session-store';
     <section class="canon">
       <h3 class="section-label">Canon</h3>
 
+      @if (store.canonError(); as error) {
+        <p class="canon__error" role="alert">{{ error }}</p>
+      }
+
       @if (store.canonFacts().length === 0) {
         <p class="empty">No canon facts.</p>
       } @else {
@@ -59,6 +63,7 @@ import { SessionStore } from '../session-store';
       font-family: var(--font-body);
     }
     .empty { color: var(--muted); font-style: italic; }
+    .canon__error { margin: 0; color: var(--danger); font-size: 0.85rem; }
     .facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
     .fact {
       display: flex;
