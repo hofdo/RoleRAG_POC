@@ -53,12 +53,32 @@ Order: value + independence, decisions last. Each item gate-verified
   resilience boundaries (memory/retrieval/critique/diagnostics best-effort degrade-to-warning).
   Narrowing them would let an unexpected type crash a turn — harms robustness for no benefit
 
+## Decisions (2026-07-01 audit)
+
+- **Legacy `/play` UI: deleted.** The Angular SPA at `/app` is the only web UI; `app/web/`,
+  its vanilla-JS client/tests, and the `/play` routes were removed in 1.1.0. Rationale: two
+  coexisting UIs doubled maintenance and testing surface with no canonical owner.
+- **Graduated to 1.1.0.** v1 acceptance passed and the SPA/endpoints shipped since 1.0.0;
+  version bumped, `CHANGELOG.md` added, `setup.py`/`setup.cfg` (stale 0.1.0) deleted in favor of
+  `pyproject.toml`.
+- **Milestone 4 (shared world state): deferred with rationale.** The
+  `world_facts`/`WorldFact` layer from the original plan remains unbuilt — deliberately. Durable
+  memory + retrieval proved sufficient at 100-turn live scale (recall verified in the extended
+  checkpoint, docs/16); first-class mutable world state gets built when live evidence shows
+  recall/consistency degrading because facts live only in memory episodes, not before.
+
+## Follow-ups (SPA)
+
+- [ ] SPA session resume: `SessionStore.resume()` exists and is tested; no UI component calls
+  it. Wire a resume selector (recent sessions via `GET /sessions`) into the setup picker.
+
 ## Not doing (personal-use scope)
 
 StageGraph/DAG/plugin extensibility · hard memory-episode cap default (regressed recall) ·
 auth/multi-user/streaming/tracing · corpus-scale micro-opts.
 
-## Side projects (none built)
+## Side projects
 
-Full tiered list with effort + dependencies: [SIDE_PROJECTS.md](SIDE_PROJECTS.md).
-Best first: ★ Transcript Exporter (weekend, zero backend).
+Full tiered list with effort + dependencies: [SIDE_PROJECTS.md](SIDE_PROJECTS.md) — the SPA,
+RAG inspector, analytics, and eval dashboard entries shipped in 1.1.0.
+Best next: ★ Transcript Exporter (weekend, zero backend).

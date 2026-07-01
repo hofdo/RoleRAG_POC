@@ -1,59 +1,46 @@
-# Frontend
+# RoleRAG Web UI (Angular 19 SPA)
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.2.27.
+The browser surface for RoleRAG, served by FastAPI at `/app` (the API root `/` redirects
+there). It is a **thin client** over the same-origin API: the browser owns no orchestration,
+retrieval, validation, routing, persistence, memory, or hidden context — see the exposure
+boundaries in [docs/12_api_contract.md](../docs/12_api_contract.md).
 
-## Development server
+## Pages
 
-To start a local development server, run:
+| Route | What it does |
+|-------|--------------|
+| `/app/play` | Session setup from the public content catalog, turn loop over buffered SSE, `CLOUD_MODE=ask` confirmation, debug strip (route/critic/warnings/stage timings), memory + canon side panels |
+| `/app/inspector` | Per-session turn timeline with retrieval drill-down (query, selected/rejected candidates, scores, boosts) via the bulk `GET /sessions/{id}/turn-details` endpoint |
+| `/app/analytics` | Turn latency and per-stage timing statistics for a session |
+| `/app/eval` | Eval-run trends from `GET /diagnostics/eval-runs`, with per-run drill-down |
 
-```bash
-ng serve
-```
+All pages are lazy-loaded standalone components ([src/app/app.routes.ts](src/app/app.routes.ts)).
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+## Architecture
 
-## Code scaffolding
+- [src/app/session-store.ts](src/app/session-store.ts) — root-provided signal store; the logic
+  hub for session/turn/memory/canon state. Components inject it and read signals; there is no
+  NgRx. Side-panel failures surface via `memoryError`/`canonError` instead of failing silently.
+- [src/app/api.service.ts](src/app/api.service.ts) — fetch-based client, including the buffered
+  SSE turn parser (POST + `ReadableStream`; `HttpClient` doesn't fit SSE-over-POST). Malformed
+  frames surface as typed `ApiError`s.
+- [src/app/play-model.ts](src/app/play-model.ts), [src/app/analytics-model.ts](src/app/analytics-model.ts)
+  — pure view-model helpers, unit-tested without the DOM.
+- Design system: "Grimoire Console" — warm ink-on-vellum with a single live-wire accent, defined
+  as CSS variables in [src/styles.scss](src/styles.scss).
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the project run:
-
-```bash
-ng build
-```
-
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+## Develop
 
 ```bash
-ng test
+npm ci
+npm start          # ng serve on :4200, proxying API calls to :8000 (proxy.conf.json)
+npm test           # Karma unit tests (CI runs: npm test -- --watch=false --browsers=ChromeHeadless)
 ```
 
-## Running end-to-end tests
+`npm start` expects the backend stack up (`make dev` from the repo root). The production build
+is `npx ng build --base-href=/app/`; `make dev`, the Dockerfile, and CI all run it — output lands
+in `dist/frontend/browser`, which `app/main.py` mounts at `/app` with a deep-link fallback so
+client-side routes survive a hard refresh.
 
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+The end-to-end test lives at the repo root ([tests/e2e/spa-play.spec.mjs](../tests/e2e/spa-play.spec.mjs)):
+`PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 npm run test:e2e-spa` (needs the full stack + model).

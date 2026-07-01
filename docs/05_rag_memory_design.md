@@ -156,6 +156,11 @@ Current behavior:
   ([app/memory/deterministic_extractor.py](../app/memory/deterministic_extractor.py))
 - only the application decides whether to persist them
 - persisted memory episodes are stored in SQLite with visibility, importance, and tags
+- memory extraction reads the turn text **after** output-side secret containment has redacted it
+  (containment runs post-validation, pre-persistence in the orchestrator). This is deliberate:
+  redacted secrets must not re-enter circulation through memory. The accepted trade-off is that a
+  redacted phrase is also absent from extracted memories, so the engine will not "remember"
+  content it refused to say
 
 Current indexing behavior:
 

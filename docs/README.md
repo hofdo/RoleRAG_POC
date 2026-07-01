@@ -19,7 +19,7 @@ flowchart TD
     subgraph entry["Entry points"]
       CLI["CLI<br/>app/cli.py"]
       API["FastAPI + SSE<br/>app/api"]
-      WEB["Play UI /play<br/>app/web"]
+      WEB["Web UI /app<br/>frontend/ (Angular SPA)"]
     end
     COMP["Composition (DI wiring)<br/>app/composition.py"]
     ORCH["TurnOrchestrator<br/>app/orchestration"]
@@ -110,6 +110,7 @@ flowchart TD
 | Doc | What it covers |
 |-----|----------------|
 | [BACKLOG](BACKLOG.md) | Working backlog: done / open / skipped improvements, tagged `(#N)` in commits |
+| [CHANGELOG](../CHANGELOG.md) | Release-by-release delta (1.0.0 → current) |
 | [SIDE_PROJECTS](SIDE_PROJECTS.md) | Tiered side-project ideas built on top of the engine (effort + dependencies) |
 
 ## Reports & history (point-in-time, not current state)

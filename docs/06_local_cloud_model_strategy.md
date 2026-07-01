@@ -90,7 +90,7 @@ For actor or repair tasks, cloud may be selected when:
 - the API reports `status: "confirmation_required"` (JSON) or a
   `confirmation_required` SSE frame; the client resubmits the same message with
   `cloud_confirmed: true` (approve) or `force_local: true` (decline)
-- the play UI shows a confirmation dialog and resubmits automatically
+- the web UI shows a confirmation prompt and resubmits automatically
 - the CLI prompts interactively, or accepts `--confirm-cloud` / `--force-local`
   for non-interactive use
 - a declined turn is answered locally with route reason `user declined cloud`

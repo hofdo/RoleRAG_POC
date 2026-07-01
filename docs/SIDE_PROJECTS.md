@@ -16,7 +16,7 @@ always-on hosting is out of scope unless that decision is deliberately revisited
   `POST /sessions/{id}/turns`, `POST /sessions/{id}/turns/stream` (SSE), `GET /sessions/{id}/turns/{i}`
   (turn detail + retrieval diagnostics + `errors`, #8/#19), `GET /sessions/{id}/memories`, canon
   endpoints, `GET /runtime/status`, `GET /content/catalog`.
-- **Web UI** (`/play`): minimal vanilla-JS play loop + the retrieval-inspection modal (#22).
+- **Web UI** (`/app`): Angular SPA — play loop, RAG inspector, analytics, and eval pages.
 - **CLI** (`app/cli.py`): `start-session`, `turn`, `resume`, `turn-history`, `inspect-memories`,
   `export-session` / `import-session` (JSON), `ingest-scenario-lore`, `retrieve-debug`, `smoke-run`.
 - **Data**: SQLite (authoritative sessions/turns/memories/canon, turns carry `diagnostics_json`);
@@ -33,12 +33,9 @@ Render a session's turns into shareable **markdown / HTML** (optionally PDF).
 - **Scope**: a CLI subcommand or a tiny script; no schema or engine change.
 - **Why first**: immediately useful (archive/share RP sessions), no auth/multi-user creep.
 
-### RAG / Memory Inspector
-A focused debugging view of *why* retrieval picked what it did, per turn, across a whole session.
-- **Builds on**: `GET /sessions/{id}/turns/{i}` (ranked chunks + boosts + timings + `errors`), the
-  `/play` modal groundwork (#22), structured errors (#19).
-- **Scope**: graduate the in-app modal into a standalone per-session inspector (timeline of turns →
-  drill into ranking). Read-only.
+### ~~RAG / Memory Inspector~~ — **BUILT (1.1.0)**
+Shipped as the SPA's RAG Inspector page: per-session turn timeline with retrieval drill-down,
+fed by the bulk `GET /sessions/{id}/turn-details` endpoint.
 
 ---
 
@@ -53,24 +50,22 @@ Drive turns from a Discord channel; one channel ↔ one session keeps it single-
 Speech-to-text in, text-to-speech out, wrapped around the turn loop.
 - **Builds on**: the turn API unchanged; all work is client-side glue + a speech library.
 
-### Analytics dashboard
-Session/turn metrics: per-stage latency (`stage_timings`), recall trends, memory growth, and
-**warning/error categories** (now structured via #19 `errors`).
-- **Builds on**: SQLite turns + `diagnostics_json`, the structured `errors` taxonomy.
-- **Scope**: a read-only local dashboard; no engine change.
+### ~~Analytics dashboard~~ — **BUILT (1.1.0)**
+Shipped as the SPA's Analytics page (per-stage latency and turn statistics). Recall trends and
+memory-growth views remain open extensions.
 
 ---
 
 ## Tier C — large / deferred
 
-- **Polished React/Angular SPA** — replace the minimal vanilla-JS `/play` UI. Large; the current UI
-  is deliberately minimal.
+- ~~**Polished React/Angular SPA**~~ — **BUILT (1.1.0)**: Angular 19 SPA at `/app`; the vanilla-JS
+  `/play` UI was removed.
+- ~~**Eval dashboard**~~ — **BUILT (1.1.0)**: SPA Eval page over `GET /diagnostics/eval-runs`.
 - **Authoring studio** — UI to create/validate worlds, personas, scenes, lore. Wraps
   `validate-content` + `create-scenario-template` + `ingest-scenario-lore`.
 - **Branching / replay** — fork a session at a turn into alternate timelines. Needs schema work
   (turn lineage) — the biggest data change here.
 - **Mobile client** — phone-friendly play UI over the same API.
-- **Eval dashboard** — track `regression_runner` + live-smoke recall results over time.
 
 ## Out of scope (for now)
 

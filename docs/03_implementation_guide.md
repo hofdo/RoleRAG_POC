@@ -102,11 +102,13 @@ uvicorn app.main:app --reload
 ```
 
 The full HTTP surface — endpoints, request/response shapes, and error codes — is documented in
-[docs/12_api_contract.md](12_api_contract.md). In brief: `GET /play`, `GET /runtime/status`,
+[docs/12_api_contract.md](12_api_contract.md). In brief: `GET /runtime/status`,
 `GET /content/catalog`, session CRUD (`POST`/`GET /sessions`, `GET /sessions/{id}`), turns
-(`POST /sessions/{id}/turns` and `/turns/stream`), durable memories
-(`GET /sessions/{id}/memories`), and session canon
-(`GET`/`POST`/`DELETE /sessions/{id}/canon`).
+(`POST /sessions/{id}/turns` and `/turns/stream`), per-turn and bulk diagnostics
+(`GET /sessions/{id}/turns/{i}`, `GET /sessions/{id}/turn-details`), durable memories
+(`GET /sessions/{id}/memories`), session canon
+(`GET`/`POST`/`DELETE /sessions/{id}/canon`), and eval-run summaries
+(`GET /diagnostics/eval-runs`).
 
 The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
 The public HTTP contract and exposure boundaries are documented in
@@ -114,13 +116,12 @@ The public HTTP contract and exposure boundaries are documented in
 The SSE route is transport-only and buffered: it emits player-visible text after the shared
 orchestration pipeline completes, not provider tokens or pre-validation drafts.
 
-Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local framework-free UI.
-Use `Create session` to start from editable demo defaults, `Resume selected` for the local recent
-session list, or `Resume session` with an existing `session_id` fallback to render backend
-`recent_turns`. It sends turns as JSON by default and exposes buffered SSE through an optional
-developer toggle. The UI is a thin same-origin client: scenario packs remain a process-level
-backend choice through `CONTENT_ROOT`, and orchestration, retrieval, validation, routing,
-persistence, memory, and authoritative session state stay in the backend.
+Open [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/) for the Angular SPA (built by
+`make dev`; see [frontend/README.md](../frontend/README.md)). Use `Start session` to begin from
+the catalog selectors; turns run over buffered SSE. The UI is a thin same-origin client:
+scenario packs remain a process-level backend choice through `CONTENT_ROOT`, and orchestration,
+retrieval, validation, routing, persistence, memory, and authoritative session state stay in the
+backend.
 
 ## Config Notes
 
@@ -158,7 +159,7 @@ Primary repository checks:
 ruff check .
 mypy .
 pytest
-node --test tests/frontend/*.test.mjs
+(cd frontend && npm test -- --watch=false --browsers=ChromeHeadless)
 ```
 
 Eval-specific commands:

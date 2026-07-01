@@ -20,7 +20,7 @@ The repository CI already runs:
 - `ruff check .`
 - `mypy .`
 - `pytest`
-- `node --test tests/frontend/*.test.mjs`
+- SPA unit tests (`ng test`, headless)
 - `python -m app.evals.regression_runner`
 
 Extend the matrix only when another supported Python version or platform needs coverage.
@@ -48,11 +48,12 @@ Safe candidates:
 
 ## Product-Level Follow-Ons
 
-### Local play UI evolution
+### Web UI evolution
 
-The repository now includes a minimal framework-free local play UI over the existing API. Add
-existing-session resume or richer presentation only when the local workflow requires it. Keep the
-browser thin: backend behavior stays in the backend.
+The repository now includes an Angular SPA (play, RAG inspector, analytics, eval) over the
+existing API; it replaced the earlier framework-free `/play` page in 1.1.0. Session resume in
+the SPA is the known follow-up (the store supports it; no UI is wired). Keep the browser thin:
+backend behavior stays in the backend.
 
 ### Streaming evolution
 

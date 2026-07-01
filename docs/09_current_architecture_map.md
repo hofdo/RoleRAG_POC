@@ -2,7 +2,7 @@
 
 ## Overview
 
-`RoleRAG_POC` is a backend-owned roleplaying engine with thin entry points, a minimal local play UI, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.
+`RoleRAG_POC` is a backend-owned roleplaying engine with thin entry points, an Angular SPA web UI, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.
 
 See [docs/README.md](README.md) for the component, turn-pipeline, and routing diagrams; this map is the module-level companion to those.
 
@@ -12,7 +12,7 @@ See [docs/README.md](README.md) for the component, turn-pipeline, and routing di
 graph TD
     CLI["CLI<br/>app/cli.py"]
     API["FastAPI<br/>app/main.py + app/api"]
-    WEB["Local Play UI<br/>app/web"]
+    WEB["Web UI (Angular SPA)<br/>frontend/"]
     COMP["Composition<br/>app/composition.py"]
     ORCH["TurnOrchestrator<br/>app/orchestration/turn_orchestrator.py"]
     CTX["Context Builder<br/>app/orchestration/context_builder.py"]
@@ -56,7 +56,7 @@ graph TD
 |---|---|
 | `app/cli.py` | local operational interface for config, sessions, routes, ingestion, and turns |
 | `app/main.py` + `app/api/` | HTTP interface with thin route handlers |
-| `app/web/` | packaged framework-free local UI and same-origin API client |
+| `frontend/` | Angular 19 SPA (play, inspector, analytics, eval) served at `/app`; see [frontend/README.md](../frontend/README.md) |
 | `app/composition.py` | central wiring for providers, repositories, retriever, and orchestrator |
 | `app/domain/` | typed data models and visibility values |
 | `app/orchestration/` | turn lifecycle, prompt assembly, and context budgeting |
@@ -80,18 +80,20 @@ graph TD
 
 ### FastAPI API
 
-- exposes `GET /play` plus runtime status, content catalog, session CRUD, turns (JSON + buffered
-  SSE), durable memories, and session canon — see
+- exposes runtime status, content catalog, session CRUD, turns (JSON + buffered SSE), per-turn
+  and bulk turn diagnostics, durable memories, session canon, and eval-run summaries — see
   [docs/12_api_contract.md](12_api_contract.md) for the full surface
+- serves the built SPA as static files at `/app` (root `/` redirects there)
 - does not duplicate orchestration logic
 - buffers SSE frames until the shared turn pipeline completes
 
-### Local play UI
+### Web UI (Angular SPA)
 
-- starts new sessions through the existing API with editable demo defaults
-- resumes from a local recent-session selector or manual `session_id` fallback
-- uses JSON turns by default and buffered SSE only as an opt-in developer transport
-- renders safe session, transcript, route, memory, and warning data
+- starts new sessions through the existing API from catalog selectors
+- runs turns over buffered SSE and renders safe session, transcript, route, memory, canon, and
+  warning data
+- adds read-only diagnostic pages: RAG inspector (per-turn retrieval drill-down), analytics
+  (stage timings), and eval-run trends
 - does not own orchestration, scenario-pack selection, retrieval, validation, routing,
   persistence, or memory behavior
 

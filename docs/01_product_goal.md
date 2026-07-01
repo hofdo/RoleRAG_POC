@@ -4,7 +4,7 @@
 
 This document describes the current MVP goal for `RoleRAG_POC` as it exists in the repository today.
 
-The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, local-first LLM execution, optional cloud fallback, SQLite persistence, retrieval over ingested lore, and a minimal local play UI.
+The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, local-first LLM execution, optional cloud fallback, SQLite persistence, retrieval over ingested lore, and a local Angular web UI.
 
 The product goal is not to build a general autonomous-agent framework. The goal is to keep a small, inspectable engine that can run locally and be extended safely.
 
@@ -78,7 +78,7 @@ The project does not target hosted end users, teams, or production tenants.
   session management (list/resume/export/import/delete/inspect)
 - FastAPI API for the content catalog, session CRUD, turns (JSON + buffered SSE), durable
   memories, and session canon
-- framework-free local play UI over the same-origin API
+- Angular SPA (play, RAG inspector, analytics, eval) over the same-origin API
 - deterministic local/cloud router
 - actor generation, critic validation, and local memory curation
 - Qdrant-backed runtime retrieval

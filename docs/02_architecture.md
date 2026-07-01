@@ -11,7 +11,7 @@ The application owns state, routing, retrieval, visibility, persistence, and ret
 ## High-Level Flow
 
 ```text
-CLI / local play UI / FastAPI
+CLI / web UI (/app SPA) / FastAPI
   -> composition
   -> TurnOrchestrator
       -> load session, world, scene, persona
@@ -36,7 +36,8 @@ See [docs/README.md](README.md) for the rendered component, turn-pipeline, and r
 - [app/cli.py](../app/cli.py): Typer commands for configuration, sessions, routing, ingestion, and turns.
 - [app/main.py](../app/main.py): FastAPI application bootstrap.
 - [app/api/routes.py](../app/api/routes.py): thin HTTP adapters over shared services.
-- [app/web/](../app/web): packaged framework-free local UI and same-origin API client.
+- [frontend/](../frontend): Angular 19 SPA (play, RAG inspector, analytics, eval), built to
+  `frontend/dist/frontend/browser` and mounted at `/app` by `app/main.py`.
 
 ### Wiring and settings
 

@@ -7,19 +7,24 @@ execution while delegating engine behavior to shared composition and orchestrati
 
 Available endpoints:
 
-- `GET /play` for the local HTML play surface, excluded from OpenAPI
 - `GET /runtime/status`
 - `GET /content/catalog`
 - `GET /sessions`
 - `POST /sessions`
 - `GET /sessions/{session_id}`
 - `GET /sessions/{session_id}/turns/{turn_index}`
+- `GET /sessions/{session_id}/turn-details`
 - `GET /sessions/{session_id}/memories`
 - `GET /sessions/{session_id}/canon`
 - `POST /sessions/{session_id}/canon`
 - `DELETE /sessions/{session_id}/canon/{fact_id}`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
+- `GET /diagnostics/eval-runs`
+- `GET /diagnostics/eval-runs/{run_id}`
+
+The Angular SPA is served as static files at `/app` (the root `/` redirects there); it is not an
+API endpoint and is excluded from OpenAPI.
 
 API routes and the local browser UI do not own retrieval, persistence, routing, prompt
 construction, or visibility logic.
@@ -27,7 +32,7 @@ SQLite remains authoritative state. Qdrant remains a derived retrieval index.
 
 ## Runtime Status
 
-`GET /runtime/status` returns safe, shallow, non-diagnostic runtime metadata for the local `/play`
+`GET /runtime/status` returns safe, shallow, non-diagnostic runtime metadata for the local web-UI
 status panel. It does not call LLMs, instantiate providers, open SQLite, probe Qdrant reachability,
 query retrieval collections, or perform deep runtime checks.
 
@@ -61,7 +66,7 @@ GM/private fields, hidden context, and internals.
 ## Content Catalog
 
 `GET /content/catalog` returns public session-start metadata from the backend process-level
-`CONTENT_ROOT` only. It is a read-only catalog for the local `/play` selectors and does not accept
+`CONTENT_ROOT` only. It is a read-only catalog for the local web-UI selectors and does not accept
 query parameters, request bodies, per-request content roots, or frontend scenario-pack selection.
 
 The response groups public metadata into:
@@ -109,7 +114,8 @@ support through `--content-root` remains available.
 
 ## Recent Sessions
 
-`GET /sessions` is a local-use recent-session list for the `/play` resume selector. It returns
+`GET /sessions` is a local-use recent-session list (used by the CLI `list-sessions` flow and the
+SPA's session pickers). It returns
 only safe metadata from SQLite authoritative state, ordered by `updated_at` descending with
 `created_at` as the deterministic tie-breaker, and capped at 10 sessions. It accepts no query
 parameters and no request body.
@@ -143,9 +149,8 @@ data, hidden/private fields, and storage diagnostics.
 It does not return player names, content roots, hidden scene state, private persona state, SQLite
 internals, or Qdrant diagnostics.
 
-The local `/play` UI uses this endpoint when a user resumes from the recent-session selector or
-pastes a `session_id` into `Resume session`; the returned `recent_turns` are rendered as transcript
-entries and remain backend-owned.
+The CLI `resume` command uses this endpoint, and the SPA's session store consumes it for resume;
+the returned `recent_turns` are rendered as transcript entries and remain backend-owned.
 
 ## Turn Detail
 
@@ -160,11 +165,33 @@ persisted before diagnostics existed report empty diagnostic defaults.
 It returns `404 session_not_found` for an unknown session and `404 turn_not_found` for an unknown
 `turn_index`.
 
+## Bulk Turn Details
+
+`GET /sessions/{session_id}/turn-details` returns every stored turn's full diagnostics in one
+call — `{"session_id": "<id>", "turns": [<turn detail>, …]}` with each entry shaped exactly like
+the single-turn `GET /sessions/{session_id}/turns/{turn_index}` response, ordered by
+`turn_index`. It exists so the SPA's Analytics and RAG Inspector pages don't fan out N requests
+per session. The same metadata-only exposure rules apply: no chunk text, no prompts, no hidden
+fields. Unknown session ids return `404 session_not_found`.
+
+## Eval Runs
+
+`GET /diagnostics/eval-runs` is a read-only scan of the process-level eval results directory for
+per-run `conversation-checkpoint.json` artifacts. It returns `results_dir` plus a list of run
+summaries: `id`, `status`, `turn_count`, `recall_misses`, `extraction_misses`,
+`retrieval_misses`, `total_seconds`, `p50_seconds`, `p95_seconds`, and `warning_total`. It does
+not call LLMs or touch SQLite/Qdrant.
+
+`GET /diagnostics/eval-runs/{run_id}` returns the full `conversation-checkpoint.json` payload for
+one run (the SPA Eval page's drill-down). Unknown run ids return `404 eval_run_not_found`. Run
+artifacts are local diagnostic files produced by the live checkpoint harness; the endpoint serves
+them verbatim and is local-use only, like the rest of the surface.
+
 ## Session Memories
 
 `GET /sessions/{session_id}/memories` returns the persisted durable-memory episodes for a
 session as metadata: `id`, `scene_id`, `actor_id`, `summary`, `importance`, `visibility`, and
-`tags`. The `/play` UI renders this in a read-only "Memories" panel and the CLI exposes the
+`tags`. The web UI renders this in a read-only "Memory" panel and the CLI exposes the
 same data via `inspect-memories`. Unknown session ids return the standard `404` envelope.
 
 ## Session Canon
@@ -363,7 +390,7 @@ provider secrets, SQLite internals, Qdrant internals, provider internals, or Qdr
 
 ## Known Limitations
 
-The local play UI does not provide authentication, multi-user isolation, browser-local
+The local web UI does not provide authentication, multi-user isolation, browser-local
 authoritative state, or frontend scenario-pack selection. The API does not provide provider token
 streaming, pre-validation token emission, per-request content-root selection, per-request
 scenario-pack selection, hidden-context diagnostics, or retrieval payloads containing chunk text;

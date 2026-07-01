@@ -1,8 +1,8 @@
 # RoleRAG_POC
 
-Personal-use RoleRAG MVP built around a CLI-first roleplay loop, a minimal local play UI, a
-small FastAPI API, SQLite persistence, Qdrant-backed retrieval, and deterministic local/cloud
-routing.
+Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
+(play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
+Qdrant-backed retrieval, and deterministic local/cloud routing.
 
 ## Current State
 
@@ -13,8 +13,8 @@ Implemented in this repository:
 - deterministic routing with `CLOUD_MODE=off|ask|auto`
 - structured JSON world, scene, and persona loading
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
-- FastAPI endpoints for public content catalog lookup, session creation, turn execution, buffered SSE turn streaming, and session lookup
-- framework-free local play UI served by FastAPI at `GET /play`
+- FastAPI endpoints for public content catalog lookup, session creation, turn execution, buffered SSE turn streaming, session lookup, bulk turn details, and eval-run summaries
+- Angular 19 SPA served by FastAPI at `/app` (the root `/` redirects to it): play loop, RAG inspector with per-turn retrieval drill-down, turn analytics, and eval-run trends
 - SQLite persistence for sessions, turns, and durable memory episodes
 - automatic indexing of curated durable memories into session-scoped retrieval
 - Qdrant-backed vector storage for ingested lore and retrieval
@@ -34,11 +34,11 @@ Implemented in this repository:
   and in live checkpoint reports
 - conditional critic/curator gating (`CRITIC_GATING` / `CURATOR_GATING` = `always|auto`);
   the deterministic promise extractor always runs
-- interactive `CLOUD_MODE=ask` confirmation in the play UI, the CLI, and the API
+- interactive `CLOUD_MODE=ask` confirmation in the web UI, the CLI, and the API
   (`status: confirmation_required` two-phase turns)
 - session management CLI: `list-sessions`, `delete-session`, `export-session`,
   `import-session`, `inspect-memories`, `reset-db`
-- read-only memory viewer in the play UI and `GET /sessions/{id}/memories`
+- read-only memory viewer in the web UI and `GET /sessions/{id}/memories`
 - one-command startup and teardown via `scripts/dev-up.sh` and `scripts/dev-down.sh`
 - local-only memory extraction
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
@@ -58,7 +58,7 @@ thin wrapper over the commands documented below.
 
 ### Run in Docker (no local Python needed)
 
-The app (FastAPI + `/play` UI) runs in Docker alongside Qdrant. The model server
+The app (FastAPI + `/app` SPA) runs in Docker alongside Qdrant. The model server
 stays on the **host**: Docker has no GPU passthrough on macOS, so a local LLM inside
 a container would run CPU-only and far too slowly for the recommended 26B model.
 
@@ -69,7 +69,8 @@ a container would run CPU-only and far too slowly for the recommended 26B model.
    docker compose up --build
    ```
 
-   Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play). The container reaches
+   Open [http://127.0.0.1:8000](http://127.0.0.1:8000) (redirects into the SPA at `/app/`,
+   which the image builds in its frontend stage). The container reaches
    the host model via `host.docker.internal`, talks to Qdrant over the compose network,
    and bind-mounts `./data` so the SQLite db persists and scenario content is editable on
    the host. A turn sent before the model server is up returns a clear "provider
@@ -94,13 +95,14 @@ With Docker running and a `.venv` installed:
 
 ```bash
 bash scripts/dev-up.sh
-# opens Qdrant + llama-server + API, then play at http://127.0.0.1:8000/play
+# opens Qdrant + llama-server + API, builds the SPA, then play at http://127.0.0.1:8000/app/
 bash scripts/dev-down.sh   # stop everything dev-up started
 ```
 
 ### Prerequisites
 
 - Python `3.12+`
+- Node `20+` (builds the Angular SPA; the API runs without it, but serves no UI)
 - Docker
 - a local OpenAI-compatible model server such as `llama.cpp` or Ollama's compatibility layer
 
@@ -111,6 +113,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 cp .env.example .env
+(cd frontend && npm ci && npx ng build --base-href=/app/)  # SPA; `make dev` does this for you
 docker compose up -d qdrant
 python -m app.cli config
 python -m app.cli health
@@ -175,10 +178,10 @@ python -m app.cli ingest data/documents/demo_lore.md \
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) for the local play UI. The UI starts
-new sessions from backend-owned catalog selectors, resumes existing sessions by pasted
-`session_id`, sends turns over JSON by default, and exposes buffered SSE as an opt-in developer
-toggle. Scenario packs are selected only by starting FastAPI with the desired process-level
+Open [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/) for the web UI (the root `/`
+redirects there; if the SPA is not built, it returns a hint with the build command instead).
+The UI starts new sessions from backend-owned catalog selectors and runs turns over buffered
+SSE. Scenario packs are selected only by starting FastAPI with the desired process-level
 `CONTENT_ROOT`; the browser has no scenario-pack selector or content-root input.
 
 ## Local Model Setup
@@ -556,7 +559,6 @@ Start the server:
 
 Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) for the full contract):
 
-- `GET /play`
 - `GET /runtime/status`
 - `GET /content/catalog`
 - `GET /sessions`
@@ -565,10 +567,13 @@ Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) fo
 - `POST /sessions/{session_id}/turns/stream`
 - `GET /sessions/{session_id}`
 - `GET /sessions/{session_id}/turns/{turn_index}`
+- `GET /sessions/{session_id}/turn-details`
 - `GET /sessions/{session_id}/memories`
 - `GET /sessions/{session_id}/canon`
 - `POST /sessions/{session_id}/canon`
 - `DELETE /sessions/{session_id}/canon/{fact_id}`
+- `GET /diagnostics/eval-runs`
+- `GET /diagnostics/eval-runs/{run_id}`
 
 The `canon` endpoints are an author surface for pinning durable "Standing facts"
 into the actor prompt by hand, alongside the auto-derived canon. Pinned facts
@@ -603,21 +608,26 @@ does not stream provider tokens or expose drafts before critic validation. Setti
 `SSE_TEXT_CHUNK_CHARS` above `0` splits that already-validated text into ordered `text` fragments
 the client concatenates, for progressive rendering; it never exposes pre-validation tokens.
 
-### Local Play UI
+### Web UI (Angular SPA)
 
-Open [http://127.0.0.1:8000/play](http://127.0.0.1:8000/play) after starting FastAPI. The
-framework-free browser surface is a thin client over the same-origin API:
+Open [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/) after starting FastAPI with a
+built frontend (`make dev` builds it; see [frontend/README.md](frontend/README.md) for the SPA
+architecture). The browser surface is a thin client over the same-origin API, with four pages:
 
-- catalog selectors load public worlds, scenes, and personas from `GET /content/catalog`
-- `Create session` uses the selected catalog world, scene, persona, and player name
-- `Developer ID fallback` remains available for manual world, scene, and persona IDs; if catalog
-  loading fails, the fallback opens and session creation uses the manual IDs
-- recent sessions load from `GET /sessions`; `Resume selected` restores through backend session lookup
-- `Resume session` accepts an existing `session_id` fallback and renders backend `recent_turns`
-- turn execution uses JSON by default
-- the developer panel can opt into buffered SSE and displays safe route, memory, critic-status, and warning data
+- **Play** — catalog selectors load public worlds, scenes, and personas from
+  `GET /content/catalog`; `Start session` uses the selected catalog world, scene, persona, and
+  player name; turns run over buffered SSE; a debug strip shows safe route, memory,
+  critic-status, and warning data; side panels show read-only memories and editable canon facts
+- **RAG Inspector** — per-session turn timeline from `GET /sessions/{id}/turn-details` with
+  retrieval drill-down (query, selected/rejected chunks, scores, boosts) per turn
+- **Analytics** — turn latency and stage-timing statistics for a session
+- **Eval** — eval-run trends from `GET /diagnostics/eval-runs` with per-run drill-down
+- `CLOUD_MODE=ask` cloud-confirmation prompts render inline and resubmit on approval
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
   the desired `CONTENT_ROOT` to use a different scenario pack
+
+Session resume by `session_id` currently exists in the CLI and API only; the SPA starts fresh
+sessions (resume UI is a tracked follow-up in [docs/BACKLOG.md](docs/BACKLOG.md)).
 
 The browser does not own orchestration, retrieval, validation, routing, persistence, memory,
 scenario-pack selection, hidden context, or browser-local authoritative state. It provides no
@@ -673,7 +683,13 @@ Run all checks:
 ruff check .
 mypy .
 pytest
-npm run test:frontend
+(cd frontend && npm test -- --watch=false --browsers=ChromeHeadless)
+```
+
+The SPA end-to-end test needs the full stack running (`make dev`):
+
+```bash
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 npm run test:e2e-spa
 ```
 
 Run only eval tests:

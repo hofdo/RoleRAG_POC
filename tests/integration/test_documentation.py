@@ -66,6 +66,9 @@ def test_api_contract_document_covers_public_boundaries() -> None:
     assert "GET /sessions" in contract
     assert "POST /sessions" in contract
     assert "GET /sessions/{session_id}" in contract
+    assert "GET /sessions/{session_id}/turn-details" in contract
+    assert "GET /diagnostics/eval-runs" in contract
+    assert "GET /diagnostics/eval-runs/{run_id}" in contract
     assert "POST /sessions/{session_id}/turns" in contract
     assert "POST /sessions/{session_id}/turns/stream" in contract
     assert "invalid_content_catalog" in contract
@@ -123,23 +126,20 @@ def test_api_contract_document_covers_public_boundaries() -> None:
         assert excluded in contract
 
 
-def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
+def test_primary_docs_cover_web_ui_and_thin_client_limits() -> None:
     readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8")
     architecture = (REPOSITORY_ROOT / "docs" / "02_architecture.md").read_text(encoding="utf-8")
     current_map = (REPOSITORY_ROOT / "docs" / "09_current_architecture_map.md").read_text(
         encoding="utf-8"
     )
+    frontend_readme = (REPOSITORY_ROOT / "frontend" / "README.md").read_text(encoding="utf-8")
 
     assert "uvicorn app.main:app --reload" in readme
-    assert "http://127.0.0.1:8000/play" in readme
+    assert "http://127.0.0.1:8000/app/" in readme
     assert "GET /content/catalog" in readme
     assert "catalog selectors" in readme
-    assert "Create session" in readme
-    assert "manual" in readme
-    assert "fallback" in readme
-    assert "Resume session" in readme
+    assert "Start session" in readme
     assert "session_id" in readme
-    assert "JSON" in readme
     assert "buffered SSE" in readme
     assert "scenario packs" in readme
     assert "process-level backend choice through `CONTENT_ROOT`" in readme
@@ -152,5 +152,7 @@ def test_primary_docs_cover_local_play_ui_and_thin_client_limits() -> None:
     assert "no frontend scenario-pack selection" in readme
     assert "no per-request content-root selection" in readme
     assert "no backend ownership moved into browser code" in readme
-    assert "app/web/" in architecture
-    assert "GET /play" in current_map
+    assert "frontend/" in architecture
+    assert "Angular" in current_map
+    assert "thin client" in frontend_readme
+    assert "/app" in frontend_readme
