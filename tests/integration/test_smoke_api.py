@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -74,23 +77,36 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         )
 
 
-def test_play_page_and_assets_are_served_outside_openapi() -> None:
+def test_spa_assets_are_served_with_javascript_mime_when_built() -> None:
+    # Browsers refuse to execute module scripts without a JavaScript MIME type; some
+    # environments lack a .js mapping and serve application/octet-stream, breaking the UI.
+    spa_directory = Path(__file__).parents[2] / "frontend" / "dist" / "frontend" / "browser"
+    if not spa_directory.is_dir():
+        pytest.skip("SPA not built")
     client = TestClient(app)
 
-    page = client.get("/play")
-    css = client.get("/play/assets/styles.css")
-    api_client = client.get("/play/assets/api-client.mjs")
-    play_model = client.get("/play/assets/play-model.mjs")
-    play_ui = client.get("/play/assets/play-ui.mjs")
+    index = client.get("/app/")
+    script = next(iter(sorted(spa_directory.glob("*.js"))), None)
+    assert index.status_code == 200
+    assert index.headers["content-type"].startswith("text/html")
+    assert script is not None
+    asset = client.get(f"/app/{script.name}")
+    assert asset.status_code == 200
+    assert "javascript" in asset.headers["content-type"]
+
+
+def test_root_serves_spa_redirect_or_build_hint_outside_openapi() -> None:
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
     schema = client.get("/openapi.json").json()
 
-    assert page.status_code == 200
-    assert '<script type="module" src="/play/assets/play-ui.mjs"></script>' in page.text
-    assert 'id="resume-form"' in page.text
-    assert 'id="resume-session-id"' in page.text
-    assert "Resume session" in page.text
-    assert css.status_code == 200
-    assert api_client.status_code == 200
-    assert play_model.status_code == 200
-    assert play_ui.status_code == 200
-    assert "/play" not in schema["paths"]
+    # With a frontend build present the root redirects into the SPA; without one it
+    # returns an actionable 503 instead of a bare 404.
+    if response.status_code == 307:
+        assert response.headers["location"] == "/app/"
+    else:
+        assert response.status_code == 503
+        assert "npm" in response.text
+    assert "/" not in schema["paths"]
+    assert "/app" not in schema["paths"]

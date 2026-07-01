@@ -551,7 +551,7 @@ PY
 if [[ "${LIVE_SKIP_BROWSER}" == "1" ]]; then
   printf -- "- SKIP Playwright UI smoke (LIVE_SKIP_BROWSER=1)\n" >> "${REPORT}"
 else
-  run_step playwright "Run Playwright UI smoke" npm run test:live-ui -- --reporter=line
+  run_step playwright "Run Playwright UI smoke" npm run test:e2e-spa -- --reporter=line
 fi
 
 run_step conversation-checkpoint "Run ${LIVE_TURN_COUNT}-turn Rose Gallery checkpoint" \

@@ -27,7 +27,7 @@ deterministic_exit=0
 run_recorded ruff "${PYTHON}" -m ruff check . || deterministic_exit=1
 run_recorded mypy "${PYTHON}" -m mypy . || deterministic_exit=1
 run_recorded pytest "${PYTHON}" -m pytest || deterministic_exit=1
-run_recorded frontend npm run test:frontend || deterministic_exit=1
+run_recorded frontend bash -c "cd frontend && npm test -- --watch=false --browsers=ChromeHeadless" || deterministic_exit=1
 run_recorded regression "${PYTHON}" -m app.evals.regression_runner || deterministic_exit=1
 
 run_model() {

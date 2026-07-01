@@ -27,14 +27,12 @@ jobs:
         with:
           node-version: "20"
           cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-
-      - name: Install Node dependencies
-        run: npm ci
 
       - name: Lint
         run: ruff check .
@@ -45,8 +43,13 @@ jobs:
       - name: Test Python
         run: pytest
 
-      - name: Test frontend modules
-        run: npm run test:frontend
+      - name: Install SPA dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Test SPA
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+        working-directory: frontend
 
       - name: Run deterministic eval summary
         run: python -m app.evals.regression_runner

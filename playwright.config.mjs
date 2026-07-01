@@ -22,7 +22,7 @@ export default defineConfig({
     : "list",
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "test-results",
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:18080",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8000",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

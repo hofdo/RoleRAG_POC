@@ -96,10 +96,10 @@ if [[ -d frontend ]]; then
     if (cd frontend && npx ng build --base-href=/app/) > "${RUN_DIR}/ng-build.log" 2>&1; then
       spa_built=1
     else
-      echo "Frontend build failed; see ${RUN_DIR}/ng-build.log (API will still serve legacy /play)." >&2
+      echo "Frontend build failed; see ${RUN_DIR}/ng-build.log (API will run without a UI)." >&2
     fi
   else
-    echo "npm not found; skipping SPA build (legacy /play UI only)."
+    echo "npm not found; skipping SPA build (API will run without a UI)."
   fi
 fi
 
@@ -128,6 +128,6 @@ fi
 
 echo
 echo "RoleRAG is up:"
-[[ "${spa_built}" == 1 ]] && echo "  SPA:     http://127.0.0.1:${API_PORT}/app/"
-echo "  Legacy:  http://127.0.0.1:${API_PORT}/play"
+[[ "${spa_built}" == 1 ]] && echo "  UI:      http://127.0.0.1:${API_PORT}/app/"
+echo "  API:     http://127.0.0.1:${API_PORT}/runtime/status"
 echo "Logs: ${RUN_DIR}/  |  Stop everything: scripts/dev-down.sh"

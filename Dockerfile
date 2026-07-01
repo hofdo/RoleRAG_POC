@@ -1,4 +1,4 @@
-# RoleRAG app image (FastAPI + Angular /app SPA + legacy /play UI + CLI).
+# RoleRAG app image (FastAPI + Angular /app SPA + CLI).
 #
 # The model server is deliberately NOT containerized: on Apple Silicon, Docker has
 # no GPU passthrough, so a local LLM in a container runs CPU-only and is unusably

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -11,8 +11,6 @@ from starlette.types import Scope
 from app import __version__
 from app.api import router as api_router
 from app.api.errors import ApiError, api_error_handler, request_validation_error_handler
-from app.web import ASSETS_DIRECTORY
-from app.web import router as web_router
 
 # Angular SPA build output, mounted at /app when present (built via
 # `ng build --base-href=/app/`). Guarded by isdir so a checkout without a
@@ -42,14 +40,19 @@ app = FastAPI(title="rolerag-poc", version=__version__)
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 app.include_router(api_router)
-app.include_router(web_router)
-app.mount("/play/assets", StaticFiles(directory=ASSETS_DIRECTORY), name="play-assets")
 
 
 @app.get("/", include_in_schema=False)
-def root_redirect() -> RedirectResponse:
-    # The SPA is the default UI when built; fall back to the legacy /play page otherwise.
-    return RedirectResponse("/app/" if _SPA_DIRECTORY.is_dir() else "/play")
+def root_redirect() -> Response:
+    if _SPA_DIRECTORY.is_dir():
+        return RedirectResponse("/app/")
+    return PlainTextResponse(
+        "RoleRAG API is running, but the SPA is not built.\n"
+        "Build it with: cd frontend && npm ci && npx ng build --base-href=/app/\n"
+        "(or just run `make dev` / `docker compose up --build`).\n",
+        status_code=503,
+    )
+
 
 if _SPA_DIRECTORY.is_dir():
     # html=True serves index.html at /app/; _SpaStaticFiles adds the deep-link fallback so a
