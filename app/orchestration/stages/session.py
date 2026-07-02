@@ -31,6 +31,12 @@ class LoadedTurnContext:
     scene: SceneState
     recent_turns: tuple[StoredTurn, ...]
     standing_facts: tuple[str, ...] = ()
+    # True when this turn carries a valid persona override that has not yet been
+    # written to the session repository. The durable write is deferred until the
+    # turn actually persists (see TurnOrchestrator.run_turn), so a failed turn
+    # (CONTROLLED_FAILURE, confirmation required, provider error) never commits a
+    # persona switch that the player never actually saw succeed.
+    persona_switched: bool = False
 
 
 class TurnSessionLoader:
@@ -100,6 +106,7 @@ class TurnSessionLoader:
         persona_id = session.active_persona_id
         loader = self.loader_for_content_root(session.content_root)
         world = loader.load_world(session.world_id)
+        persona_switched = False
         if (
             turn_input.active_persona_id is not None
             and turn_input.active_persona_id != persona_id
@@ -110,8 +117,15 @@ class TurnSessionLoader:
                     f"{turn_input.active_persona_id}"
                 )
             persona_id = turn_input.active_persona_id
-            self.session_repository.update_active_persona(session.id, persona_id)
+            # Do NOT write through to the repository here: a durable switch before
+            # the turn outcome is known would leave a failed turn (controlled
+            # failure, provider error, confirmation required) with the persona
+            # switch committed anyway. The in-memory session is updated so this
+            # turn generates/persists under the new persona; the caller commits the
+            # switch to the repository only after the turn actually persists (see
+            # TurnOrchestrator.run_turn, which checks `persona_switched`).
             session = session.model_copy(update={"active_persona_id": persona_id})
+            persona_switched = True
 
         if persona_id not in world.persona_ids:
             raise ValueError(f"Unknown persona for world {session.world_id}: {persona_id}")
@@ -146,6 +160,7 @@ class TurnSessionLoader:
             scene=loader.load_scene(session.active_scene_id),
             recent_turns=tuple(self.recent_dialogue_store.load_recent_dialogue(session.id)),
             standing_facts=standing_facts,
+            persona_switched=persona_switched,
         )
 
     def loader_for_content_root(self, content_root: str) -> TurnDataLoader:

@@ -165,27 +165,47 @@ export class SessionStore {
   // history for prior scenes stays intact.
   async switchScene(sceneId: string): Promise<void> {
     const sessionId = this.sessionId();
-    if (!sessionId || !sceneId) return;
+    if (!sessionId || !sceneId || this.busy()) return;
+    this.busy.set(true);
     try {
       this.session.set(await this.api.updateSessionScene(sessionId, sceneId));
       this.turnError.set(null);
     } catch (error) {
       this.turnError.set(errorMessage(error));
+    } finally {
+      this.busy.set(false);
     }
   }
 
-  // Resubmit the held message after the user approves cloud routing.
+  // Resubmit the held message after the user approves cloud routing. The persona
+  // override is not durably committed until a turn actually persists (see
+  // TurnOrchestrator.run_turn), so this resubmit must carry it again rather than
+  // relying on an already-persisted switch from the original (confirmation-required)
+  // attempt.
   confirmCloud(): Promise<boolean> {
     const pending = this.pendingConfirm();
     if (!pending) return Promise.resolve(true);
-    return this.runTurn(pending.message, buildTurnRequest(pending.message, true, { cloudConfirmed: true }));
+    return this.runTurn(
+      pending.message,
+      buildTurnRequest(pending.message, true, {
+        cloudConfirmed: true,
+        personaId: this.personaOverride(),
+      }),
+    );
   }
 
-  // Resubmit the held message but pin it to the local provider.
+  // Resubmit the held message but pin it to the local provider. Same persona-override
+  // reasoning as confirmCloud above.
   forceLocal(): Promise<boolean> {
     const pending = this.pendingConfirm();
     if (!pending) return Promise.resolve(true);
-    return this.runTurn(pending.message, buildTurnRequest(pending.message, false, { forceLocal: true }));
+    return this.runTurn(
+      pending.message,
+      buildTurnRequest(pending.message, false, {
+        forceLocal: true,
+        personaId: this.personaOverride(),
+      }),
+    );
   }
 
   private async runTurn(message: string, request: ReturnType<typeof buildTurnRequest>): Promise<boolean> {

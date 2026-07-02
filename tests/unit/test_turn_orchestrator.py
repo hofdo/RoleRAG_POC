@@ -259,6 +259,9 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_persona_override_switches_the_session_persona(tmp_path: Path) -> None:
+    # Success path: the persona switch is deferred (TurnSessionLoader.load no longer
+    # writes through immediately) but must still land in the repository once the turn
+    # actually persists (TurnOrchestrator.run_turn, right after the persistence stage).
     from app.domain import TurnOutcome
 
     provider = FakeProvider()
@@ -276,6 +279,35 @@ async def test_persona_override_switches_the_session_persona(tmp_path: Path) -> 
     reloaded = orchestrator.session_repository.get_session("demo-session")
     assert reloaded is not None
     assert reloaded.active_persona_id == "warden"
+
+
+@pytest.mark.asyncio
+async def test_persona_override_is_not_persisted_when_the_turn_fails(tmp_path: Path) -> None:
+    # A turn that fails (here: repeated empty actor responses -> CONTROLLED_FAILURE)
+    # returns before the persistence stage runs, so the persona switch must never reach
+    # the repository -- the stored session persona stays exactly as it was before the
+    # turn was attempted. This is the failure-path counterpart to
+    # test_persona_override_switches_the_session_persona above.
+    from app.domain import TurnOutcome
+    from app.orchestration.turn_orchestrator import CONTROLLED_FAILURE_TEXT
+
+    provider = SequencedProvider(["", ""])
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="Hello",
+            active_persona_id="warden",
+        )
+    )
+
+    assert result.text == CONTROLLED_FAILURE_TEXT
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    reloaded = orchestrator.session_repository.get_session("demo-session")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "archivist"
 
 
 @pytest.mark.asyncio

@@ -421,6 +421,16 @@ class TurnOrchestrator:
                 assistant_message=final_text,
                 route=final_route,
             )
+        if context.persona_switched:
+            # The turn has now actually persisted, so it is safe to commit the
+            # persona override durably. Deferred from TurnSessionLoader.load so
+            # that a failed turn (confirmation required, generation/provider
+            # error, controlled failure -- all of which return earlier than this
+            # point) never leaves a persona switch committed for a turn the
+            # player never saw succeed.
+            self.session_repository.update_active_persona(
+                context.session.id, context.session.active_persona_id
+            )
         _emit_stage(on_stage, "memory")
         with _stage_timer(timings, "memory"):
             memory = await self.memory_stage.run(

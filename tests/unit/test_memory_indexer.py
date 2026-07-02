@@ -272,6 +272,96 @@ def test_index_memories_evicts_lowest_priority_beyond_session_cap(tmp_path: Path
     assert set(vector_store.deleted_ids) == evicted
 
 
+def test_session_cap_eviction_leaves_persona_memory_copies_searchable(tmp_path: Path) -> None:
+    # Controller decision: session-cap eviction is scoped to SESSION_MEMORY only.
+    # PERSONA_MEMORY is the cross-session durable NPC memory (dual-write in
+    # _index_persona_memories), so a persona copy of an evicted episode must
+    # remain searchable even after its SESSION_MEMORY sibling is capped away.
+    store = _memory_store(tmp_path)
+    persisted = _persist_importances(store, [5, 4, 3, 2, 1])
+    vector_store = InMemoryVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=store,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        session_memory_max_episodes=3,
+    )
+
+    indexer.index_memories(persisted)
+
+    # Top 3 importances (5, 4, 3) stay in SESSION_MEMORY; importances 1 and 2 are
+    # evicted from SESSION_MEMORY by the cap.
+    evicted = [memory for memory in persisted if memory.importance in (1, 2)]
+    kept = [memory for memory in persisted if memory.importance not in (1, 2)]
+    query_vector = FakeEmbeddingProvider().embed_text("promise")
+
+    session_hits = vector_store.search(
+        RagCollection.SESSION_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(session_id="session-1"),
+        limit=10,
+    )
+    session_hit_ids = {hit.id for hit in session_hits}
+    assert session_hit_ids == {memory.id for memory in kept}
+    assert not session_hit_ids & {memory.id for memory in evicted}
+
+    # Every episode with importance >= PERSONA_MEMORY_IMPORTANCE_FLOOR (4) was
+    # dual-written to PERSONA_MEMORY, including the ones later capped out of
+    # SESSION_MEMORY (importance 4). Those persona copies must still be
+    # searchable -- cap eviction never touches PERSONA_MEMORY.
+    persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(persona_id="archivist"),
+        limit=10,
+    )
+    persona_hit_ids = {hit.id for hit in persona_hits}
+    high_value = {memory.id for memory in persisted if memory.importance >= 4}
+    assert persona_hit_ids == high_value
+    # This cap (3) happens not to evict any persona-eligible (importance >= 4)
+    # episode, so it only shows persona copies are unaffected by *some* cap
+    # eviction. The next test tightens the cap so a persona-eligible episode is
+    # itself evicted from SESSION_MEMORY, proving the exemption directly.
+
+
+def test_session_cap_eviction_of_a_persona_eligible_memory_keeps_it_searchable_via_persona(
+    tmp_path: Path,
+) -> None:
+    # A tighter cap that evicts even a persona-eligible (importance >= 4) episode
+    # from SESSION_MEMORY -- confirming the PERSONA_MEMORY copy survives that
+    # eviction untouched.
+    store = _memory_store(tmp_path)
+    persisted = _persist_importances(store, [5, 4])
+    vector_store = InMemoryVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=store,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        session_memory_max_episodes=1,
+    )
+
+    indexer.index_memories(persisted)
+
+    evicted_memory = next(memory for memory in persisted if memory.importance == 4)
+    query_vector = FakeEmbeddingProvider().embed_text("promise")
+
+    session_hits = vector_store.search(
+        RagCollection.SESSION_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(session_id="session-1"),
+        limit=10,
+    )
+    assert evicted_memory.id not in {hit.id for hit in session_hits}
+
+    persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(persona_id="archivist"),
+        limit=10,
+    )
+    assert evicted_memory.id in {hit.id for hit in persona_hits}
+
+
 def test_index_memories_does_not_evict_when_cap_is_zero(tmp_path: Path) -> None:
     store = _memory_store(tmp_path)
     persisted = _persist_importances(store, [5, 4, 3, 2, 1])

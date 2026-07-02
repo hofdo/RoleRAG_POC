@@ -66,16 +66,26 @@ class MemoryIndexer:
         return self.index_memories(self.memory_store.list_memories_for_session(session_id))
 
     def unindex(self, memory_ids: Sequence[str]) -> None:
+        # Both VectorStore implementations already handle a missing/empty PERSONA_MEMORY
+        # collection without raising (QdrantVectorStore.delete_points checks
+        # collection_exists; InMemoryVectorStore uses a defaultdict), so no try/except
+        # is needed here -- and none should be added back without a real failure mode.
         self.vector_store.delete_points(RagCollection.SESSION_MEMORY, list(memory_ids))
-        try:
-            self.vector_store.delete_points(RagCollection.PERSONA_MEMORY, list(memory_ids))
-        except Exception:  # noqa: BLE001 - persona collection may not exist yet
-            pass
+        self.vector_store.delete_points(RagCollection.PERSONA_MEMORY, list(memory_ids))
 
     def _enforce_session_cap(self, session_id: str) -> None:
         """Bound the retrievable session-memory index to the most valuable N
         episodes (importance then recency), unindexing the rest. SQLite stays
-        authoritative; nothing is deleted there. Inert when the cap is 0."""
+        authoritative; nothing is deleted there. Inert when the cap is 0.
+
+        Deliberately exempt: PERSONA_MEMORY copies of evicted episodes are left
+        indexed. _index_persona_memories dual-writes high-value PLAYER-visible
+        episodes into PERSONA_MEMORY as cross-session, per-actor NPC memory --
+        that collection is durable on purpose, so an NPC keeps remembering the
+        player across sessions. session_memory_max_episodes bounds only the
+        session-scoped SESSION_MEMORY index; applying the same cap to
+        PERSONA_MEMORY would silently erase long-game NPC recall exactly when a
+        session has accumulated enough history to hit the cap."""
         cap = self.session_memory_max_episodes
         if cap <= 0 or self.memory_store is None:
             return

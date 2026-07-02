@@ -223,6 +223,49 @@ describe('SessionStore turn flow', () => {
     expect(store.pendingConfirm()).toBeNull();
   });
 
+  // The persona switch is not durably committed by the backend until a turn actually
+  // persists (TurnOrchestrator.run_turn commits it only after the persistence stage
+  // succeeds). The original request that triggered CONFIRMATION_REQUIRED never
+  // persisted, so the resubmit must carry the override again -- it cannot rely on an
+  // already-persisted switch server-side.
+  it('confirmCloud resubmits the persona override that triggered the original confirmation', async () => {
+    const { store, api } = setup();
+    store.personaOverride.set('warden');
+    api.next = confirmationTurn;
+    await store.sendMessage('go cloud?', true);
+
+    api.next = completedTurn('cloud reply');
+    await store.confirmCloud();
+
+    const last = api.calls.at(-1)!.request;
+    expect(last).toEqual({
+      message: 'go cloud?',
+      request_cloud: true,
+      cloud_confirmed: true,
+      force_local: false,
+      active_persona_id: 'warden',
+    });
+  });
+
+  it('forceLocal resubmits the persona override that triggered the original confirmation', async () => {
+    const { store, api } = setup();
+    store.personaOverride.set('warden');
+    api.next = confirmationTurn;
+    await store.sendMessage('go cloud?', true);
+
+    api.next = completedTurn('local reply');
+    await store.forceLocal();
+
+    const last = api.calls.at(-1)!.request;
+    expect(last).toEqual({
+      message: 'go cloud?',
+      request_cloud: false,
+      cloud_confirmed: false,
+      force_local: true,
+      active_persona_id: 'warden',
+    });
+  });
+
   it('is a no-op without an active session', async () => {
     const { store, api } = setup();
     store.session.set(null);
@@ -306,6 +349,39 @@ describe('SessionStore switchScene', () => {
     expect(api.updateSessionSceneCalls).toEqual([{ sessionId: 's1', sceneId: 'east-wing' }]);
     expect(store.session()?.active_scene_id).toBe('east-wing');
     expect(store.turnError()).toBeNull();
+  });
+
+  it('sets busy during the switch and clears it afterwards', async () => {
+    const { store, api } = setup();
+    let sawBusyDuringCall = false;
+    const original = api.updateSessionScene.bind(api);
+    api.updateSessionScene = (sessionId: string, sceneId: string) => {
+      sawBusyDuringCall = store.busy();
+      return original(sessionId, sceneId);
+    };
+
+    await store.switchScene('east-wing');
+
+    expect(sawBusyDuringCall).toBeTrue();
+    expect(store.busy()).toBeFalse();
+  });
+
+  it('clears busy even when the scene switch fails', async () => {
+    const { store, api } = setup();
+    api.updateSessionSceneShouldFail = true;
+
+    await store.switchScene('east-wing');
+
+    expect(store.busy()).toBeFalse();
+  });
+
+  it('is a no-op while busy', async () => {
+    const { store, api } = setup();
+    store.busy.set(true);
+
+    await store.switchScene('east-wing');
+
+    expect(api.updateSessionSceneCalls).toEqual([]);
   });
 
   it('surfaces a failure without touching the session', async () => {
