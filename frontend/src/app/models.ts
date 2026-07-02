@@ -8,6 +8,7 @@ export interface CreateSessionRequest {
   scene_id: string;
   player_name: string;
   active_persona_id: string;
+  provider?: 'local' | 'cloud';
 }
 
 export interface CreateSessionResponse {
@@ -15,6 +16,7 @@ export interface CreateSessionResponse {
   world_id: string;
   active_scene_id: string;
   active_persona_id: string;
+  provider?: string;
 }
 
 export interface RecentSessionResponse {

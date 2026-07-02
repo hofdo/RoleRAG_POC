@@ -1,4 +1,6 @@
 import {
+  buildCatalogSessionRequest,
+  buildSessionRequest,
   buildTurnRequest,
   createCatalogSelection,
   formatRetrievalDiagnostics,
@@ -50,6 +52,48 @@ describe('play-model', () => {
       message: 'hi',
       active_persona_id: 'warden',
     });
+  });
+
+  it('builds a session request defaulting to the local provider', () => {
+    expect(
+      buildSessionRequest({ worldId: 'w1', sceneId: 's2', personaId: 'p1', playerName: 'Avery' }),
+    ).toEqual({
+      world_id: 'w1',
+      scene_id: 's2',
+      active_persona_id: 'p1',
+      player_name: 'Avery',
+      provider: 'local',
+    });
+  });
+
+  it('builds a session request carrying the chosen provider', () => {
+    expect(
+      buildSessionRequest({
+        worldId: 'w1',
+        sceneId: 's2',
+        personaId: 'p1',
+        playerName: 'Avery',
+        provider: 'cloud',
+      }),
+    ).toEqual({
+      world_id: 'w1',
+      scene_id: 's2',
+      active_persona_id: 'p1',
+      player_name: 'Avery',
+      provider: 'cloud',
+    });
+  });
+
+  it('builds a catalog session request carrying the chosen provider', () => {
+    const sel = createCatalogSelection(catalog);
+    const request = buildCatalogSessionRequest(sel, 'Avery', 'cloud');
+    expect(request.provider).toBe('cloud');
+  });
+
+  it('builds a catalog session request defaulting to local when no provider given', () => {
+    const sel = createCatalogSelection(catalog);
+    const request = buildCatalogSessionRequest(sel, 'Avery');
+    expect(request.provider).toBe('local');
   });
 
   it('detects confirmation-required turns', () => {

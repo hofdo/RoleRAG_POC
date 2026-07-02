@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { ApiError, ApiService } from './api.service';
 import { SessionStore } from './session-store';
 import type {
+  CreateSessionRequest,
   CreateTurnRequest,
   DeleteLastTurnResponse,
   GetSessionResponse,
@@ -130,6 +131,21 @@ class FakeApi {
       recent_turns: [],
     });
   }
+  createSessionCalls: CreateSessionRequest[] = [];
+  createSession(request: CreateSessionRequest): Promise<{
+    session_id: string;
+    world_id: string;
+    active_scene_id: string;
+    active_persona_id: string;
+  }> {
+    this.createSessionCalls.push(request);
+    return Promise.resolve({
+      session_id: 's1',
+      world_id: request.world_id,
+      active_scene_id: request.scene_id,
+      active_persona_id: request.active_persona_id,
+    });
+  }
 }
 
 function setup(): { store: SessionStore; api: FakeApi } {
@@ -152,13 +168,12 @@ describe('SessionStore turn flow', () => {
     const { store, api } = setup();
     api.next = completedTurn('an answer');
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(store.transcript().map((e) => [e.role, e.text])).toEqual([
       ['player', 'a question'],
       ['assistant', 'an answer'],
     ]);
-    expect(store.pendingConfirm()).toBeNull();
     expect(store.lastDebug()?.provider).toBe('local');
     expect(store.busy()).toBe(false);
   });
@@ -166,7 +181,7 @@ describe('SessionStore turn flow', () => {
   it('sendMessage sends only message and active_persona_id (no cloud flags)', async () => {
     const { store, api } = setup();
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(api.calls.at(-1)!.request).toEqual({
       message: 'a question',
@@ -177,7 +192,7 @@ describe('SessionStore turn flow', () => {
   it('is a no-op without an active session', async () => {
     const { store, api } = setup();
     store.session.set(null);
-    await store.sendMessage('nope', false);
+    await store.sendMessage('nope');
     expect(api.calls).toEqual([]);
   });
 
@@ -185,7 +200,7 @@ describe('SessionStore turn flow', () => {
     const { store, api } = setup();
     api.stagesToEmit = ['session', 'retrieval', 'generation'];
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(store.currentStage()).toBeNull();
   });
@@ -194,7 +209,7 @@ describe('SessionStore turn flow', () => {
     const { store, api } = setup();
     api.createBufferedTurn = () => Promise.reject(new Error('boom'));
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(store.currentStage()).toBeNull();
     expect(store.turnError()).toContain('boom');
@@ -205,7 +220,7 @@ describe('SessionStore turn flow', () => {
     api.createBufferedTurn = () =>
       Promise.reject(new ApiError('provider_timeout', 'boom', 504));
 
-    const ok = await store.sendMessage('hello', false);
+    const ok = await store.sendMessage('hello');
 
     expect(ok).toBeFalse();
     expect(store.turnError()).toContain('provider_timeout');
@@ -213,21 +228,15 @@ describe('SessionStore turn flow', () => {
 
   it('returns true from sendMessage when the turn completes', async () => {
     const { store } = setup();
-    const ok = await store.sendMessage('hello', false);
+    const ok = await store.sendMessage('hello');
     expect(ok).toBeTrue();
-  });
-
-  it('confirmCloud/forceLocal resolve true with no pending confirmation', async () => {
-    const { store } = setup();
-    expect(await store.confirmCloud()).toBeTrue();
-    expect(await store.forceLocal()).toBeTrue();
   });
 
   it('sendMessage includes the persona override when set', async () => {
     const { store, api } = setup();
     store.personaOverride.set('warden');
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(api.calls.at(-1)!.request.active_persona_id).toBe('warden');
   });
@@ -235,7 +244,7 @@ describe('SessionStore turn flow', () => {
   it('sendMessage omits the persona override when unset', async () => {
     const { store, api } = setup();
 
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
 
     expect(api.calls.at(-1)!.request.active_persona_id).toBeUndefined();
   });
@@ -317,7 +326,7 @@ describe('SessionStore rerollLast', () => {
   it('deletes the last turn, drops it from the transcript, and resends the message', async () => {
     const { store, api } = setup();
     api.next = completedTurn('an answer');
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
     expect(store.transcript().length).toBe(2);
 
     api.next = completedTurn('a reroll answer');
@@ -351,7 +360,7 @@ describe('SessionStore rerollLast', () => {
   it('is a no-op while busy', async () => {
     const { store, api } = setup();
     api.next = completedTurn('an answer');
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
     store.busy.set(true);
 
     await store.rerollLast();
@@ -362,7 +371,7 @@ describe('SessionStore rerollLast', () => {
   it('surfaces a delete failure, leaves the transcript intact, and does not resend', async () => {
     const { store, api } = setup();
     api.next = completedTurn('an answer');
-    await store.sendMessage('a question', false);
+    await store.sendMessage('a question');
     api.deleteLastTurnShouldFail = true;
 
     await store.rerollLast();
@@ -473,5 +482,162 @@ describe('SessionStore panel errors', () => {
 
     expect(store.canonError()).toContain('Fact not deleted');
     expect(store.canonFacts().length).toBe(1);
+  });
+});
+
+describe('SessionStore cloudAvailable', () => {
+  it('is false with no runtime status loaded', () => {
+    const { store } = setup();
+    expect(store.cloudAvailable()).toBeFalse();
+  });
+
+  it('is false when cloud_mode is off, even if configured', () => {
+    const { store } = setup();
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'off',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    expect(store.cloudAvailable()).toBeFalse();
+  });
+
+  it('is false when not configured, even if cloud_mode is ask', () => {
+    const { store } = setup();
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: false,
+    });
+    expect(store.cloudAvailable()).toBeFalse();
+  });
+
+  it('is true when configured and cloud_mode is ask or auto', () => {
+    const { store } = setup();
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    expect(store.cloudAvailable()).toBeTrue();
+  });
+});
+
+describe('SessionStore createSessionFromSelection provider', () => {
+  function withSelection(store: SessionStore): void {
+    store.session.set(null);
+    store.catalog.set({
+      worlds: [
+        { id: 'w', name: 'World', default_scene_id: 'sc', scene_ids: ['sc'], persona_ids: ['p'] },
+      ],
+      scenes: [
+        { id: 'sc', title: 'Scene', location: 'Loc', player_visible_summary: '', active_personas: [] },
+      ],
+      personas: [{ id: 'p', name: 'Persona', role: 'npc', public_description: '', speaking_style: '' }],
+    });
+    store.selectWorld('w');
+  }
+
+  it('defaults sessionProvider to local', () => {
+    const { store } = setup();
+    expect(store.sessionProvider()).toBe('local');
+  });
+
+  it('creates the session with the chosen provider', async () => {
+    const { store, api } = setup();
+    withSelection(store);
+    store.sessionProvider.set('cloud');
+
+    await store.createSessionFromSelection('Avery');
+
+    expect(api.createSessionCalls.at(-1)?.provider).toBe('cloud');
+  });
+
+  it('creates the session with the local provider by default', async () => {
+    const { store, api } = setup();
+    withSelection(store);
+
+    await store.createSessionFromSelection('Avery');
+
+    expect(api.createSessionCalls.at(-1)?.provider).toBe('local');
+  });
+
+  it('asks for confirmation before creating a cloud session when cloud_mode is ask', async () => {
+    const { store, api } = setup();
+    withSelection(store);
+    store.sessionProvider.set('cloud');
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    spyOn(window, 'confirm').and.returnValue(true);
+
+    await store.createSessionFromSelection('Avery');
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(api.createSessionCalls.length).toBe(1);
+  });
+
+  it('does not create the session when the user declines the cloud confirmation', async () => {
+    const { store, api } = setup();
+    withSelection(store);
+    store.sessionProvider.set('cloud');
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    spyOn(window, 'confirm').and.returnValue(false);
+
+    await store.createSessionFromSelection('Avery');
+
+    expect(api.createSessionCalls.length).toBe(0);
+  });
+
+  it('does not ask for confirmation when cloud_mode is auto', async () => {
+    const { store, api } = setup();
+    withSelection(store);
+    store.sessionProvider.set('cloud');
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'auto',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    spyOn(window, 'confirm');
+
+    await store.createSessionFromSelection('Avery');
+
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(api.createSessionCalls.length).toBe(1);
   });
 });

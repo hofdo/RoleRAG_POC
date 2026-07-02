@@ -68,6 +68,16 @@ import { formatRecentSessionOption } from '../play-model';
         </label>
 
         <label>
+          Model
+          <select #providerSel (change)="store.sessionProvider.set(providerSel.value === 'cloud' ? 'cloud' : 'local')">
+            <option value="local" [selected]="store.sessionProvider() === 'local'">Local</option>
+            @if (store.cloudAvailable()) {
+              <option value="cloud" [selected]="store.sessionProvider() === 'cloud'">Cloud</option>
+            }
+          </select>
+        </label>
+
+        <label>
           Player name
           <input
             #nameInput

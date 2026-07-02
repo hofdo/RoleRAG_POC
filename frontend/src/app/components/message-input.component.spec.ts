@@ -89,14 +89,6 @@ describe('MessageInputComponent', () => {
     expect(store.turnError()).toContain('boom');
   });
 
-  it('shows the cloud-confirm banner when a confirmation is pending', () => {
-    const { fixture, store } = make();
-    store.pendingConfirm.set({ message: 'go cloud?' });
-    fixture.detectChanges();
-    const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.confirm-banner')).not.toBeNull();
-  });
-
   it('shows the current stage label while busy', () => {
     const { fixture, store } = make();
     store.busy.set(true);
@@ -121,7 +113,7 @@ describe('MessageInputComponent', () => {
     expect(c.stageLabel('mystery')).toBe('mystery');
   });
 
-  it('disables Reroll last with no session, while busy, or with a pending confirm', () => {
+  it('disables Reroll last with no session or while busy', () => {
     const { fixture, store } = make();
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
@@ -139,14 +131,6 @@ describe('MessageInputComponent', () => {
     fixture.detectChanges();
     expect(rerollButton.disabled).toBe(true);
     store.busy.set(false);
-
-    // A pending cloud-route confirmation means the last turn hasn't landed yet;
-    // rerolling would race deleting a turn that doesn't exist as a completed turn.
-    store.pendingConfirm.set({ message: 'go cloud?' });
-    fixture.detectChanges();
-    expect(rerollButton.disabled).toBe(true);
-
-    store.pendingConfirm.set(null);
     fixture.detectChanges();
     expect(rerollButton.disabled).toBe(false);
   });

@@ -8,7 +8,6 @@ import {
   describeRuntimeStatus,
   formatStageTimings,
   fullTranscript,
-  isConfirmationRequired,
   type CatalogSelection,
   type TranscriptEntry,
 } from './play-model';
@@ -59,19 +58,24 @@ export class SessionStore {
   // Side-panel failures surface here instead of silently showing stale data.
   readonly memoryError = signal<string | null>(null);
   readonly canonError = signal<string | null>(null);
-  // Set when CLOUD_MODE=ask and the router wants cloud: holds the message to resubmit on confirm.
-  readonly pendingConfirm = signal<{ message: string } | null>(null);
   readonly lastDebug = signal<TurnDebug | null>(null);
   readonly recentSessions = signal<RecentSessionResponse[]>([]);
   // Persona to use for the *next* turn only; the backend switches the session's
   // active persona once that turn lands (see TurnSessionLoader.load).
   readonly personaOverride = signal<string | null>(null);
+  // Provider chosen at session-creation time only; the session is bound to it for its
+  // lifetime (see feat(session): provider field). Not consulted after createSessionFromSelection.
+  readonly sessionProvider = signal<'local' | 'cloud'>('local');
 
   readonly statusView = computed(() => describeRuntimeStatus(this.runtimeStatus()));
   readonly sessionId = computed(() => this.session()?.session_id ?? null);
   readonly memoryLines = computed(() =>
     describeMemories({ session_id: this.sessionId() ?? '', memories: this.memories() }),
   );
+  readonly cloudAvailable = computed(() => {
+    const status = this.runtimeStatus();
+    return !!status && status.cloud_provider_configured && status.cloud_mode !== 'off';
+  });
 
   async loadRuntimeStatus(): Promise<void> {
     try {
@@ -107,15 +111,20 @@ export class SessionStore {
   async createSessionFromSelection(playerName: string): Promise<void> {
     const selection = this.selection();
     if (!selection?.world) return;
+    const provider = this.sessionProvider();
+    if (provider === 'cloud' && this.runtimeStatus()?.cloud_mode === 'ask') {
+      if (!window.confirm('Turns in this session will be sent to the cloud provider. Continue?')) {
+        return;
+      }
+    }
     this.busy.set(true);
     this.turnError.set(null);
     try {
-      const request = buildCatalogSessionRequest(selection, playerName);
+      const request = buildCatalogSessionRequest(selection, playerName, provider);
       const session = await this.api.createSession(request);
       this.session.set(session);
       this.transcript.set([]);
       this.memories.set([]);
-      this.pendingConfirm.set(null);
       await Promise.all([this.refreshMemories(), this.loadCanon()]);
     } catch (error) {
       this.turnError.set(errorMessage(error));
@@ -137,7 +146,6 @@ export class SessionStore {
       });
       const details = await this.api.getSessionTurnDetails(sessionId);
       this.transcript.set(fullTranscript(details));
-      this.pendingConfirm.set(null);
       await Promise.all([this.refreshMemories(), this.loadCanon()]);
     } catch (error) {
       this.turnError.set(errorMessage(error));
@@ -154,11 +162,7 @@ export class SessionStore {
     }
   }
 
-  // requestCloud is accepted (message-input still passes it) but ignored: the
-  // per-turn cloud request flow is gone -- routing is decided entirely by the
-  // session's bound provider now. UI removal of the checkbox is Task 5.
-  sendMessage(message: string, requestCloud: boolean): Promise<boolean> {
-    void requestCloud;
+  sendMessage(message: string): Promise<boolean> {
     return this.runTurn(message, buildTurnRequest(message, { personaId: this.personaOverride() }));
   }
 
@@ -176,31 +180,6 @@ export class SessionStore {
     } finally {
       this.busy.set(false);
     }
-  }
-
-  // Resubmit the held message after the user approves cloud routing. The persona
-  // override is not durably committed until a turn actually persists (see
-  // TurnOrchestrator.run_turn), so this resubmit must carry it again rather than
-  // relying on an already-persisted switch from the original (confirmation-required)
-  // attempt.
-  confirmCloud(): Promise<boolean> {
-    const pending = this.pendingConfirm();
-    if (!pending) return Promise.resolve(true);
-    return this.runTurn(
-      pending.message,
-      buildTurnRequest(pending.message, { personaId: this.personaOverride() }),
-    );
-  }
-
-  // Resubmit the held message but pin it to the local provider. Same persona-override
-  // reasoning as confirmCloud above.
-  forceLocal(): Promise<boolean> {
-    const pending = this.pendingConfirm();
-    if (!pending) return Promise.resolve(true);
-    return this.runTurn(
-      pending.message,
-      buildTurnRequest(pending.message, { personaId: this.personaOverride() }),
-    );
   }
 
   private async runTurn(message: string, request: ReturnType<typeof buildTurnRequest>): Promise<boolean> {
@@ -225,11 +204,6 @@ export class SessionStore {
   }
 
   private applyTurn(message: string, turn: TurnResult): void {
-    if (isConfirmationRequired(turn)) {
-      this.pendingConfirm.set({ message });
-      return;
-    }
-    this.pendingConfirm.set(null);
     this.transcript.update((entries) => [
       ...entries,
       { role: 'player', text: message, source: 'new' },
@@ -321,7 +295,7 @@ export class SessionStore {
     } finally {
       this.busy.set(false);
     }
-    await this.sendMessage(lastPlayer.text, false);
+    await this.sendMessage(lastPlayer.text);
     void this.refreshMemories();
   }
 }

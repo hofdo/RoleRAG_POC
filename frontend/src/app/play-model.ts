@@ -32,6 +32,7 @@ export interface SetupForm {
   sceneId: string;
   personaId: string;
   playerName: string;
+  provider?: 'local' | 'cloud';
 }
 
 export interface CatalogSelection {
@@ -55,6 +56,7 @@ export function buildSessionRequest(form: SetupForm): CreateSessionRequest {
     scene_id: form.sceneId,
     active_persona_id: form.personaId,
     player_name: form.playerName,
+    provider: form.provider ?? 'local',
   };
 }
 
@@ -88,12 +90,14 @@ export function createCatalogSelection(
 export function buildCatalogSessionRequest(
   selection: CatalogSelection,
   playerName: string,
+  provider?: 'local' | 'cloud',
 ): CreateSessionRequest {
   return buildSessionRequest({
     worldId: selection.world?.id ?? '',
     sceneId: selection.sceneId,
     personaId: selection.personaId,
     playerName,
+    provider,
   });
 }
 

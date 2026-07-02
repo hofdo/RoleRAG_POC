@@ -178,3 +178,79 @@ describe('SetupPickerComponent scene/persona switch controls', () => {
     expect(button).toBeUndefined();
   });
 });
+
+describe('SetupPickerComponent model dropdown', () => {
+  function findModelSelect(el: HTMLElement): HTMLSelectElement | null {
+    const label = Array.from(el.querySelectorAll('label')).find((l) =>
+      l.textContent?.trim().startsWith('Model'),
+    );
+    return label?.querySelector('select') ?? null;
+  }
+
+  it('shows only the Local option when cloud is off', () => {
+    const { fixture, store } = make();
+    store.catalog.set(catalogFixture);
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'off',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const modelSelect = findModelSelect(el);
+    expect(modelSelect).not.toBeNull();
+    const options = Array.from(modelSelect!.querySelectorAll('option')).map((o) => o.value);
+    expect(options).toEqual(['local']);
+  });
+
+  it('shows both options when cloud is configured and not off', () => {
+    const { fixture, store } = make();
+    store.catalog.set(catalogFixture);
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const modelSelect = findModelSelect(el);
+    expect(modelSelect).not.toBeNull();
+    const options = Array.from(modelSelect!.querySelectorAll('option')).map((o) => o.value);
+    expect(options).toEqual(['local', 'cloud']);
+  });
+
+  it('sets sessionProvider on the store when the model select changes', () => {
+    const { fixture, store } = make();
+    store.catalog.set(catalogFixture);
+    store.runtimeStatus.set({
+      app_name: 'a',
+      app_version: '1',
+      environment: 'test',
+      cloud_mode: 'ask',
+      retrieval_configured: true,
+      content_catalog_available: true,
+      local_provider_configured: true,
+      cloud_provider_configured: true,
+    });
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const modelSelect = findModelSelect(el)!;
+    modelSelect.value = 'cloud';
+    modelSelect.dispatchEvent(new Event('change'));
+
+    expect(store.sessionProvider()).toBe('cloud');
+  });
+});

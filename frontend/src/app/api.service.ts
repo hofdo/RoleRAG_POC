@@ -207,6 +207,7 @@ export class ApiService {
         scene_id: request.scene_id,
         player_name: request.player_name,
         active_persona_id: request.active_persona_id,
+        provider: request.provider ?? 'local',
       },
     });
   }
