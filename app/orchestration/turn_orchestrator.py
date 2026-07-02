@@ -19,6 +19,7 @@ from app.domain import (
     TurnInput,
     TurnOutcome,
     TurnResult,
+    TurnRetrievalDiagnostics,
 )
 from app.llm.provider import LlmProvider
 from app.llm.router import (
@@ -325,17 +326,30 @@ class TurnOrchestrator:
                     routing=routing,
                 )
         except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
+            failure_warnings = [
+                *retrieval.warnings,
+                *routing.warnings,
+                f"actor failed: {exc}",
+            ]
+            self._persist_controlled_failure(
+                context=context,
+                user_message=turn_input.message,
+                text=CONTROLLED_FAILURE_TEXT,
+                route=routing.route,
+                finish_reason=None,
+                critic_status=CriticStatus.SKIPPED,
+                warnings=failure_warnings,
+                timings=timings,
+                retrieval_diagnostics=retrieval.diagnostics,
+                on_stage=on_stage,
+            )
             return TurnResult(
                 text=CONTROLLED_FAILURE_TEXT,
                 route=routing.route,
                 finish_reason=None,
                 memory_written=False,
                 critic_status=CriticStatus.SKIPPED,
-                warnings=[
-                    *retrieval.warnings,
-                    *routing.warnings,
-                    f"actor failed: {exc}",
-                ],
+                warnings=failure_warnings,
                 retrieval=retrieval.diagnostics,
                 stage_timings=timings,
                 outcome=TurnOutcome.CONTROLLED_FAILURE,
@@ -382,6 +396,18 @@ class TurnOrchestrator:
         if resolution.repair_duration is not None:
             timings["repair"] = resolution.repair_duration
         if resolution.controlled_failure:
+            self._persist_controlled_failure(
+                context=context,
+                user_message=turn_input.message,
+                text=resolution.text,
+                route=resolution.route,
+                finish_reason=resolution.finish_reason,
+                critic_status=resolution.critic_status,
+                warnings=warnings,
+                timings=timings,
+                retrieval_diagnostics=retrieval.diagnostics,
+                on_stage=on_stage,
+            )
             return TurnResult(
                 text=resolution.text,
                 route=resolution.route,
@@ -532,6 +558,51 @@ class TurnOrchestrator:
             memory_written=memory.memory_written,
             warnings=list(memory.warnings),
         )
+
+    def _persist_controlled_failure(
+        self,
+        *,
+        context: LoadedTurnContext,
+        user_message: str,
+        text: str,
+        route: ModelRoute,
+        finish_reason: str | None,
+        critic_status: CriticStatus,
+        warnings: list[str],
+        timings: dict[str, float],
+        retrieval_diagnostics: TurnRetrievalDiagnostics | None,
+        on_stage: Callable[[str], None] | None,
+    ) -> None:
+        """Keep failed turns in history: the player's message survives, the failure
+        diagnostics become queryable, and acceptance tooling can account for every
+        attempted turn. The row is written with outcome=CONTROLLED_FAILURE and is
+        excluded from recent-dialogue prompt context by the repository. A pending
+        persona switch is deliberately NOT committed here -- that stays tied to a
+        turn the player actually saw succeed. Persistence failure degrades to a
+        warning: it must never mask the original failure."""
+        try:
+            _emit_stage(on_stage, "persistence")
+            with _stage_timer(timings, "persistence"):
+                persistence = self.persistence_stage.run(
+                    session=context.session,
+                    user_message=user_message,
+                    assistant_message=text,
+                    route=route,
+                    outcome=TurnOutcome.CONTROLLED_FAILURE,
+                )
+            self.turn_repository.update_turn_diagnostics(
+                persistence.turn.id,
+                TurnDiagnostics(
+                    retrieval=retrieval_diagnostics,
+                    stage_timings=timings,
+                    critic_status=critic_status,
+                    finish_reason=finish_reason,
+                    warnings=warnings,
+                    memory_written=False,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"failed-turn persistence skipped: {exc}")
 
     def loader_for_session(self, session: SessionState) -> TurnDataLoader:
         return self.session_stage.loader_for_content_root(session.content_root)

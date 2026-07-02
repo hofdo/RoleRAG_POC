@@ -739,6 +739,7 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
             if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
             else "completed"
         ),
+        outcome=result.outcome.value,
         text=result.text,
         route=RouteResponse(
             provider=result.route.provider.value,
@@ -759,6 +760,7 @@ def _to_turn_detail_response(turn: StoredTurn) -> TurnDetailResponse:
     diagnostics = turn.diagnostics
     return TurnDetailResponse(
         turn_index=turn.turn_index,
+        outcome=turn.outcome.value,
         scene_id=turn.scene_id,
         persona_id=turn.persona_id,
         user_message=turn.user_message,

@@ -120,6 +120,12 @@ class TurnInput(BaseModel):
     force_local: bool = False
 
 
+class TurnOutcome(str, Enum):
+    SUCCESS = "success"
+    CONTROLLED_FAILURE = "controlled_failure"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+
+
 class StoredTurn(BaseModel):
     id: int
     session_id: str
@@ -131,12 +137,9 @@ class StoredTurn(BaseModel):
     route: ModelRoute
     created_at: datetime
     diagnostics: "TurnDiagnostics | None" = None
-
-
-class TurnOutcome(str, Enum):
-    SUCCESS = "success"
-    CONTROLLED_FAILURE = "controlled_failure"
-    CONFIRMATION_REQUIRED = "confirmation_required"
+    # CONFIRMATION_REQUIRED turns are never persisted; stored rows are
+    # SUCCESS or CONTROLLED_FAILURE.
+    outcome: TurnOutcome = TurnOutcome.SUCCESS
 
 
 class CriticStatus(str, Enum):

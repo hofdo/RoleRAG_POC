@@ -148,6 +148,7 @@ def to_retrieval_diagnostics_response(
 
 class CreateTurnResponse(BaseModel):
     status: str = "completed"
+    outcome: str = "success"
     text: str
     route: RouteResponse
     finish_reason: str | None = None
@@ -176,6 +177,7 @@ class StreamFinalPayload(BaseModel):
 
 class StreamFailurePayload(StreamFinalPayload):
     text: str
+    outcome: str = "controlled_failure"
 
 
 class StreamConfirmationPayload(BaseModel):
@@ -248,6 +250,7 @@ class GetSessionResponse(BaseModel):
 
 class TurnDetailResponse(BaseModel):
     turn_index: int
+    outcome: str = "success"
     scene_id: str
     persona_id: str
     user_message: str

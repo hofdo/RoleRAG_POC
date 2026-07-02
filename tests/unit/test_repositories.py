@@ -10,6 +10,7 @@ from app.domain import (
     MemoryCandidate,
     SessionState,
     TurnDiagnostics,
+    TurnOutcome,
     Visibility,
 )
 from app.llm.router import ModelProviderName, ModelRoute
@@ -679,3 +680,82 @@ def test_append_memory_outcome_merges_into_diagnostics(tmp_path: Path) -> None:
         "memory curation deferred: runs after this response",
         "memory dedup dropped 1 duplicate candidate(s)",
     ]
+
+
+def test_turn_outcome_round_trips_and_defaults_to_success(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="Doomed question",
+        assistant_message="The system could not produce a response.",
+        route=_build_route(),
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+
+    stored = turn_repository.list_all_turns("session-1")
+    assert [turn.outcome for turn in stored] == [
+        TurnOutcome.SUCCESS,
+        TurnOutcome.CONTROLLED_FAILURE,
+    ]
+    deleted = turn_repository.delete_last_turn("session-1")
+    assert deleted is not None
+    assert deleted.outcome == TurnOutcome.CONTROLLED_FAILURE
+
+
+def test_list_recent_turns_excludes_controlled_failures(tmp_path: Path) -> None:
+    # Prompt context and the recent-session view must never feed the canned
+    # failure line back to the model.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    for index, outcome in enumerate(
+        [TurnOutcome.SUCCESS, TurnOutcome.CONTROLLED_FAILURE, TurnOutcome.SUCCESS]
+    ):
+        turn_repository.append_turn(
+            session_id="session-1",
+            scene_id="rose-gallery",
+            persona_id="archivist",
+            user_message=f"Question {index + 1}",
+            assistant_message=f"Answer {index + 1}",
+            route=_build_route(),
+            outcome=outcome,
+        )
+
+    recent = turn_repository.list_recent_turns("session-1", limit=8)
+    assert [turn.user_message for turn in recent] == ["Question 1", "Question 3"]
+    # The unfiltered view still returns everything (Inspector / resume).
+    assert len(turn_repository.list_all_turns("session-1")) == 3

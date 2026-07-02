@@ -13,6 +13,7 @@ from app.domain import (
     SessionState,
     StoredTurn,
     TurnDiagnostics,
+    TurnOutcome,
     Visibility,
 )
 from app.llm.router import ModelProviderName, ModelRoute
@@ -49,6 +50,7 @@ class TurnRepository(Protocol):
         user_message: str,
         assistant_message: str,
         route: ModelRoute,
+        outcome: TurnOutcome = TurnOutcome.SUCCESS,
     ) -> StoredTurn: ...
 
     def update_turn_diagnostics(self, turn_id: int, diagnostics: TurnDiagnostics) -> None: ...
@@ -243,6 +245,7 @@ class SQLiteTurnRepository:
         user_message: str,
         assistant_message: str,
         route: ModelRoute,
+        outcome: TurnOutcome = TurnOutcome.SUCCESS,
     ) -> StoredTurn:
         turn_index = self.count_turns(session_id) + 1
         created_at = utc_now()
@@ -261,8 +264,9 @@ class SQLiteTurnRepository:
                 route_max_tokens,
                 route_temperature,
                 route_requires_user_confirmation,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at,
+                outcome
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -278,6 +282,7 @@ class SQLiteTurnRepository:
                 route.temperature,
                 int(route.requires_user_confirmation),
                 serialize_datetime(created_at),
+                outcome.value,
             ),
         )
         self.connection.commit()
@@ -294,6 +299,7 @@ class SQLiteTurnRepository:
             assistant_message=assistant_message,
             route=route,
             created_at=created_at,
+            outcome=outcome,
         )
 
     def update_turn_diagnostics(self, turn_id: int, diagnostics: TurnDiagnostics) -> None:
@@ -340,14 +346,18 @@ class SQLiteTurnRepository:
                 route_temperature,
                 route_requires_user_confirmation,
                 diagnostics_json,
-                created_at
+                created_at,
+                outcome
             FROM turns
-            WHERE session_id = ?
+            WHERE session_id = ? AND outcome = 'success'
             ORDER BY turn_index DESC
             LIMIT ?
             """,
             (session_id, limit),
         ).fetchall()
+        # Controlled failures are excluded: recent dialogue feeds the actor prompt
+        # and the recent-session view, and neither should echo the canned failure
+        # line back. list_all_turns keeps the unfiltered history.
         return [self._row_to_turn(row) for row in reversed(rows)]
 
     def list_all_turns(self, session_id: str) -> list[StoredTurn]:
@@ -368,7 +378,8 @@ class SQLiteTurnRepository:
                 route_temperature,
                 route_requires_user_confirmation,
                 diagnostics_json,
-                created_at
+                created_at,
+                outcome
             FROM turns
             WHERE session_id = ?
             ORDER BY turn_index ASC
@@ -414,6 +425,7 @@ class SQLiteTurnRepository:
             ),
             created_at=parse_datetime(row["created_at"]),
             diagnostics=self._parse_diagnostics(row),
+            outcome=TurnOutcome(row["outcome"]) if "outcome" in row.keys() else TurnOutcome.SUCCESS,
         )
 
     @staticmethod

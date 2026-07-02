@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain import SessionState, StoredTurn
+from app.domain import SessionState, StoredTurn, TurnOutcome
 from app.llm.router import ModelRoute
 from app.persistence.repositories import SessionRepository, TurnRepository
 
@@ -29,6 +29,7 @@ class TurnPersistenceStage:
         user_message: str,
         assistant_message: str,
         route: ModelRoute,
+        outcome: TurnOutcome = TurnOutcome.SUCCESS,
     ) -> PersistenceStageResult:
         turn = self.turn_repository.append_turn(
             session_id=session.id,
@@ -37,6 +38,7 @@ class TurnPersistenceStage:
             user_message=user_message,
             assistant_message=assistant_message,
             route=route,
+            outcome=outcome,
         )
         self.session_repository.update_session_activity(
             session.id,

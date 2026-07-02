@@ -93,7 +93,7 @@ if [[ -d frontend ]]; then
       (cd frontend && npm ci) || { echo "npm ci failed." >&2; exit 1; }
     fi
     echo "Building SPA (served at /app)…"
-    if (cd frontend && npx ng build --base-href=/app/) > "${RUN_DIR}/ng-build.log" 2>&1; then
+    if (cd frontend && npx ng build) > "${RUN_DIR}/ng-build.log" 2>&1; then
       spa_built=1
     else
       echo "Frontend build failed; see ${RUN_DIR}/ng-build.log (API will run without a UI)." >&2
