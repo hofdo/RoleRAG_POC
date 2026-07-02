@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from app.cli import app
@@ -82,8 +84,9 @@ def test_list_sessions_shows_seeded_session(tmp_path: Path) -> None:
     assert payload["sessions"][0]["turn_count"] == 2
 
 
-def test_delete_session_removes_data(tmp_path: Path) -> None:
+def test_delete_session_removes_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     database_path = _seed_database(tmp_path)
+    monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(
         app,
@@ -98,8 +101,9 @@ def test_delete_session_removes_data(tmp_path: Path) -> None:
     connection.close()
 
 
-def test_delete_session_unknown_id_fails(tmp_path: Path) -> None:
+def test_delete_session_unknown_id_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     database_path = _seed_database(tmp_path)
+    monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(
         app,
@@ -110,9 +114,12 @@ def test_delete_session_unknown_id_fails(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
-def test_export_import_round_trip_preserves_session(tmp_path: Path) -> None:
+def test_export_import_round_trip_preserves_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database_path = _seed_database(tmp_path)
     export_path = tmp_path / "session-1.json"
+    monkeypatch.chdir(tmp_path)
 
     export_result = runner.invoke(
         app,
@@ -206,8 +213,9 @@ def test_import_session_with_new_id_remaps_children(tmp_path: Path) -> None:
     connection.close()
 
 
-def test_reset_db_wipes_all_sessions(tmp_path: Path) -> None:
+def test_reset_db_wipes_all_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     database_path = _seed_database(tmp_path)
+    monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(
         app,
@@ -253,7 +261,6 @@ def test_backup_writes_timestamped_copy(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     copies = list((tmp_path / "backups").glob("rolerag-*.db"))
     assert len(copies) == 1
-    import sqlite3
 
     check = sqlite3.connect(copies[0])
     assert check.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
