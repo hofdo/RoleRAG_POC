@@ -5,7 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/process-lifecycle.sh"
 source "${SCRIPT_DIR}/lib/local-model-profile.sh"
 
-PYTHON="${PYTHON:-python}"
+# Prefer the repo venv: macOS has no bare `python` on PATH by default.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "${SCRIPT_DIR}/../.venv/bin/python" ]]; then
+    PYTHON="${SCRIPT_DIR}/../.venv/bin/python"
+  else
+    PYTHON="python"
+  fi
+fi
 ARTIFACT_DIR="${LIVE_ARTIFACT_DIR:-/tmp/rolerag-live-test}"
 RAW_DIR="${ARTIFACT_DIR}/raw"
 WORK_DIR="${LIVE_WORK_DIR:-${ARTIFACT_DIR}/work}"
