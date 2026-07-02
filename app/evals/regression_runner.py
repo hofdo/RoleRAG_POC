@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.agents.critic_agent import CriticAgent
 from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
 from app.agents.secret_guard import scan_reply
+from app.domain import TurnInput, TurnOutcome
 from app.evals.event_key_retrieval import evaluate_event_key_retrieval
 from app.evals.fixtures import EvalFixture, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
@@ -47,7 +48,7 @@ def run_regressions() -> RegressionReport:
         asyncio.run(_memory_result(fixture)),
         _memory_continuity_result(),
         _draft_validation_result(),
-        _provider_binding_result(fixture),
+        asyncio.run(_provider_binding_result(fixture)),
         _containment_result(),
         asyncio.run(_structured_resilience_result()),
         _retrieval_miss_result(fixture),
@@ -202,9 +203,16 @@ def _draft_validation_result() -> CategoryResult:
     return CategoryResult(name="draft_validation", passed=all(checks.values()), checks=checks)
 
 
-def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
+async def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
     """Every task runs on the session's bound provider; there is no escalation,
-    fallback, or per-turn override (Task 2 routing collapse)."""
+    fallback, or per-turn override (Task 2 routing collapse).
+
+    Runtime checks (not just route-object inspection) run a full-stack orchestrator
+    turn -- real CriticAgent + MemoryCurator, not stubs -- against task-routed
+    recording fake providers, so the checks fail if the router ever lets a task
+    slip to the wrong provider or if hidden persona/scene content leaks into a
+    cloud request. Fakes only; no network or real model involved.
+    """
 
     def route_for(task: ModelTask, provider: ModelProviderName) -> ModelRoute:
         return choose_route(
@@ -218,20 +226,86 @@ def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
             cloud_temperature=fixture.cloud_route.temperature,
         )
 
-    local_actor = route_for(ModelTask.ACTOR_RESPONSE, ModelProviderName.LOCAL)
-    cloud_actor = route_for(ModelTask.ACTOR_RESPONSE, ModelProviderName.CLOUD)
     local_critic = route_for(ModelTask.CRITIC, ModelProviderName.LOCAL)
     cloud_critic = route_for(ModelTask.CRITIC, ModelProviderName.CLOUD)
     local_memory = route_for(ModelTask.MEMORY_EXTRACTION, ModelProviderName.LOCAL)
     cloud_memory = route_for(ModelTask.MEMORY_EXTRACTION, ModelProviderName.CLOUD)
+
+    # local_session_never_calls_cloud: a local session's actor, critic, and memory
+    # calls must never reach the cloud provider -- the cloud provider explodes if
+    # touched at all.
+    class _ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("cloud provider must never be called for a local session")
+
+    local_orchestrator, local_fake, _ = fixture.build_full_stack_orchestrator(
+        session_provider=ModelProviderName.LOCAL,
+        actor_response_text="Local answer",
+    )
+    local_orchestrator.cloud_provider = _ExplodingProvider()
+    local_orchestrator.generation_stage.cloud_provider = _ExplodingProvider()
+    local_orchestrator.critique_stage.cloud_provider = _ExplodingProvider()
+    local_orchestrator.memory_stage.cloud_provider = _ExplodingProvider()
+    local_result = await local_orchestrator.run_turn(
+        turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
+    )
+    local_never_calls_cloud = (
+        local_result.outcome == TurnOutcome.SUCCESS
+        and local_result.route.provider == ModelProviderName.LOCAL
+        and len(local_fake.requests) >= 1
+    )
+
+    # cloud_session_runs_all_tasks_on_cloud + cloud_critic_prompt_carries_no_hidden_content:
+    # a cloud session's actor, critic, and memory-extraction calls must all land on the
+    # cloud provider (local provider explodes if touched), and none of the fixture's
+    # hidden persona/scene strings may appear in any recorded cloud request.
+    class _LocalExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("local provider must never be called for a cloud session")
+
+    cloud_orchestrator, _, cloud_fake = fixture.build_full_stack_orchestrator(
+        session_provider=ModelProviderName.CLOUD,
+        actor_response_text="Cloud answer",
+    )
+    cloud_orchestrator.provider = _LocalExplodingProvider()
+    cloud_orchestrator.generation_stage.provider = _LocalExplodingProvider()
+    cloud_orchestrator.critique_stage.provider = _LocalExplodingProvider()
+    cloud_orchestrator.memory_stage.provider = _LocalExplodingProvider()
+    cloud_result = await cloud_orchestrator.run_turn(
+        turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
+    )
+    cloud_tasks = [request.metadata.get("task") for request in cloud_fake.requests]
+    cloud_runs_all_tasks_on_cloud = (
+        cloud_result.outcome == TurnOutcome.SUCCESS
+        and cloud_result.route.provider == ModelProviderName.CLOUD
+        and "critic" in cloud_tasks
+        and "memory_extraction" in cloud_tasks
+    )
+
+    all_cloud_text = " ".join(
+        message.content for request in cloud_fake.requests for message in request.messages
+    )
+    hidden_strings = (
+        fixture.primary_persona_secret,
+        fixture.primary_persona_private_description,
+        fixture.primary_persona_forbidden_knowledge,
+        fixture.scene_gm_only_text,
+    )
+    cloud_critic_prompt_carries_no_hidden_content = all(
+        hidden not in all_cloud_text for hidden in hidden_strings
+    )
+
     checks = {
-        "local_session_actor_stays_local": local_actor.provider == ModelProviderName.LOCAL,
-        "cloud_session_actor_routes_cloud": cloud_actor.provider == ModelProviderName.CLOUD,
-        "structured_tasks_greedy_on_local": (
-            local_critic.temperature == 0.0 and local_memory.temperature == 0.0
+        "local_session_never_calls_cloud": local_never_calls_cloud,
+        "cloud_session_runs_all_tasks_on_cloud": cloud_runs_all_tasks_on_cloud,
+        "cloud_critic_prompt_carries_no_hidden_content": (
+            cloud_critic_prompt_carries_no_hidden_content
         ),
-        "structured_tasks_greedy_on_cloud": (
-            cloud_critic.temperature == 0.0 and cloud_memory.temperature == 0.0
+        "structured_tasks_stay_greedy_on_both_providers": (
+            local_critic.temperature == 0.0
+            and local_memory.temperature == 0.0
+            and cloud_critic.temperature == 0.0
+            and cloud_memory.temperature == 0.0
         ),
     }
     return CategoryResult(name="provider_binding", passed=all(checks.values()), checks=checks)
@@ -308,9 +382,7 @@ async def _structured_resilience_result() -> CategoryResult:
         "truncated_structured_call_retries": truncated_then_valid.calls == 2 and recovered.accepted,
         "complete_structured_call_not_retried": complete.calls == 1,
     }
-    return CategoryResult(
-        name="structured_resilience", passed=all(checks.values()), checks=checks
-    )
+    return CategoryResult(name="structured_resilience", passed=all(checks.values()), checks=checks)
 
 
 def _format_category(result: CategoryResult) -> str:

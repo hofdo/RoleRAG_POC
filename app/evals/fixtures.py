@@ -5,8 +5,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.agents.critic_agent import CriticAgent
+from app.agents.memory_curator import MemoryCurator
 from app.domain import (
     CriticResult,
+    MemoryEpisode,
     PersonaCard,
     RetrievedChunk,
     SceneState,
@@ -16,11 +19,16 @@ from app.domain import (
 from app.domain.visibility import Visibility
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
-from app.memory import RecentDialogueStore
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
-from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
+from app.persistence import (
+    DemoWorldRecord,
+    SQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+)
 from app.persistence.sqlite import connect_sqlite, initialize_database
 from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
 from app.rag.embeddings import EmbeddingProvider
@@ -67,6 +75,55 @@ class SequencedFakeProvider(LlmProvider):
             usage={"total_tokens": 0},
             finish_reason="stop",
         )
+
+
+class TaskRoutedRecordingProvider(LlmProvider):
+    """Records every request and answers by ``request.metadata["task"]``.
+
+    Used to run a *real* CriticAgent + MemoryCurator (not stubs) through the
+    orchestrator so the provider-binding eval can assert, at the request-object
+    level, which provider each task actually landed on and that no hidden
+    fixture content ever appears in the recorded requests.
+    """
+
+    def __init__(
+        self,
+        *,
+        actor_text: str,
+        critic_text: str = '{"accepted": true, "issues": [], "repair_instruction": null}',
+        memory_text: str = '{"write_memory": false, "memories": [], "reason": "nothing durable"}',
+    ) -> None:
+        self.actor_text = actor_text
+        self.critic_text = critic_text
+        self.memory_text = memory_text
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        task = request.metadata.get("task") if request.metadata else None
+        if task == "critic":
+            text = self.critic_text
+        elif task == "memory_extraction":
+            text = self.memory_text
+        else:
+            text = self.actor_text
+        return LlmResponse(
+            text=text,
+            provider="fake",
+            model=request.model,
+            usage={"total_tokens": 0},
+            finish_reason="stop",
+        )
+
+
+class NullMemoryIndexer:
+    """Discards memory writes; the eval only needs the extraction call recorded."""
+
+    def index_memories(self, memories: list[MemoryEpisode]) -> object:
+        return None
+
+    def unindex(self, memory_ids: Sequence[str]) -> None:
+        raise AssertionError("unindex not expected in provider-binding eval")
 
 
 class AlwaysAcceptCritic:
@@ -144,6 +201,7 @@ class EvalFixture:
     scene_gm_only_text: str
     primary_persona_secret: str
     primary_persona_private_description: str
+    primary_persona_forbidden_knowledge: str
     local_route: ModelRoute
     cloud_route: ModelRoute
     memory_route: ModelRoute
@@ -315,6 +373,57 @@ class EvalFixture:
         )
         return orchestrator, local_provider, cloud_provider
 
+    def build_full_stack_orchestrator(
+        self,
+        *,
+        session_provider: ModelProviderName,
+        actor_response_text: str,
+    ) -> tuple[TurnOrchestrator, TaskRoutedRecordingProvider, TaskRoutedRecordingProvider]:
+        """Orchestrator wired with a *real* CriticAgent + MemoryCurator (not stubs).
+
+        Used by the provider-binding eval to prove -- at the request-object level --
+        that critic and memory-extraction calls follow the session provider like the
+        actor call does, and that hidden persona/scene fields never appear in any
+        request sent to the recording providers. Both providers are fakes (task-routed
+        by ``request.metadata["task"]``); no network or real model is involved.
+        """
+        temp_dir = Path(tempfile.mkdtemp(prefix="rolerag-evals-fullstack-"))
+        connection = connect_sqlite(temp_dir / "evals.db")
+        initialize_database(connection)
+        session_repository = SQLiteSessionRepository(connection)
+        turn_repository = SQLiteTurnRepository(connection)
+        memory_repository = SQLiteMemoryRepository(connection)
+        session_repository.create_session(
+            self.session.model_copy(update={"provider": session_provider})
+        )
+        local_provider = TaskRoutedRecordingProvider(actor_text=actor_response_text)
+        cloud_provider = TaskRoutedRecordingProvider(actor_text="Cloud answer")
+        orchestrator = TurnOrchestrator(
+            loader=EvalLoader(self),
+            provider=local_provider,
+            cloud_provider=cloud_provider,
+            critic_agent=CriticAgent(),
+            memory_store=MemoryEpisodeStore(memory_repository=memory_repository),
+            memory_curator=MemoryCurator(),
+            memory_indexer=NullMemoryIndexer(),
+            session_repository=session_repository,
+            turn_repository=turn_repository,
+            recent_dialogue_store=RecentDialogueStore(
+                turn_repository=turn_repository,
+                recent_turns=8,
+            ),
+            actor_context_retriever=self.create_actor_context_retriever(),
+            config=TurnOrchestratorConfig(
+                local_model=self.local_route.model,
+                cloud_model=self.cloud_route.model,
+                local_max_tokens=self.local_route.max_tokens,
+                cloud_max_tokens=self.cloud_route.max_tokens,
+                local_temperature=self.local_route.temperature,
+                cloud_temperature=self.cloud_route.temperature,
+            ),
+        )
+        return orchestrator, local_provider, cloud_provider
+
 
 def build_eval_fixture() -> EvalFixture:
     world = DemoWorldRecord(
@@ -327,6 +436,7 @@ def build_eval_fixture() -> EvalFixture:
     scene_gm_only_text = "A loyalist listener watches from the south alcove."
     primary_persona_private_description = "She hides a dangerous debt to the old archive ring."
     primary_persona_secret = "She hid a cipher inside the gallery clock."
+    primary_persona_forbidden_knowledge = "The archive key is hidden beneath the rose seal."
     scene = SceneState(
         id="eval-rose-gallery",
         title="Rose Gallery",
@@ -346,7 +456,7 @@ def build_eval_fixture() -> EvalFixture:
         speaking_style="Precise, dry, and quietly skeptical.",
         goals=["protect the archive", "test promises before trusting them"],
         secrets=[primary_persona_secret],
-        forbidden_knowledge=["The archive key is hidden beneath the rose seal."],
+        forbidden_knowledge=[primary_persona_forbidden_knowledge],
     )
     secondary_persona = PersonaCard(
         id="corvin-hale",
@@ -559,6 +669,7 @@ def build_eval_fixture() -> EvalFixture:
         scene_gm_only_text=scene_gm_only_text,
         primary_persona_secret=primary_persona_secret,
         primary_persona_private_description=primary_persona_private_description,
+        primary_persona_forbidden_knowledge=primary_persona_forbidden_knowledge,
         local_route=local_route,
         cloud_route=cloud_route,
         memory_route=memory_route,
