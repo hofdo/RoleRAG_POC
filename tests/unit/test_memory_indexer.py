@@ -9,7 +9,7 @@ from app.domain import MemoryCandidate, MemoryEpisode, RetrievedChunk, SessionSt
 from app.memory import MemoryEpisodeStore, MemoryIndexer
 from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
-from app.rag import RagChunk, RagCollection, RetrievalFilter
+from app.rag import InMemoryVectorStore, RagChunk, RagCollection, RetrievalFilter
 
 
 class FakeEmbeddingProvider:
@@ -113,10 +113,21 @@ def test_memory_indexer_preserves_episode_metadata() -> None:
 
     result = indexer.index_memories([_episode()])
 
+    # _episode() is PLAYER-visible, importance=4, actor_id="archivist" -- it clears the
+    # PERSONA_MEMORY_IMPORTANCE_FLOOR, so it is embedded/upserted twice: once into
+    # SESSION_MEMORY (this test's focus) and once into PERSONA_MEMORY (covered by
+    # test_high_value_player_memories_are_also_indexed_per_persona).
     assert result.indexed_count == 1
-    assert embedding_provider.batches == [["The player promised to return before dawn."]]
-    assert vector_store.ensure_calls == [(RagCollection.SESSION_MEMORY, 3)]
-    collection, chunks, vectors = vector_store.upsert_calls[0]
+    assert embedding_provider.batches == [
+        ["The player promised to return before dawn."],
+        ["The player promised to return before dawn."],
+    ]
+    assert (RagCollection.SESSION_MEMORY, 3) in vector_store.ensure_calls
+    session_calls = [
+        call for call in vector_store.upsert_calls if call[0] == RagCollection.SESSION_MEMORY
+    ]
+    assert len(session_calls) == 1
+    collection, chunks, vectors = session_calls[0]
     assert collection == RagCollection.SESSION_MEMORY
     assert vectors == [[1.0, 42.0, 0.0]]
     assert chunks == [
@@ -320,6 +331,127 @@ def test_memory_indexer_skips_vector_calls_for_empty_list() -> None:
     assert embedding_provider.batches == []
     assert vector_store.ensure_calls == []
     assert vector_store.upsert_calls == []
+
+
+def test_high_value_player_memories_are_also_indexed_per_persona() -> None:
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        importance_floor=1,
+    )
+    player_memory = MemoryEpisode(
+        id="player-1",
+        session_id="session-1",
+        scene_id="rose-gallery",
+        actor_id="innkeeper",
+        summary="The player promised to return the innkeeper's ledger.",
+        importance=4,
+        visibility=Visibility.PLAYER,
+        tags=["promise"],
+    )
+    gm_memory = MemoryEpisode(
+        id="gm-1",
+        session_id="session-1",
+        scene_id="rose-gallery",
+        actor_id="innkeeper",
+        summary="The innkeeper secretly informs the regent.",
+        importance=5,
+        visibility=Visibility.GM,
+        tags=["secret"],
+    )
+
+    indexer.index_memories([player_memory, gm_memory])
+
+    query_vector = embedding_provider.embed_text("ledger")
+    persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(persona_id="innkeeper"),
+        limit=10,
+    )
+    assert [hit.actor_id for hit in persona_hits] == ["innkeeper"]
+    assert [hit.id for hit in persona_hits] == ["player-1"]
+
+    # A different persona_id must not see another actor's persisted memory.
+    other_persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        query_vector,
+        RetrievalFilter.player_visible(persona_id="someone-else"),
+        limit=10,
+    )
+    assert other_persona_hits == []
+
+
+def test_low_importance_player_memory_is_not_indexed_per_persona() -> None:
+    vector_store = InMemoryVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        importance_floor=1,
+    )
+    low_value_memory = MemoryEpisode(
+        id="player-low",
+        session_id="session-1",
+        scene_id="rose-gallery",
+        actor_id="innkeeper",
+        summary="Minor smalltalk.",
+        importance=3,
+        visibility=Visibility.PLAYER,
+        tags=[],
+    )
+
+    indexer.index_memories([low_value_memory])
+
+    vector_store.ensure_collection(RagCollection.PERSONA_MEMORY, FakeEmbeddingProvider().dimension)
+    persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        FakeEmbeddingProvider().embed_text("smalltalk"),
+        RetrievalFilter.player_visible(persona_id="innkeeper"),
+        limit=10,
+    )
+    assert persona_hits == []
+
+
+def test_unindex_also_removes_persona_memory_copies() -> None:
+    vector_store = InMemoryVectorStore()
+    indexer = MemoryIndexer(
+        memory_store=None,
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        importance_floor=1,
+    )
+    player_memory = MemoryEpisode(
+        id="player-2",
+        session_id="session-1",
+        scene_id="rose-gallery",
+        actor_id="innkeeper",
+        summary="The player vowed to protect the inn.",
+        importance=5,
+        visibility=Visibility.PLAYER,
+        tags=["vow"],
+    )
+    indexer.index_memories([player_memory])
+
+    indexer.unindex(["player-2"])
+
+    session_hits = vector_store.search(
+        RagCollection.SESSION_MEMORY,
+        FakeEmbeddingProvider().embed_text("inn"),
+        RetrievalFilter.player_visible(session_id="session-1"),
+        limit=10,
+    )
+    persona_hits = vector_store.search(
+        RagCollection.PERSONA_MEMORY,
+        FakeEmbeddingProvider().embed_text("inn"),
+        RetrievalFilter.player_visible(persona_id="innkeeper"),
+        limit=10,
+    )
+    assert session_hits == []
+    assert persona_hits == []
 
 
 def test_memory_indexer_reindexes_existing_sqlite_memories(tmp_path: Path) -> None:

@@ -839,8 +839,15 @@ def test_cli_reindex_memories_indexes_existing_sqlite_memories(tmp_path: Path) -
         "indexed_count": 1,
         "session_id": "demo-session",
     }
-    assert vector_store.ensure_calls == [(RagCollection.SESSION_MEMORY, 2)]
-    assert vector_store.upsert_calls[0][1][0].id == persisted[0].id
+    # This memory is PLAYER-visible, importance=4, with actor_id="archivist" -- it
+    # clears PERSONA_MEMORY_IMPORTANCE_FLOOR, so it is also dual-written to
+    # PERSONA_MEMORY (see app/memory/indexer.py:_index_persona_memories).
+    assert (RagCollection.SESSION_MEMORY, 2) in vector_store.ensure_calls
+    session_calls = [
+        call for call in vector_store.upsert_calls if call[0] == RagCollection.SESSION_MEMORY
+    ]
+    assert len(session_calls) == 1
+    assert session_calls[0][1][0].id == persisted[0].id
 
 
 def test_cli_reindex_memories_fails_clearly_for_missing_session(tmp_path: Path) -> None:

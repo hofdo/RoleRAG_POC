@@ -4,12 +4,18 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
-from app.domain import MemoryEpisode
+from app.domain import MemoryEpisode, Visibility
 from app.memory.consolidation import CONSOLIDATED_TAG
 from app.memory.store import MemoryEpisodeStore
 from app.rag.embeddings import EmbeddingProvider
 from app.rag.models import RagChunk, RagCollection
 from app.rag.vector_store import VectorStore
+
+# Cross-session NPC memory: only PLAYER-visible episodes at or above this importance are
+# also written to persona_memory, so a later session with the same persona can retrieve
+# them (retrieval already searches persona_memory filtered by persona_id — see
+# ActorContextRetriever / RetrievalFilter.player_visible(persona_id=...)).
+PERSONA_MEMORY_IMPORTANCE_FLOOR = 4
 
 
 class MemoryIndexingResult(BaseModel):
@@ -49,6 +55,7 @@ class MemoryIndexer:
             self.embedding_provider.dimension,
         )
         self.vector_store.upsert_chunks(RagCollection.SESSION_MEMORY, chunks, vectors)
+        self._index_persona_memories(eligible)
         for session_id in {memory.session_id for memory in eligible}:
             self._enforce_session_cap(session_id)
         return MemoryIndexingResult(indexed_count=len(chunks))
@@ -60,6 +67,10 @@ class MemoryIndexer:
 
     def unindex(self, memory_ids: Sequence[str]) -> None:
         self.vector_store.delete_points(RagCollection.SESSION_MEMORY, list(memory_ids))
+        try:
+            self.vector_store.delete_points(RagCollection.PERSONA_MEMORY, list(memory_ids))
+        except Exception:  # noqa: BLE001 - persona collection may not exist yet
+            pass
 
     def _enforce_session_cap(self, session_id: str) -> None:
         """Bound the retrievable session-memory index to the most valuable N
@@ -80,6 +91,39 @@ class MemoryIndexer:
             RagCollection.SESSION_MEMORY,
             [memory.id for memory in surplus],
         )
+
+    def _index_persona_memories(self, memories: Sequence[MemoryEpisode]) -> None:
+        """Cross-session NPC memory: high-value PLAYER-visible episodes are also
+        indexed per actor, so a later session with the same persona retrieves them
+        (retrieval already searches persona_memory filtered by persona_id)."""
+        lasting = [
+            memory
+            for memory in memories
+            if memory.visibility is Visibility.PLAYER
+            and memory.actor_id
+            and memory.importance >= PERSONA_MEMORY_IMPORTANCE_FLOOR
+        ]
+        if not lasting:
+            return
+        chunks = [
+            self._to_chunk(memory).model_copy(
+                update={
+                    "source_type": RagCollection.PERSONA_MEMORY.value,
+                    # RetrievalFilter.player_visible(persona_id=...) filters on the
+                    # chunk's persona_id payload field, not actor_id -- the actor_id
+                    # is preserved for provenance/display but persona_id drives the
+                    # cross-session retrieval filter (see app/rag/vector_store.py
+                    # _chunk_matches_filters / _build_qdrant_filter).
+                    "persona_id": memory.actor_id,
+                }
+            )
+            for memory in lasting
+        ]
+        vectors = self.embedding_provider.embed_batch([chunk.text for chunk in chunks])
+        self.vector_store.ensure_collection(
+            RagCollection.PERSONA_MEMORY, self.embedding_provider.dimension
+        )
+        self.vector_store.upsert_chunks(RagCollection.PERSONA_MEMORY, chunks, vectors)
 
     @staticmethod
     def _eviction_sort_key(memory: MemoryEpisode) -> tuple[int, float, str]:
