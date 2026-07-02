@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -51,9 +51,11 @@ class StubMemoryCurator:
         self.result = result
         self.error = error
         self.calls = 0
+        self.curate_calls: list[dict[str, object]] = []
 
-    async def curate(self, **_: object) -> Any:
+    async def curate(self, **kwargs: object) -> Any:
         self.calls += 1
+        self.curate_calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return self.result
@@ -1274,3 +1276,44 @@ async def test_run_deferred_memory_writes_and_updates_diagnostics(tmp_path: Path
     stored = orchestrator.turn_repository.list_all_turns("demo-session")[-1]
     assert stored.diagnostics is not None
     assert stored.diagnostics.memory_written is True
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_memory_uses_original_turns_scene_and_persona(
+    tmp_path: Path,
+) -> None:
+    # Regression test: a scene/persona switch landing between the response and the
+    # deferred job running must NOT cause the job to curate/attribute the turn's
+    # memories under the NEW scene/persona. run_deferred_memory must use the job's
+    # pinned scene_id/persona_id (captured from the turn at defer-time), not the
+    # session's live (possibly since-switched) fields.
+    provider = FakeProvider()
+    fake_curator = StubMemoryCurator(
+        result=MemoryCuratorResult(write_memory=False, reason="not exercised")
+    )
+    orchestrator = _build_orchestrator(tmp_path, provider, memory_curator=fake_curator)
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+        active_persona_id="archivist",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input, defer_memory=True)
+    assert result.deferred_memory is not None
+    assert result.deferred_memory.scene_id == "rose-gallery"
+    assert result.deferred_memory.persona_id == "archivist"
+
+    # Switch the session's live persona AFTER the turn was generated/persisted but
+    # BEFORE the deferred job runs -- exactly the race this fix closes.
+    orchestrator.session_repository.update_active_persona("demo-session", "warden")
+
+    await orchestrator.run_deferred_memory(result.deferred_memory)
+
+    assert fake_curator.calls == 1
+    curate_kwargs = fake_curator.curate_calls[0]
+    persona = cast(PersonaCard, curate_kwargs["persona"])
+    scene = cast(SceneState, curate_kwargs["scene"])
+    # The curator must see the ORIGINAL turn's persona (archivist), never the
+    # switched-to persona (warden) that is now live on the session.
+    assert persona.id == "archivist"
+    assert scene.id == "rose-gallery"

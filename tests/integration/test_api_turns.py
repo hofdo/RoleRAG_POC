@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.api.routes import get_read_services, get_turn_services, stream_turn
 from app.api.schemas import CreateTurnRequest
 from app.composition import AppServices
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.domain import (
     CriticResult,
     PersonaCard,
@@ -34,6 +34,24 @@ from app.persistence import (
 )
 from app.persistence.sqlite import connect_sqlite, initialize_database, serialize_datetime
 from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
+
+
+@pytest.fixture(autouse=True)
+def _isolate_deferred_memory_settings(tmp_path: Path) -> Iterator[None]:
+    # Every test in this module exercises POST /turns or /turns/stream, which
+    # schedules a deferred memory job (app.api.routes._schedule_deferred_memory).
+    # That job builds its OWN AppServices from Settings resolved via the
+    # get_settings dependency -- it does NOT reuse the fake services injected via
+    # get_turn_services/get_read_services overrides below. Without overriding
+    # get_settings too, the deferred job falls back to a real Settings() and
+    # touches data/rolerag.db in the repo's CWD during `make check`. Point it at
+    # a per-test tmp_path database instead so no test suite run has real DB
+    # side effects.
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(tmp_path / "deferred-memory-settings.db")
+    )
+    yield
+    app.dependency_overrides.pop(get_settings, None)
 
 
 class SequencedFakeProvider(LlmProvider):
@@ -1272,6 +1290,95 @@ def test_delete_last_turn_reroll_flow_deletes_memories_and_unindexes(
     assert response.status_code == 200
     body = response.json()
     assert body["deleted_memory_count"] == 1
+    assert memory_repository.list_memories_for_session("session-1") == []
+    assert memory_indexer.unindexed_calls == [[memory_id]]
+
+
+@pytest.mark.asyncio
+async def test_delete_last_turn_drains_in_flight_deferred_memory_job_before_sweeping(
+    tmp_path: Path,
+) -> None:
+    # Regression test for the reroll-vs-deferred-curation race: if a deferred memory
+    # job for the turn being deleted is still in flight when DELETE /turns/last runs,
+    # the job can write that turn's memories AFTER the sweep, resurrecting them.
+    # delete_last_turn must drain (await) every pending _DEFERRED_MEMORY_TASKS entry
+    # FIRST, so the job's write lands before delete_memories_since runs and gets
+    # deleted along with the rest of the turn's memories.
+    #
+    # Calls routes.delete_last_turn directly (like
+    # test_event_stream_cancels_in_flight_turn_on_client_disconnect does for
+    # stream_turn) rather than through TestClient, so the in-flight task and the
+    # endpoint call share the same event loop -- TestClient drives requests on its
+    # own portal loop, which would make a task inserted from this test's loop
+    # unawaitable from inside the endpoint.
+    from app.api import routes
+
+    services, _, memory_repository, memory_indexer = _build_services_with_memory(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+    assert create.status_code == 200
+    app.dependency_overrides.clear()
+
+    assert services.turn_repository is not None
+    stored_turn = services.turn_repository.list_all_turns("session-1")[0]
+    assert stored_turn.created_at is not None
+
+    # A controllable stand-in for a still-running deferred memory job: it blocks on
+    # an Event and, once released, writes a memory row timestamped at the deleted
+    # turn -- exactly what the real deferred job would do. Inserted directly into
+    # _DEFERRED_MEMORY_TASKS to simulate "job scheduled, not yet finished" without
+    # depending on real curation timing.
+    release = asyncio.Event()
+    memory_id = "mem-from-in-flight-job"
+
+    async def slow_deferred_job() -> None:
+        await release.wait()
+        services.connection.execute(
+            """
+            INSERT INTO memory_episodes (
+                id, session_id, scene_id, actor_id, summary, importance,
+                visibility, tags_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                memory_id,
+                "session-1",
+                "rose-gallery",
+                "archivist",
+                "Written by the in-flight deferred job.",
+                3,
+                Visibility.PLAYER.value,
+                "[]",
+                serialize_datetime(stored_turn.created_at),
+            ),
+        )
+        services.connection.commit()
+
+    task = asyncio.ensure_future(slow_deferred_job())
+    routes._DEFERRED_MEMORY_TASKS.add(task)
+    task.add_done_callback(routes._DEFERRED_MEMORY_TASKS.discard)
+
+    # Release the job shortly after delete_last_turn starts awaiting the drain, so
+    # the ordering is genuinely exercised rather than the job finishing beforehand.
+    async def release_soon() -> None:
+        await asyncio.sleep(0.01)
+        release.set()
+
+    releaser = asyncio.ensure_future(release_soon())
+    body = await routes.delete_last_turn(session_id="session-1", services=services)
+    await releaser
+
+    assert task.done()  # the drain awaited the job to completion
+
+    # If delete_last_turn had swept BEFORE draining, this row (written by the job
+    # after release) would still be present. Draining first means the sweep's
+    # delete_memories_since call happens after the write, so it is included.
+    assert body.deleted_memory_count == 1
     assert memory_repository.list_memories_for_session("session-1") == []
     assert memory_indexer.unindexed_calls == [[memory_id]]
 

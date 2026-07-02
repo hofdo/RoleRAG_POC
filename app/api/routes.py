@@ -352,6 +352,11 @@ async def stream_turn(
                 while not queue.empty():
                     yield queue.get_nowait()
                 result = await turn
+                # Schedule immediately once the turn has actually completed, before
+                # the frame-yield loop below: a client disconnect while frames are
+                # being yielded closes this generator (GeneratorExit) and must not
+                # be able to skip scheduling the deferred memory job.
+                _schedule_deferred_memory(result, settings)
             except ApiError as exc:
                 # The HTTP status is already 200 once streaming starts; errors must
                 # travel as a terminal frame instead.
@@ -363,7 +368,6 @@ async def stream_turn(
                 result, text_chunk_chars=settings.sse_text_chunk_chars
             ):
                 yield out
-            _schedule_deferred_memory(result, settings)
         finally:
             # If the client disconnects (or any other early exit closes this
             # generator) before the turn finished, cancel it so it doesn't run
@@ -377,6 +381,12 @@ async def stream_turn(
                 turn.cancel()
                 with suppress(asyncio.CancelledError):
                     await turn
+            elif not turn.cancelled():
+                # Retrieve the exception (if any) so asyncio doesn't log a
+                # "never retrieved" warning for a turn that completed with an
+                # exception we already handled (or that raced past handling
+                # because the generator was closed first).
+                turn.exception()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -521,10 +531,20 @@ def get_turn_detail(
     response_model=DeleteLastTurnResponse,
     responses=ERROR_404_RESPONSE,
 )
-def delete_last_turn(
+async def delete_last_turn(
     session_id: str,
     services: Annotated[AppServices, Depends(get_turn_services)],
 ) -> DeleteLastTurnResponse:
+    # A reroll can race a still-running deferred memory job for the very turn being
+    # deleted: create_turn/stream_turn return before curation finishes, so the job
+    # may write the rerolled turn's memories AFTER this sweep runs, resurrecting
+    # them. Drain (don't cancel) every pending job first -- cancelling could leave
+    # a half-written memory; draining is self-healing because the job's writes
+    # land before delete_memories_since runs and are then deleted along with the
+    # rest of the turn's memories.
+    pending = [task for task in _DEFERRED_MEMORY_TASKS if not task.done()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     _require_session(services, session_id)
     if services.turn_repository is None:
         raise RuntimeError("Turn services must include a turn repository")

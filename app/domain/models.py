@@ -187,10 +187,19 @@ class TurnDiagnostics(BaseModel):
 
 
 class DeferredMemoryJob(BaseModel):
-    """Inputs the memory stage needs when it runs after the response is sent."""
+    """Inputs the memory stage needs when it runs after the response is sent.
+
+    scene_id/persona_id pin the job to the scene and persona the turn was actually
+    generated under -- NOT whatever the session's live fields say when the job runs.
+    A scene or persona switch that lands between the response and the deferred job
+    executing must not cause the job to curate/attribute memories to the new
+    scene/persona instead of the turn's original one.
+    """
 
     session_id: str
     turn_id: int
+    scene_id: str
+    persona_id: str
     user_message: str
     assistant_message: str
     retrieval_confidence: float | None

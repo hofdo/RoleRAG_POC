@@ -458,6 +458,8 @@ class TurnOrchestrator:
                 deferred_memory=DeferredMemoryJob(
                     session_id=context.session.id,
                     turn_id=persistence.turn.id,
+                    scene_id=persistence.turn.scene_id,
+                    persona_id=persistence.turn.persona_id,
                     user_message=turn_input.message,
                     assistant_message=final_text,
                     retrieval_confidence=retrieval.confidence,
@@ -504,15 +506,18 @@ class TurnOrchestrator:
     async def run_deferred_memory(self, job: DeferredMemoryJob) -> None:
         """Memory stage for an already-persisted turn, after the response was sent.
 
-        Loads persona/scene via session_stage using the session's *currently stored*
-        active_persona_id. If Task 7's deferred persona-switch commit fired for this
-        turn, that commit already landed (run_turn commits it before scheduling this
-        job), so this always sees the switched persona -- never the pre-turn one.
+        Loads persona/scene from job.scene_id/job.persona_id -- the scene and persona
+        the turn was actually generated under -- rather than the session's *current*
+        live fields. The session's active scene/persona can change between the
+        response being sent and this job running (a scene switch or a later turn's
+        persona override), and using the live fields would mis-attribute this turn's
+        memories to whatever is active when the job happens to run instead of what
+        was active when the turn happened.
         """
         session = self.session_stage.resume_session(job.session_id)
         loader = self.session_stage.loader_for_content_root(session.content_root)
-        persona = loader.load_persona(session.active_persona_id)
-        scene = loader.load_scene(session.active_scene_id)
+        persona = loader.load_persona(job.persona_id)
+        scene = loader.load_scene(job.scene_id)
         memory = await self.memory_stage.run(
             session=session,
             scene=scene,
