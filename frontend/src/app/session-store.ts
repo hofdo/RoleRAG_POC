@@ -267,4 +267,27 @@ export class SessionStore {
       this.canonError.set(`Fact not deleted. ${errorMessage(error)}`);
     }
   }
+
+  // Delete the last turn (and any memories written after it) and resend the same
+  // player message. The delete step manages its own busy flag; the resend delegates
+  // to sendMessage, which manages busy for the turn itself.
+  async rerollLast(): Promise<void> {
+    const sessionId = this.sessionId();
+    if (!sessionId || this.busy()) return;
+    const lastPlayer = [...this.transcript()].reverse().find((e) => e.role === 'player');
+    if (!lastPlayer) return;
+    this.turnError.set(null);
+    this.busy.set(true);
+    try {
+      await this.api.deleteLastTurn(sessionId);
+      this.transcript.update((all) => all.slice(0, -2));
+    } catch (error) {
+      this.turnError.set(errorMessage(error));
+      return;
+    } finally {
+      this.busy.set(false);
+    }
+    await this.sendMessage(lastPlayer.text, false);
+    void this.refreshMemories();
+  }
 }

@@ -46,6 +46,14 @@ import { SessionStore } from '../session-store';
         <button type="button" class="send" (click)="send()" [disabled]="sendDisabled()">
           Send
         </button>
+        <button
+          type="button"
+          class="ghost"
+          (click)="store.rerollLast()"
+          [disabled]="store.busy() || !store.sessionId()"
+        >
+          Reroll last
+        </button>
       </div>
 
       @if (store.turnError(); as error) {

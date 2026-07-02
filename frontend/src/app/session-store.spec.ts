@@ -3,6 +3,7 @@ import { ApiError, ApiService } from './api.service';
 import { SessionStore } from './session-store';
 import type {
   CreateTurnRequest,
+  DeleteLastTurnResponse,
   GetSessionResponse,
   RecentSessionsResponse,
   SessionTurnDetailsResponse,
@@ -105,6 +106,18 @@ class FakeApi {
   deleteCanonFact(_sessionId: string, _factId: string): Promise<void> {
     if (this.failPanels) return Promise.reject(new Error('backend down'));
     return Promise.resolve();
+  }
+  deleteLastTurnCalls: string[] = [];
+  deleteLastTurnShouldFail = false;
+  deleteLastTurn(sessionId: string): Promise<DeleteLastTurnResponse> {
+    this.deleteLastTurnCalls.push(sessionId);
+    if (this.deleteLastTurnShouldFail) return Promise.reject(new Error('delete failed'));
+    return Promise.resolve({
+      session_id: sessionId,
+      deleted_turn_index: 1,
+      user_message: 'a question',
+      deleted_memory_count: 0,
+    });
   }
   getSession(_sessionId: string): Promise<GetSessionResponse> {
     return Promise.resolve(sessionDetailFixture);
@@ -239,6 +252,67 @@ describe('SessionStore turn flow', () => {
     const { store } = setup();
     expect(await store.confirmCloud()).toBeTrue();
     expect(await store.forceLocal()).toBeTrue();
+  });
+});
+
+describe('SessionStore rerollLast', () => {
+  it('deletes the last turn, drops it from the transcript, and resends the message', async () => {
+    const { store, api } = setup();
+    api.next = completedTurn('an answer');
+    await store.sendMessage('a question', false);
+    expect(store.transcript().length).toBe(2);
+
+    api.next = completedTurn('a reroll answer');
+    await store.rerollLast();
+
+    expect(api.deleteLastTurnCalls).toEqual(['s1']);
+    expect(store.transcript().map((e) => [e.role, e.text])).toEqual([
+      ['player', 'a question'],
+      ['assistant', 'a reroll answer'],
+    ]);
+    expect(store.busy()).toBe(false);
+  });
+
+  it('is a no-op without an active session', async () => {
+    const { store, api } = setup();
+    store.session.set(null);
+
+    await store.rerollLast();
+
+    expect(api.deleteLastTurnCalls).toEqual([]);
+  });
+
+  it('is a no-op when there is no player turn in the transcript', async () => {
+    const { store, api } = setup();
+
+    await store.rerollLast();
+
+    expect(api.deleteLastTurnCalls).toEqual([]);
+  });
+
+  it('is a no-op while busy', async () => {
+    const { store, api } = setup();
+    api.next = completedTurn('an answer');
+    await store.sendMessage('a question', false);
+    store.busy.set(true);
+
+    await store.rerollLast();
+
+    expect(api.deleteLastTurnCalls).toEqual([]);
+  });
+
+  it('surfaces a delete failure, leaves the transcript intact, and does not resend', async () => {
+    const { store, api } = setup();
+    api.next = completedTurn('an answer');
+    await store.sendMessage('a question', false);
+    api.deleteLastTurnShouldFail = true;
+
+    await store.rerollLast();
+
+    expect(store.turnError()).toContain('delete failed');
+    expect(store.transcript().length).toBe(2);
+    expect(store.busy()).toBe(false);
+    expect(api.calls.length).toBe(1); // no resend attempted
   });
 });
 

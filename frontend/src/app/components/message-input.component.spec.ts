@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { ApiService } from '../api.service';
 import { SessionStore } from '../session-store';
 import { MessageInputComponent } from './message-input.component';
-import type { CreateTurnRequest, TurnResult } from '../models';
+import type { CreateTurnRequest, DeleteLastTurnResponse, TurnResult } from '../models';
 
 class FakeApi {
   calls: CreateTurnRequest[] = [];
@@ -25,6 +25,14 @@ class FakeApi {
   }
   getSessionMemories(): Promise<{ session_id: string; memories: [] }> {
     return Promise.resolve({ session_id: 's1', memories: [] });
+  }
+  deleteLastTurn(sessionId: string): Promise<DeleteLastTurnResponse> {
+    return Promise.resolve({
+      session_id: sessionId,
+      deleted_turn_index: 1,
+      user_message: 'hello',
+      deleted_memory_count: 0,
+    });
   }
 }
 
@@ -111,5 +119,39 @@ describe('MessageInputComponent', () => {
     const { fixture } = make();
     const c = fixture.componentInstance;
     expect(c.stageLabel('mystery')).toBe('mystery');
+  });
+
+  it('disables Reroll last with no session or while busy', () => {
+    const { fixture, store } = make();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rerollButton = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Reroll last',
+    ) as HTMLButtonElement;
+
+    expect(rerollButton.disabled).toBe(true); // no session
+
+    store.session.set({ session_id: 's1', world_id: 'w', active_scene_id: 'sc', active_persona_id: 'p' });
+    fixture.detectChanges();
+    expect(rerollButton.disabled).toBe(false);
+
+    store.busy.set(true);
+    fixture.detectChanges();
+    expect(rerollButton.disabled).toBe(true);
+  });
+
+  it('Reroll last click delegates to store.rerollLast()', () => {
+    const { fixture, store } = make();
+    store.session.set({ session_id: 's1', world_id: 'w', active_scene_id: 'sc', active_persona_id: 'p' });
+    spyOn(store, 'rerollLast').and.resolveTo();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rerollButton = Array.from(el.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'Reroll last',
+    ) as HTMLButtonElement;
+
+    rerollButton.click();
+
+    expect(store.rerollLast).toHaveBeenCalled();
   });
 });

@@ -185,6 +185,13 @@ export interface AddCanonFactRequest {
   text: string;
 }
 
+export interface DeleteLastTurnResponse {
+  session_id: string;
+  deleted_turn_index: number;
+  user_message: string;
+  deleted_memory_count: number;
+}
+
 export interface EvalRunSummary {
   id: string;
   status: string;

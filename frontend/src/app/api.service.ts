@@ -7,6 +7,7 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   CreateTurnRequest,
+  DeleteLastTurnResponse,
   EvalRunDetail,
   EvalRunsResponse,
   GetSessionResponse,
@@ -250,6 +251,12 @@ export class ApiService {
     if (!response.ok) {
       await throwApiError(response);
     }
+  }
+
+  deleteLastTurn(sessionId: string): Promise<DeleteLastTurnResponse> {
+    return requestJson(`/sessions/${encodeURIComponent(sessionId)}/turns/last`, {
+      method: 'DELETE',
+    });
   }
 
   // Buffered turn over SSE (/turns/stream). Resolves once the terminal event arrives.
