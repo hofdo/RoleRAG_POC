@@ -122,6 +122,11 @@ class TurnRepairStage:
             user_message=user_message,
             draft=repaired_text,
             retrieved_chunks=retrieval.chunks,
+            # Without this, route_provider defaults to LOCAL and the re-check critic
+            # would be routed to the local provider even on a cloud session -- the
+            # same session-provider affinity the repair route itself already respects
+            # two lines up.
+            route_provider=context.session.provider,
         )
         warnings.extend(repaired_critique.warnings)
         if repaired_critique.failed:

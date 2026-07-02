@@ -110,6 +110,9 @@ class CriticAgent:
         actor_messages: Sequence[LlmMessage],
         issues: Sequence[str],
     ) -> list[LlmMessage]:
+        # Currently uncalled: TurnRepairStage.run uses build_local_repair_messages on
+        # both providers (repair route follows the session provider, not a separate
+        # cloud escalation). Kept in case cloud repair ever needs a distinct prompt.
         repair_lines = [
             "Rewrite the response to fix critique issues.",
             f"Issues: {', '.join(issues) if issues else 'unspecified critique rejection'}",

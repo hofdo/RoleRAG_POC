@@ -1175,6 +1175,102 @@ async def test_cloud_session_runs_critic_and_memory_on_cloud_without_secrets(
     assert "mirrored column" not in all_cloud_text  # scene.gm_private_summary
 
 
+@pytest.mark.asyncio
+async def test_cloud_session_repair_path_sends_no_hidden_content_to_cloud(
+    tmp_path: Path,
+) -> None:
+    # Repair-path privacy pin: the plain-accept critic in the test above means
+    # TurnRepairStage.run never fires, so the repair request built by the real
+    # CriticAgent.build_local_repair_messages (used on BOTH providers -- see
+    # TurnRepairStage.run) and dispatched to the cloud provider was never checked for
+    # hidden-content leakage. Force one rejection so a repair pass actually runs, then
+    # scan every recorded cloud request (actor draft, critic reject, repair draft,
+    # critic re-check, memory extraction) for the hidden fixture strings.
+    from app.agents.critic_agent import CriticAgent
+    from app.agents.memory_curator import MemoryCurator
+
+    class ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("local provider must never be called for a cloud session")
+
+    class CloudRepairDialogueProvider(LlmProvider):
+        """Answers actor (plain text) and critic/memory (structured JSON) requests.
+
+        The first critic call REJECTS the draft (with a paraphrased, non-verbatim
+        issue/repair_instruction -- never the literal hidden fixture strings) so
+        TurnRepairStage.run actually executes; the re-check critic call ACCEPTS so the
+        turn resolves as REPAIRED instead of CONTROLLED_FAILURE.
+        """
+
+        def __init__(self) -> None:
+            self.requests: list[LlmRequest] = []
+            self._critic_calls = 0
+
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            self.requests.append(request)
+            task = request.metadata.get("task")
+            if task == "critic":
+                self._critic_calls += 1
+                if self._critic_calls == 1:
+                    text = (
+                        '{"accepted": false, '
+                        '"issues": ["mentions the hidden cipher"], '
+                        '"repair_instruction": "Do not reference any hidden cipher or spy."}'
+                    )
+                else:
+                    text = '{"accepted": true, "issues": [], "repair_instruction": null}'
+            elif task == "memory_extraction":
+                text = '{"write_memory": false, "memories": [], "reason": "nothing durable"}'
+            else:
+                text = "I have heard enough to know the regent fears open daylight."
+            return LlmResponse(
+                text=text,
+                provider="cloud",
+                model=request.model,
+                usage={"total_tokens": 20},
+                finish_reason="stop",
+            )
+
+    cloud_provider = CloudRepairDialogueProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        ExplodingProvider(),
+        cloud_provider=cloud_provider,
+        session_provider=ModelProviderName.CLOUD,
+        critic=cast(Any, CriticAgent()),
+        memory_curator=MemoryCurator(),
+        memory_indexer=StubMemoryIndexer(),
+        loader=_HiddenContentLoader(),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    assert result.critic_status == CriticStatus.REPAIRED
+    assert result.route.provider == ModelProviderName.CLOUD
+
+    tasks = [request.metadata.get("task") for request in cloud_provider.requests]
+    assert tasks.count("critic") == 2  # initial rejection + re-check after repair
+    # The repair request itself has no "task" metadata (see TurnGenerationStage /
+    # build_local_repair_messages), so it must be identified by its distinctive repair
+    # prompt content rather than by metadata["task"].
+    all_cloud_text = " ".join(
+        message.content for request in cloud_provider.requests for message in request.messages
+    )
+    assert "Revise your previous roleplay draft." in all_cloud_text
+
+    # The hidden-content fixture strings must never reach the cloud provider on ANY
+    # request (actor, critic reject, repair, critic re-check, memory).
+    assert "cipher key" not in all_cloud_text  # persona.secrets
+    assert "poisoning" not in all_cloud_text  # persona.forbidden_knowledge
+    assert "mirrored column" not in all_cloud_text  # scene.gm_private_summary
+
+
 class FirstOnlyProvider(LlmProvider):
     """Returns one draft, then fails — exercises repair failure paths."""
 
