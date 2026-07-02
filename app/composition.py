@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from app.agents import CriticAgent, MemoryCurator
@@ -102,12 +103,25 @@ def build_structured_failure_sink(settings: Settings) -> StructuredOutputFailure
     return StructuredOutputFailureSink(directory=settings.structured_output_failure_log_dir)
 
 
+@lru_cache(maxsize=4)
+def _cached_embedding_provider(model_name: str) -> FastEmbedEmbeddingProvider:
+    return FastEmbedEmbeddingProvider(model_name=model_name)
+
+
 def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    return FastEmbedEmbeddingProvider(model_name=settings.embedding_model)
+    # ponytail: process-wide cache — the fastembed ONNX model was reloaded from
+    # disk on every HTTP request otherwise; move to app.state lifespan if
+    # per-settings isolation ever matters
+    return _cached_embedding_provider(settings.embedding_model)
+
+
+@lru_cache(maxsize=4)
+def _cached_vector_store(url: str) -> QdrantVectorStore:
+    return QdrantVectorStore(url=url)
 
 
 def build_vector_store(settings: Settings) -> VectorStore:
-    return QdrantVectorStore(url=settings.qdrant_url)
+    return _cached_vector_store(settings.qdrant_url)
 
 
 def build_ranking_weights(settings: Settings) -> RankingWeights:
