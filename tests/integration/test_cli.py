@@ -350,6 +350,135 @@ def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> 
     assert len(context_retriever.calls) == 1
 
 
+def test_cli_start_session_defaults_to_local_provider(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["provider"] == "local"
+
+
+def test_cli_start_session_cloud_rejected_when_cloud_mode_off(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "demo-session",
+            "--skip-lore-ingest",
+            "--provider",
+            "cloud",
+        ],
+        env={
+            "DATABASE_PATH": str(tmp_path / "sessions.db"),
+            "CLOUD_MODE": "off",
+            "CLOUD_LLM_API_KEY": "real-cloud-key",
+        },
+    )
+
+    assert result.exit_code == 1
+    assert "CLOUD_MODE=ask|auto" in result.output
+
+
+def test_cli_start_session_cloud_rejected_when_no_usable_key(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "demo-session",
+            "--skip-lore-ingest",
+            "--provider",
+            "cloud",
+        ],
+        env={
+            "DATABASE_PATH": str(tmp_path / "sessions.db"),
+            "CLOUD_MODE": "auto",
+            "CLOUD_LLM_API_KEY": "replace_me",
+        },
+    )
+
+    assert result.exit_code == 1
+    assert "CLOUD_MODE=ask|auto" in result.output
+
+
+def test_cli_start_session_cloud_ask_confirms_before_creating(tmp_path: Path) -> None:
+    confirmed = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "demo-session",
+            "--skip-lore-ingest",
+            "--provider",
+            "cloud",
+        ],
+        env={
+            "DATABASE_PATH": str(tmp_path / "sessions.db"),
+            "CLOUD_MODE": "ask",
+            "CLOUD_LLM_API_KEY": "real-cloud-key",
+        },
+        input="y\n",
+    )
+
+    assert confirmed.exit_code == 0
+    json_body = confirmed.stdout[confirmed.stdout.index("{") :]
+    assert json.loads(json_body)["provider"] == "cloud"
+
+
+def test_cli_start_session_cloud_ask_aborts_on_decline(tmp_path: Path) -> None:
+    declined = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "declined-session",
+            "--skip-lore-ingest",
+            "--provider",
+            "cloud",
+        ],
+        env={
+            "DATABASE_PATH": str(tmp_path / "sessions.db"),
+            "CLOUD_MODE": "ask",
+            "CLOUD_LLM_API_KEY": "real-cloud-key",
+        },
+        input="n\n",
+    )
+
+    assert declined.exit_code == 1
+    resume_result = runner.invoke(
+        app,
+        ["resume", "--session-id", "declined-session"],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+    assert resume_result.exit_code == 1
+
+
+def test_cli_start_session_cloud_auto_skips_confirmation(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "start-session",
+            "--session-id",
+            "auto-session",
+            "--skip-lore-ingest",
+            "--provider",
+            "cloud",
+        ],
+        env={
+            "DATABASE_PATH": str(tmp_path / "sessions.db"),
+            "CLOUD_MODE": "auto",
+            "CLOUD_LLM_API_KEY": "real-cloud-key",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["provider"] == "cloud"
+
+
 def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
     pack_root = tmp_path / "pack"
     _write_scenario_pack(pack_root)

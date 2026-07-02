@@ -181,6 +181,151 @@ def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -
     assert "updated_at" not in payload
 
 
+def test_post_sessions_defaults_to_local_provider(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["provider"] == "local"
+
+
+def test_create_cloud_session_rejected_when_cloud_mode_off(tmp_path: Path) -> None:
+    database_path = tmp_path / "api-sessions.db"
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        cloud_mode=CloudMode.OFF,
+        cloud_llm_api_key="real-cloud-key",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "provider": "cloud",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "cloud_unavailable"
+
+
+def test_create_cloud_session_rejected_when_no_usable_key(tmp_path: Path) -> None:
+    database_path = tmp_path / "api-sessions.db"
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        cloud_mode=CloudMode.AUTO,
+        cloud_llm_api_key="replace_me",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "provider": "cloud",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "cloud_unavailable"
+
+
+def test_create_cloud_session_succeeds_when_configured(tmp_path: Path) -> None:
+    database_path = tmp_path / "api-sessions.db"
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        cloud_mode=CloudMode.AUTO,
+        cloud_llm_api_key="real-cloud-key",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "provider": "cloud",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["provider"] == "cloud"
+
+
+def test_create_cloud_session_allowed_when_cloud_mode_ask(tmp_path: Path) -> None:
+    # ask vs auto is a client-side confirmation concern (Task 5's SPA); the API
+    # itself allows both once a usable key is configured.
+    database_path = tmp_path / "api-sessions.db"
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        cloud_mode=CloudMode.ASK,
+        cloud_llm_api_key="real-cloud-key",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "provider": "cloud",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["provider"] == "cloud"
+
+
+def test_post_sessions_rejects_invalid_provider_value(tmp_path: Path) -> None:
+    app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "demo_world",
+            "scene_id": "rose-gallery",
+            "player_name": "Player",
+            "active_persona_id": "archivist",
+            "provider": "quantum",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_get_sessions_returns_recent_safe_metadata_only(tmp_path: Path) -> None:
     services = _build_services(tmp_path)
     created_at = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)

@@ -23,7 +23,7 @@ from app.composition import (
     build_vector_store,
     redact_settings,
 )
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.content import (
     ContentValidationReport,
     ScenarioTemplateResult,
@@ -39,7 +39,7 @@ from app.diagnostics import (
 )
 from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
-from app.llm.router import ModelProviderName, ModelRoute, ModelTask, choose_route
+from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
@@ -351,8 +351,26 @@ def start_session(
         bool,
         typer.Option("--skip-lore-ingest", help="Do not auto-index scenario lore on start"),
     ] = False,
+    provider: Annotated[
+        ModelProviderName,
+        typer.Option(help="Provider this session is bound to for its lifetime"),
+    ] = ModelProviderName.LOCAL,
 ) -> None:
     settings = get_settings()
+    if provider == ModelProviderName.CLOUD:
+        if settings.cloud_mode == CloudMode.OFF or not is_usable_cloud_api_key(
+            settings.cloud_llm_api_key
+        ):
+            typer.secho(
+                "Cloud sessions need CLOUD_MODE=ask|auto and a configured cloud API key.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(code=1)
+        if settings.cloud_mode == CloudMode.ASK:
+            typer.confirm(
+                "Send this session's turns to the cloud provider?",
+                abort=True,
+            )
     resolved_content_root = content_root or settings.content_root
     services = _build_services(
         settings,
@@ -367,6 +385,7 @@ def start_session(
             player_name=player_name,
             session_id=session_id,
             content_root=str(resolved_content_root),
+            provider=provider,
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
         services.close()

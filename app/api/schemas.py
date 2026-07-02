@@ -33,6 +33,7 @@ class CreateSessionRequest(BaseModel):
     scene_id: str = Field(min_length=1, max_length=200)
     player_name: str = Field(min_length=1, max_length=200)
     active_persona_id: str = Field(min_length=1, max_length=200)
+    provider: str = Field(default="local", pattern="^(local|cloud)$")
 
 
 class CreateSessionResponse(BaseModel):
@@ -40,6 +41,7 @@ class CreateSessionResponse(BaseModel):
     world_id: str
     active_scene_id: str
     active_persona_id: str
+    provider: str
 
 
 class UpdateSceneRequest(BaseModel):

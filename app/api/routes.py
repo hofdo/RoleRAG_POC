@@ -52,6 +52,7 @@ from app.domain import (
     TurnResult,
 )
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
+from app.llm.router import CloudMode, ModelProviderName
 from app.orchestration.turn_errors import classify_warnings
 from app.persistence import (
     ContentCatalogError,
@@ -215,13 +216,24 @@ def get_content_catalog(
 def create_session(
     request: CreateSessionRequest,
     services: Annotated[AppServices, Depends(get_read_services)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> CreateSessionResponse:
+    if request.provider == "cloud" and (
+        settings.cloud_mode == CloudMode.OFF
+        or not is_usable_cloud_api_key(settings.cloud_llm_api_key)
+    ):
+        raise ApiError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="cloud_unavailable",
+            message="Cloud sessions need CLOUD_MODE=ask|auto and a configured cloud API key.",
+        )
     try:
         session = services.orchestrator.create_session(
             world_id=request.world_id,
             scene_id=request.scene_id,
             active_persona_id=request.active_persona_id,
             player_name=request.player_name,
+            provider=ModelProviderName(request.provider),
         )
     except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
         raise ApiError(
@@ -234,6 +246,7 @@ def create_session(
         world_id=session.world_id,
         active_scene_id=session.active_scene_id,
         active_persona_id=session.active_persona_id,
+        provider=session.provider.value,
     )
 
 
@@ -274,6 +287,7 @@ def update_session_scene(
         world_id=session.world_id,
         active_scene_id=request.scene_id,
         active_persona_id=session.active_persona_id,
+        provider=session.provider.value,
     )
 
 
