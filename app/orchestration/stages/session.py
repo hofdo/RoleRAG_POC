@@ -98,14 +98,21 @@ class TurnSessionLoader:
     def load(self, turn_input: TurnInput) -> LoadedTurnContext:
         session = self.resume_session(turn_input.session_id)
         persona_id = session.active_persona_id
+        loader = self.loader_for_content_root(session.content_root)
+        world = loader.load_world(session.world_id)
         if (
             turn_input.active_persona_id is not None
             and turn_input.active_persona_id != persona_id
         ):
-            raise ValueError("Turn persona override does not match the stored session persona")
+            if turn_input.active_persona_id not in world.persona_ids:
+                raise ValueError(
+                    f"Unknown persona for world {session.world_id}: "
+                    f"{turn_input.active_persona_id}"
+                )
+            persona_id = turn_input.active_persona_id
+            self.session_repository.update_active_persona(session.id, persona_id)
+            session = session.model_copy(update={"active_persona_id": persona_id})
 
-        loader = self.loader_for_content_root(session.content_root)
-        world = loader.load_world(session.world_id)
         if persona_id not in world.persona_ids:
             raise ValueError(f"Unknown persona for world {session.world_id}: {persona_id}")
         if session.active_scene_id not in world.scene_ids:

@@ -36,6 +36,7 @@ from app.api.schemas import (
     SessionMemoriesResponse,
     SessionTurnDetailsResponse,
     TurnDetailResponse,
+    UpdateSceneRequest,
     to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames, serialize_error_frame, serialize_stage_frame
@@ -222,6 +223,46 @@ def create_session(
         session_id=session.id,
         world_id=session.world_id,
         active_scene_id=session.active_scene_id,
+        active_persona_id=session.active_persona_id,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/scene",
+    response_model=CreateSessionResponse,
+    responses={**ERROR_400_RESPONSE, **ERROR_404_RESPONSE},
+)
+def update_session_scene(
+    session_id: str,
+    request: UpdateSceneRequest,
+    services: Annotated[AppServices, Depends(get_read_services)],
+) -> CreateSessionResponse:
+    session = services.session_repository.get_session(session_id)
+    if session is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="session_not_found",
+            message=f"Unknown session id: {session_id}",
+        )
+    loader = services.orchestrator.loader_for_session(session)
+    try:
+        world = loader.load_world(session.world_id)
+        if request.scene_id not in world.scene_ids:
+            raise ValueError(
+                f"Unknown scene for world {session.world_id}: {request.scene_id}"
+            )
+        loader.load_scene(request.scene_id)
+    except (DataFileNotFoundError, DataValidationError, ValueError) as exc:
+        raise ApiError(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="invalid_scene",
+            message=_safe_request_error_message(exc),
+        ) from exc
+    services.session_repository.update_active_scene(session_id, request.scene_id)
+    return CreateSessionResponse(
+        session_id=session.id,
+        world_id=session.world_id,
+        active_scene_id=request.scene_id,
         active_persona_id=session.active_persona_id,
     )
 

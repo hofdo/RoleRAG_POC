@@ -42,6 +42,12 @@ class CreateSessionResponse(BaseModel):
     active_persona_id: str
 
 
+class UpdateSceneRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(min_length=1, max_length=200)
+
+
 class RecentSessionResponse(BaseModel):
     session_id: str
     world_id: str

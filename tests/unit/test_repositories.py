@@ -177,6 +177,32 @@ def test_session_repository_updates_activity_timestamp(tmp_path: Path) -> None:
     assert loaded.updated_at == later
 
 
+def test_update_active_scene_and_persona(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    session = session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    session_repository.update_active_scene(session.id, "east_wing")
+    session_repository.update_active_persona(session.id, "warden")
+    reloaded = session_repository.get_session(session.id)
+
+    assert reloaded is not None
+    assert reloaded.active_scene_id == "east_wing"
+    assert reloaded.active_persona_id == "warden"
+    assert reloaded.updated_at is not None
+    assert session.updated_at is not None
+    assert reloaded.updated_at >= session.updated_at
+
+
 def test_session_repository_lists_recent_sessions_with_limit_and_tie_breaker(
     tmp_path: Path,
 ) -> None:

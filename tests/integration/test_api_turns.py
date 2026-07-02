@@ -58,7 +58,7 @@ class FakeLoader:
             id=world_id,
             name="Winter Palace Intrigue",
             default_scene_id="rose-gallery",
-            persona_ids=["archivist"],
+            persona_ids=["archivist", "warden"],
             scene_ids=["rose-gallery"],
         )
 
@@ -515,7 +515,9 @@ def test_post_turn_returns_404_for_missing_session(tmp_path: Path) -> None:
     }
 
 
-def test_post_turn_rejects_persona_override_mismatch_with_400_envelope(tmp_path: Path) -> None:
+def test_post_turn_rejects_persona_override_for_unknown_persona_with_400_envelope(
+    tmp_path: Path,
+) -> None:
     services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
@@ -530,10 +532,29 @@ def test_post_turn_rejects_persona_override_mismatch_with_400_envelope(tmp_path:
     assert response.json() == {
         "error": {
             "code": "invalid_turn_request",
-            "message": "Turn persona override does not match the stored session persona",
+            "message": "Unknown persona for world demo_world: someone-else",
             "details": [],
         }
     }
+
+
+def test_post_turn_with_known_persona_override_switches_the_session_persona(
+    tmp_path: Path,
+) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Hello there.", "active_persona_id": "warden"},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    reloaded = services.session_repository.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "warden"
 
 
 def test_post_turn_returns_retrieval_failure_warning_in_success_response(tmp_path: Path) -> None:

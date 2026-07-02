@@ -34,6 +34,10 @@ class SessionRepository(Protocol):
 
     def update_session_activity(self, session_id: str, *, updated_at: datetime) -> None: ...
 
+    def update_active_scene(self, session_id: str, scene_id: str) -> None: ...
+
+    def update_active_persona(self, session_id: str, persona_id: str) -> None: ...
+
 
 class TurnRepository(Protocol):
     def append_turn(
@@ -206,6 +210,20 @@ class SQLiteSessionRepository:
         )
         self.connection.commit()
         return cursor.rowcount > 0
+
+    def update_active_scene(self, session_id: str, scene_id: str) -> None:
+        self.connection.execute(
+            "UPDATE sessions SET active_scene_id = ?, updated_at = ? WHERE id = ?",
+            (scene_id, serialize_datetime(utc_now()), session_id),
+        )
+        self.connection.commit()
+
+    def update_active_persona(self, session_id: str, persona_id: str) -> None:
+        self.connection.execute(
+            "UPDATE sessions SET active_persona_id = ?, updated_at = ? WHERE id = ?",
+            (persona_id, serialize_datetime(utc_now()), session_id),
+        )
+        self.connection.commit()
 
 
 class SQLiteTurnRepository:

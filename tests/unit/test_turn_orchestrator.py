@@ -124,21 +124,30 @@ class FakeLoader:
             id=world_id,
             name="Winter Palace Intrigue",
             default_scene_id="rose-gallery",
-            persona_ids=["archivist"],
+            persona_ids=["archivist", "warden"],
             scene_ids=["rose-gallery"],
         )
 
     def load_persona(self, persona_id: str) -> PersonaCard:
-        if persona_id != "archivist":
-            raise ValueError(f"Unknown persona: {persona_id}")
-        return PersonaCard(
-            id="archivist",
-            name=f"Iria Vale ({self.marker})",
-            role="npc",
-            public_description="A composed palace archivist.",
-            private_description="She is quietly aiding the coup.",
-            speaking_style="Precise and dry.",
-        )
+        if persona_id == "archivist":
+            return PersonaCard(
+                id="archivist",
+                name=f"Iria Vale ({self.marker})",
+                role="npc",
+                public_description="A composed palace archivist.",
+                private_description="She is quietly aiding the coup.",
+                speaking_style="Precise and dry.",
+            )
+        if persona_id == "warden":
+            return PersonaCard(
+                id="warden",
+                name=f"Corin Ashe ({self.marker})",
+                role="npc",
+                public_description="A gruff palace warden.",
+                private_description="He owes the archivist a debt.",
+                speaking_style="Blunt and clipped.",
+            )
+        raise ValueError(f"Unknown persona: {persona_id}")
 
     def load_scene(self, scene_id: str) -> SceneState:
         if scene_id != "rose-gallery":
@@ -246,6 +255,27 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
     }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
+
+
+@pytest.mark.asyncio
+async def test_persona_override_switches_the_session_persona(tmp_path: Path) -> None:
+    from app.domain import TurnOutcome
+
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="Hello",
+            active_persona_id="warden",
+        )
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    reloaded = orchestrator.session_repository.get_session("demo-session")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "warden"
 
 
 @pytest.mark.asyncio

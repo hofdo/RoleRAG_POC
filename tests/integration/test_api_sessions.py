@@ -35,7 +35,7 @@ class FakeLoader:
             name="Winter Palace Intrigue",
             default_scene_id="rose-gallery",
             persona_ids=["archivist"],
-            scene_ids=["rose-gallery"],
+            scene_ids=["rose-gallery", "east-wing"],
         )
 
     def load_persona(self, persona_id: str) -> PersonaCard:
@@ -53,15 +53,23 @@ class FakeLoader:
         )
 
     def load_scene(self, scene_id: str) -> SceneState:
-        if scene_id != "rose-gallery":
-            raise ValueError(f"Unknown scene: {scene_id}")
-        return SceneState(
-            id="rose-gallery",
-            title="Rose Gallery",
-            location="Winter Palace",
-            player_visible_summary="Courtiers drift between mirrors and roses.",
-            gm_private_summary="A loyalist listener waits in the south alcove.",
-        )
+        if scene_id == "rose-gallery":
+            return SceneState(
+                id="rose-gallery",
+                title="Rose Gallery",
+                location="Winter Palace",
+                player_visible_summary="Courtiers drift between mirrors and roses.",
+                gm_private_summary="A loyalist listener waits in the south alcove.",
+            )
+        if scene_id == "east-wing":
+            return SceneState(
+                id="east-wing",
+                title="East Wing",
+                location="Winter Palace",
+                player_visible_summary="A cold corridor lined with portraits.",
+                gm_private_summary="The regent's ledger is hidden behind a portrait.",
+            )
+        raise ValueError(f"Unknown scene: {scene_id}")
 
 
 def _build_services(tmp_path: Path) -> AppServices:
@@ -910,6 +918,47 @@ def test_get_session_memories_returns_404_for_unknown_session(tmp_path: Path) ->
     client = TestClient(app)
 
     response = client.get("/sessions/missing/memories")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 404
+
+
+def test_update_session_scene(tmp_path: Path) -> None:
+    from app.api.routes import get_read_services
+
+    services = _build_services(tmp_path)
+    services.session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post("/sessions/session-1/scene", json={"scene_id": "east-wing"})
+    invalid = client.post("/sessions/session-1/scene", json={"scene_id": "nope"})
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()["active_scene_id"] == "east-wing"
+    assert invalid.status_code == 400
+    reloaded = services.session_repository.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_scene_id == "east-wing"
+
+
+def test_update_session_scene_returns_404_for_missing_session(tmp_path: Path) -> None:
+    from app.api.routes import get_read_services
+
+    services = _build_services(tmp_path)
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post("/sessions/missing-session/scene", json={"scene_id": "east-wing"})
 
     app.dependency_overrides.clear()
     assert response.status_code == 404
