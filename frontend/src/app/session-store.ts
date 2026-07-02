@@ -52,6 +52,7 @@ export class SessionStore {
   readonly memories = signal<MemoryEpisode[]>([]);
   readonly canonFacts = signal<CanonFact[]>([]);
   readonly busy = signal<boolean>(false);
+  readonly currentStage = signal<string | null>(null);
   readonly turnError = signal<string | null>(null);
   readonly loadError = signal<string | null>(null);
   // Side-panel failures surface here instead of silently showing stale data.
@@ -162,12 +163,16 @@ export class SessionStore {
     if (!sessionId) return;
     this.busy.set(true);
     this.turnError.set(null);
+    this.currentStage.set(null);
     try {
-      const turn = await this.api.createBufferedTurn(sessionId, request);
+      const turn = await this.api.createBufferedTurn(sessionId, request, {
+        onStage: (stage) => this.currentStage.set(stage),
+      });
       this.applyTurn(message, turn);
     } catch (error) {
       this.turnError.set(errorMessage(error));
     } finally {
+      this.currentStage.set(null);
       this.busy.set(false);
     }
   }

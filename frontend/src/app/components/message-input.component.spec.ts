@@ -73,4 +73,28 @@ describe('MessageInputComponent', () => {
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.confirm-banner')).not.toBeNull();
   });
+
+  it('shows the current stage label while busy', () => {
+    const { fixture, store } = make();
+    store.busy.set(true);
+    store.currentStage.set('retrieval');
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.stage')?.textContent).toContain('Retrieving memories');
+  });
+
+  it('hides the stage line when not busy', () => {
+    const { fixture, store } = make();
+    store.busy.set(false);
+    store.currentStage.set('retrieval');
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.stage')).toBeNull();
+  });
+
+  it('falls back to the raw stage name for an unknown stage', () => {
+    const { fixture } = make();
+    const c = fixture.componentInstance;
+    expect(c.stageLabel('mystery')).toBe('mystery');
+  });
 });

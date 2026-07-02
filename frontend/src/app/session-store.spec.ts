@@ -35,9 +35,17 @@ class FakeApi {
   calls: { sessionId: string; request: CreateTurnRequest }[] = [];
   next: TurnResult = completedTurn('hello');
   failPanels = false;
+  stagesToEmit: string[] = [];
 
-  createBufferedTurn(sessionId: string, request: CreateTurnRequest): Promise<TurnResult> {
+  createBufferedTurn(
+    sessionId: string,
+    request: CreateTurnRequest,
+    options?: { onStage?: (stage: string) => void },
+  ): Promise<TurnResult> {
     this.calls.push({ sessionId, request });
+    for (const stage of this.stagesToEmit) {
+      options?.onStage?.(stage);
+    }
     return Promise.resolve(this.next);
   }
   getSessionMemories(): Promise<{ session_id: string; memories: [] }> {
@@ -134,6 +142,25 @@ describe('SessionStore turn flow', () => {
     store.session.set(null);
     await store.sendMessage('nope', false);
     expect(api.calls).toEqual([]);
+  });
+
+  it('clears currentStage after the turn completes', async () => {
+    const { store, api } = setup();
+    api.stagesToEmit = ['session', 'retrieval', 'generation'];
+
+    await store.sendMessage('a question', false);
+
+    expect(store.currentStage()).toBeNull();
+  });
+
+  it('clears currentStage even when the turn fails', async () => {
+    const { store, api } = setup();
+    api.createBufferedTurn = () => Promise.reject(new Error('boom'));
+
+    await store.sendMessage('a question', false);
+
+    expect(store.currentStage()).toBeNull();
+    expect(store.turnError()).toContain('boom');
   });
 });
 

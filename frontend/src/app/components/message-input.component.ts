@@ -7,6 +7,9 @@ import { SessionStore } from '../session-store';
   imports: [],
   template: `
     <section class="composer">
+      @if (store.busy() && store.currentStage(); as stage) {
+        <p class="stage">{{ stageLabel(stage) }}…</p>
+      }
       @if (store.pendingConfirm(); as confirm) {
         <div class="confirm-banner">
           <p>Cloud route requested for this turn.</p>
@@ -61,6 +64,7 @@ import { SessionStore } from '../session-store';
       .confirm-banner p { margin: 0 0 0.5rem; }
       .confirm-actions { display: flex; gap: 0.5rem; }
       .error { color: var(--danger); margin: 0; }
+      .stage { color: var(--muted); font-size: 0.8rem; margin: 0; }
     `,
   ],
 })
@@ -73,6 +77,22 @@ export class MessageInputComponent {
   readonly sendDisabled = computed(
     () => this.store.busy() || !this.store.sessionId() || this.draft().trim().length === 0,
   );
+
+  private static readonly STAGE_LABELS: Record<string, string> = {
+    session: 'Loading session',
+    retrieval: 'Retrieving memories',
+    routing: 'Choosing route',
+    generation: 'Drafting reply',
+    validation: 'Checking draft',
+    critique: 'Critic reviewing',
+    repair: 'Repairing draft',
+    persistence: 'Saving turn',
+    memory: 'Updating memory',
+  };
+
+  stageLabel(stage: string): string {
+    return MessageInputComponent.STAGE_LABELS[stage] ?? stage;
+  }
 
   send(): void {
     void this.store.sendMessage(this.draft().trim(), this.requestCloud());

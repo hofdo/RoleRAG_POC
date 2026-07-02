@@ -66,7 +66,20 @@ async function requestJson<T>(
 
 // --- SSE buffered-turn parsing (ported from api-client.mjs:247-333) ---
 
-function applyEvent(result: TurnResult, eventName: string, payload: any): boolean {
+function applyEvent(
+  result: TurnResult,
+  eventName: string,
+  payload: any,
+  onStage?: (stage: string) => void,
+): boolean {
+  if (eventName === 'stage') {
+    onStage?.(String((payload as { stage?: unknown }).stage ?? ''));
+    return false;
+  }
+  if (eventName === 'error') {
+    const p = payload as { code?: string; message?: string; status?: number };
+    throw new ApiError(p.code ?? 'stream_error', p.message ?? 'Turn failed.', p.status ?? 502);
+  }
   if (eventName === 'text') {
     result.text += payload.text;
     return false;
@@ -94,7 +107,11 @@ function applyEvent(result: TurnResult, eventName: string, payload: any): boolea
   return false;
 }
 
-function parseFrame(result: TurnResult, frame: string): boolean {
+function parseFrame(
+  result: TurnResult,
+  frame: string,
+  onStage?: (stage: string) => void,
+): boolean {
   let eventName = 'message';
   const dataLines: string[] = [];
   for (const line of frame.split('\n')) {
@@ -114,10 +131,13 @@ function parseFrame(result: TurnResult, frame: string): boolean {
     // A corrupt frame must surface as a typed stream error, not a raw SyntaxError.
     throw new ApiError('invalid_stream', 'The backend event stream sent a malformed frame.', 502);
   }
-  return applyEvent(result, eventName, payload);
+  return applyEvent(result, eventName, payload, onStage);
 }
 
-async function parseEventStream(response: Response): Promise<TurnResult> {
+async function parseEventStream(
+  response: Response,
+  onStage?: (stage: string) => void,
+): Promise<TurnResult> {
   if (!response.body) {
     throw new ApiError('invalid_stream', 'The backend returned an empty event stream.', 502);
   }
@@ -142,14 +162,14 @@ async function parseEventStream(response: Response): Promise<TurnResult> {
     buffer = buffer.replaceAll('\r\n', '\n');
     let boundary = buffer.indexOf('\n\n');
     while (boundary >= 0) {
-      terminal = parseFrame(result, buffer.slice(0, boundary)) || terminal;
+      terminal = parseFrame(result, buffer.slice(0, boundary), onStage) || terminal;
       buffer = buffer.slice(boundary + 2);
       boundary = buffer.indexOf('\n\n');
     }
   }
   buffer += decoder.decode();
   if (buffer.trim()) {
-    terminal = parseFrame(result, buffer.trim()) || terminal;
+    terminal = parseFrame(result, buffer.trim(), onStage) || terminal;
   }
   if (!terminal || !result.route) {
     throw new ApiError('invalid_stream', 'The backend event stream ended unexpectedly.', 502);
@@ -236,7 +256,7 @@ export class ApiService {
   async createBufferedTurn(
     sessionId: string,
     request: CreateTurnRequest,
-    { timeoutMs = STREAM_TIMEOUT_MS }: { timeoutMs?: number } = {},
+    { timeoutMs = STREAM_TIMEOUT_MS, onStage }: { timeoutMs?: number; onStage?: (stage: string) => void } = {},
   ): Promise<TurnResult> {
     const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/turns/stream`, {
       method: 'POST',
@@ -252,6 +272,6 @@ export class ApiService {
     if (!response.ok) {
       await throwApiError(response);
     }
-    return parseEventStream(response);
+    return parseEventStream(response, onStage);
   }
 }
