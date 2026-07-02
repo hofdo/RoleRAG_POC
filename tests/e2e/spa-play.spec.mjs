@@ -9,7 +9,9 @@ test("SPA creates a session, runs a local turn, and inspects it", async ({ page 
 
   // Shell + setup picker present, catalog loaded.
   await expect(page.getByText("RoleRAG").first()).toBeVisible();
-  await expect(page.getByLabel("World")).toBeEnabled();
+  // Role + exact name: getByLabel("World") is substring/case-insensitive and can
+  // also match the resume select once its selected option text contains a world id.
+  await expect(page.getByRole("combobox", { name: "World", exact: true })).toBeEnabled();
 
   await page.getByLabel("Player name").fill("Playwright");
   await page.getByRole("button", { name: "Start session" }).click();
