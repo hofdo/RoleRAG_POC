@@ -291,6 +291,11 @@ async def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
         fixture.primary_persona_forbidden_knowledge,
         fixture.scene_gm_only_text,
     )
+    # private_description is asserted as defense-in-depth only: no prompt builder
+    # references it today (structural absence, not an include_hidden gate) -- the
+    # three load-bearing strings are secret / forbidden_knowledge / gm_private_summary.
+    # Memory extraction has no include_hidden gate: its prompt omits hidden fields
+    # structurally (MemoryCurator._build_context interpolates only ids/names/dialogue).
     cloud_critic_prompt_carries_no_hidden_content = all(
         hidden not in all_cloud_text for hidden in hidden_strings
     )

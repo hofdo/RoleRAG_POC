@@ -128,6 +128,11 @@ async def test_cloud_critic_prompt_carries_no_hidden_content() -> None:
     all_cloud_text = " ".join(
         message.content for request in cloud_provider.requests for message in request.messages
     )
+    # private_description is asserted as defense-in-depth only: no prompt builder
+    # references it today (structural absence, not an include_hidden gate) -- the
+    # three load-bearing strings are secret / forbidden_knowledge / gm_private_summary.
+    # Memory extraction has no include_hidden gate: its prompt omits hidden fields
+    # structurally (MemoryCurator._build_context interpolates only ids/names/dialogue).
     assert fixture.primary_persona_secret not in all_cloud_text
     assert fixture.primary_persona_private_description not in all_cloud_text
     assert fixture.primary_persona_forbidden_knowledge not in all_cloud_text
