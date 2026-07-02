@@ -22,6 +22,7 @@ from app.api.schemas import (
     CreateSessionResponse,
     CreateTurnRequest,
     CreateTurnResponse,
+    DeleteLastTurnResponse,
     ErrorResponse,
     EvalRunsResponse,
     EvalRunSummary,
@@ -433,6 +434,45 @@ def get_turn_detail(
             message=f"Unknown turn index: {turn_index}",
         )
     return _to_turn_detail_response(stored_turn)
+
+
+@router.delete(
+    "/sessions/{session_id}/turns/last",
+    response_model=DeleteLastTurnResponse,
+    responses=ERROR_404_RESPONSE,
+)
+def delete_last_turn(
+    session_id: str,
+    services: Annotated[AppServices, Depends(get_turn_services)],
+) -> DeleteLastTurnResponse:
+    _require_session(services, session_id)
+    if services.turn_repository is None:
+        raise RuntimeError("Turn services must include a turn repository")
+    turn = services.turn_repository.delete_last_turn(session_id)
+    if turn is None:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="no_turns",
+            message="Session has no turns to delete.",
+        )
+    deleted_memory_ids: list[str] = []
+    if services.memory_repository is not None and turn.created_at is not None:
+        # ponytail: provenance by timestamp (memories are written after the turn is
+        # persisted); add a turn_id column to memory_episodes if this ever misfires
+        deleted_memory_ids = services.memory_repository.delete_memories_since(
+            session_id, turn.created_at
+        )
+    if deleted_memory_ids and services.memory_indexer is not None:
+        try:
+            services.memory_indexer.unindex(deleted_memory_ids)
+        except Exception:  # noqa: BLE001 - index cleanup is best-effort; SQLite is authoritative
+            pass
+    return DeleteLastTurnResponse(
+        session_id=session_id,
+        deleted_turn_index=turn.turn_index,
+        user_message=turn.user_message,
+        deleted_memory_count=len(deleted_memory_ids),
+    )
 
 
 @router.get(

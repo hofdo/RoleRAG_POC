@@ -47,6 +47,7 @@ class AppServices:
     turn_repository: TurnRepository | None = None
     memory_repository: MemoryRepository | None = None
     canon_repository: CanonRepository | None = None
+    memory_indexer: MemoryIndexer | None = None
 
     def close(self) -> None:
         self.connection.close()
@@ -205,6 +206,17 @@ def build_services(
     )
     embedding_provider = build_embedding_provider(settings) if enable_retrieval else None
     vector_store = build_vector_store(settings) if enable_retrieval else None
+    memory_indexer = (
+        MemoryIndexer(
+            memory_store=memory_store,
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+            importance_floor=settings.rag_index_importance_floor,
+            session_memory_max_episodes=settings.session_memory_max_episodes,
+        )
+        if embedding_provider is not None and vector_store is not None
+        else None
+    )
     orchestrator = TurnOrchestrator(
         loader=build_file_loader(resolved_content_root),
         loader_factory=build_file_loader,
@@ -216,17 +228,7 @@ def build_services(
         recent_dialogue_store=recent_dialogue_store,
         memory_store=memory_store,
         memory_curator=build_memory_curator(settings),
-        memory_indexer=(
-            MemoryIndexer(
-                memory_store=memory_store,
-                embedding_provider=embedding_provider,
-                vector_store=vector_store,
-                importance_floor=settings.rag_index_importance_floor,
-                session_memory_max_episodes=settings.session_memory_max_episodes,
-            )
-            if embedding_provider is not None and vector_store is not None
-            else None
-        ),
+        memory_indexer=memory_indexer,
         actor_context_retriever=(
             build_actor_context_retriever(
                 settings,
@@ -249,4 +251,5 @@ def build_services(
         turn_repository=turn_repository,
         memory_repository=memory_repository,
         canon_repository=canon_repository,
+        memory_indexer=memory_indexer,
     )

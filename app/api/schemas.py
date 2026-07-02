@@ -196,6 +196,13 @@ class RecentTurnResponse(BaseModel):
     created_at: datetime
 
 
+class DeleteLastTurnResponse(BaseModel):
+    session_id: str
+    deleted_turn_index: int
+    user_message: str
+    deleted_memory_count: int
+
+
 class MemoryEpisodeResponse(BaseModel):
     id: str
     scene_id: str

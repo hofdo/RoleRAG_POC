@@ -1025,6 +1025,43 @@ def test_api_get_turn_detail_returns_404_for_unknown_session(tmp_path: Path) -> 
     assert response.json()["error"]["code"] == "session_not_found"
 
 
+def test_delete_last_turn_reroll_flow(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+    assert create.status_code == 200
+
+    response = client.delete("/sessions/session-1/turns/last")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "session-1"
+    assert body["deleted_turn_index"] == 1
+    assert body["user_message"] == "I ask what the locked door hides."
+    assert body["deleted_memory_count"] == 0
+
+    second = client.delete("/sessions/session-1/turns/last")
+    app.dependency_overrides.clear()
+    assert second.status_code == 404
+
+
+def test_delete_last_turn_returns_404_for_unknown_session(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.delete("/sessions/missing-session/turns/last")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "session_not_found"
+
+
 def test_api_get_turn_detail_returns_404_for_unknown_turn_index(tmp_path: Path) -> None:
     services, _ = _build_in_memory_retrieval_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services

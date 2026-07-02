@@ -394,6 +394,72 @@ def test_turn_repository_lists_all_turns_in_order(tmp_path: Path) -> None:
     assert listed[0].user_message == "player message 1"
 
 
+def test_delete_last_turn_removes_and_returns_it(tmp_path: Path) -> None:
+    _, turns, _ = _seed_session_with_data(tmp_path)
+
+    deleted = turns.delete_last_turn("session-1")
+
+    assert deleted is not None and deleted.turn_index == 3
+    remaining = turns.list_all_turns("session-1")
+    assert [t.turn_index for t in remaining] == [1, 2]
+    assert turns.delete_last_turn("missing-session") is None
+
+
+def test_delete_memories_since_removes_only_at_or_after_cutoff(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    first = memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="First memory.",
+                visibility=Visibility.PLAYER,
+                importance=2,
+                tags=["first"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )[0]
+    second = memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="Second memory.",
+                visibility=Visibility.PLAYER,
+                importance=2,
+                tags=["second"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )[0]
+    # Cutoff sits strictly between the two timestamps (both were captured after
+    # append_memories persisted, so `second.created_at` is a safe upper bound
+    # that is also >= itself — the comparison below is exclusive of `first`).
+    assert first.created_at is not None
+    assert second.created_at is not None
+    assert second.created_at > first.created_at
+    cutoff = first.created_at + (second.created_at - first.created_at) / 2
+
+    deleted_ids = memory_repository.delete_memories_since("session-1", cutoff)
+
+    assert deleted_ids == [second.id]
+    assert [m.id for m in memory_repository.list_memories_for_session("session-1")] == [first.id]
+
+
 def test_turn_repository_persists_and_loads_diagnostics(tmp_path: Path) -> None:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)

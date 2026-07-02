@@ -55,6 +55,8 @@ class TurnRepository(Protocol):
 
     def count_turns(self, session_id: str) -> int: ...
 
+    def delete_last_turn(self, session_id: str) -> StoredTurn | None: ...
+
 
 class MemoryRepository(Protocol):
     def append_memories(
@@ -71,6 +73,8 @@ class MemoryRepository(Protocol):
     ) -> list[MemoryEpisode]: ...
 
     def add_tag_to_memories(self, memory_ids: list[str], tag: str) -> None: ...
+
+    def delete_memories_since(self, session_id: str, created_at: datetime) -> list[str]: ...
 
 
 class CanonRepository(Protocol):
@@ -341,6 +345,17 @@ class SQLiteTurnRepository:
         ).fetchone()
         return int(row["count"])
 
+    def delete_last_turn(self, session_id: str) -> StoredTurn | None:
+        row = self.connection.execute(
+            "SELECT * FROM turns WHERE session_id = ? ORDER BY turn_index DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        self.connection.execute("DELETE FROM turns WHERE id = ?", (row["id"],))
+        self.connection.commit()
+        return self._row_to_turn(row)
+
     def _row_to_turn(self, row: sqlite3.Row) -> StoredTurn:
         return StoredTurn(
             id=row["id"],
@@ -488,6 +503,21 @@ class SQLiteMemoryRepository:
                 (json.dumps(tags), row["id"]),
             )
         self.connection.commit()
+
+    def delete_memories_since(self, session_id: str, created_at: datetime) -> list[str]:
+        cutoff = serialize_datetime(created_at)
+        rows = self.connection.execute(
+            "SELECT id FROM memory_episodes WHERE session_id = ? AND created_at >= ?",
+            (session_id, cutoff),
+        ).fetchall()
+        ids = [row["id"] for row in rows]
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            self.connection.execute(
+                f"DELETE FROM memory_episodes WHERE id IN ({placeholders})", ids
+            )
+            self.connection.commit()
+        return ids
 
 
 class SQLiteCanonRepository:
