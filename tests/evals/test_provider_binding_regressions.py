@@ -4,7 +4,12 @@ import pytest
 
 from app.domain import TurnInput, TurnOutcome
 from app.evals.fixtures import build_eval_fixture
-from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.llm.provider import (
+    LlmProvider,
+    LlmRequest,
+    LlmResponse,
+    ProviderUnavailableError,
+)
 from app.llm.router import ModelProviderName, ModelTask, choose_route
 
 
@@ -106,6 +111,32 @@ async def test_cloud_session_runs_all_tasks_on_cloud() -> None:
     tasks = [request.metadata.get("task") for request in cloud_provider.requests]
     assert "critic" in tasks
     assert "memory_extraction" in tasks
+
+
+@pytest.mark.asyncio
+async def test_cloud_session_turn_raises_provider_unavailable_when_cloud_provider_missing() -> (
+    None
+):
+    # A cloud session is bound to cloud for its whole lifetime -- there is no per-turn
+    # fallback to local. If the cloud API key is removed after the session was created
+    # (cloud_provider=None on restart), a turn must fail as a clean
+    # ProviderUnavailableError (API 503), not a bare RuntimeError (API 500).
+    fixture = build_eval_fixture()
+    orchestrator, _, _ = fixture.build_full_stack_orchestrator(
+        session_provider=ModelProviderName.CLOUD,
+        actor_response_text="Cloud answer",
+    )
+    orchestrator.cloud_provider = None
+    orchestrator.generation_stage.cloud_provider = None
+    orchestrator.critique_stage.cloud_provider = None
+    orchestrator.memory_stage.cloud_provider = None
+
+    with pytest.raises(ProviderUnavailableError) as exc_info:
+        await orchestrator.run_turn(
+            turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
+        )
+
+    assert exc_info.value.provider == "cloud"
 
 
 @pytest.mark.asyncio
