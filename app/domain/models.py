@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.domain.visibility import Visibility
-from app.llm.router import ModelRoute
+from app.llm.router import ModelProviderName, ModelRoute
 
 
 class PersonaCard(BaseModel):
@@ -45,6 +45,9 @@ class SessionState(BaseModel):
     active_persona_id: str
     player_name: str
     content_root: str = "data"
+    # Bound at creation, immutable for the session's lifetime: the ONE provider
+    # that runs actor, repair, critic, and memory for every turn.
+    provider: ModelProviderName = ModelProviderName.LOCAL
     recent_turn_ids: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None

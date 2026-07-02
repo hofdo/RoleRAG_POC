@@ -759,3 +759,36 @@ def test_list_recent_turns_excludes_controlled_failures(tmp_path: Path) -> None:
     assert [turn.user_message for turn in recent] == ["Question 1", "Question 3"]
     # The unfiltered view still returns everything (Inspector / resume).
     assert len(turn_repository.list_all_turns("session-1")) == 3
+
+
+def test_session_provider_round_trips_and_defaults_to_local(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    repository = SQLiteSessionRepository(connection)
+    repository.create_session(
+        SessionState(
+            id="cloud-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+            provider=ModelProviderName.CLOUD,
+        )
+    )
+    repository.create_session(
+        SessionState(
+            id="local-session",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    cloud = repository.get_session("cloud-session")
+    local = repository.get_session("local-session")
+    assert cloud is not None and cloud.provider == ModelProviderName.CLOUD
+    assert local is not None and local.provider == ModelProviderName.LOCAL
+    assert {s.id: s.provider for s in repository.list_recent_sessions(10)} == {
+        "cloud-session": ModelProviderName.CLOUD,
+        "local-session": ModelProviderName.LOCAL,
+    }

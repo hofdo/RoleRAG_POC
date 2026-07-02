@@ -5,6 +5,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from app.domain import PersonaCard, SceneState, SessionState, StoredTurn, TurnInput
+from app.llm.router import ModelProviderName
 from app.memory import RecentDialogueStore
 from app.memory.store import MemoryEpisodeStore
 from app.orchestration.canon_builder import build_standing_facts
@@ -74,6 +75,7 @@ class TurnSessionLoader:
         player_name: str,
         session_id: str | None = None,
         content_root: str | None = None,
+        provider: ModelProviderName = ModelProviderName.LOCAL,
     ) -> SessionState:
         resolved_content_root = content_root or self.content_root
         loader = self.loader_for_content_root(resolved_content_root)
@@ -92,6 +94,7 @@ class TurnSessionLoader:
                 active_persona_id=active_persona_id,
                 player_name=player_name,
                 content_root=resolved_content_root,
+                provider=provider,
             )
         )
 

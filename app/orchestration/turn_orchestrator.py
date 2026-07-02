@@ -26,6 +26,7 @@ from app.llm.router import (
     HIGH_SCENE_COMPLEXITY,
     LOW_RETRIEVAL_CONFIDENCE,
     CloudMode,
+    ModelProviderName,
     ModelRoute,
 )
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
@@ -270,6 +271,7 @@ class TurnOrchestrator:
         player_name: str,
         session_id: str | None = None,
         content_root: str | None = None,
+        provider: ModelProviderName = ModelProviderName.LOCAL,
     ) -> SessionState:
         return self.session_stage.create_session(
             world_id=world_id,
@@ -278,6 +280,7 @@ class TurnOrchestrator:
             player_name=player_name,
             session_id=session_id,
             content_root=content_root,
+            provider=provider,
         )
 
     def resume_session(self, session_id: str) -> SessionState:

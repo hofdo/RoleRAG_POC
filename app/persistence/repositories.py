@@ -118,9 +118,10 @@ class SQLiteSessionRepository:
                 active_persona_id,
                 player_name,
                 content_root,
+                provider,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created.id,
@@ -129,6 +130,7 @@ class SQLiteSessionRepository:
                 created.active_persona_id,
                 created.player_name,
                 created.content_root,
+                created.provider.value,
                 serialize_datetime(created_at),
                 serialize_datetime(updated_at),
             ),
@@ -146,6 +148,7 @@ class SQLiteSessionRepository:
                 active_persona_id,
                 player_name,
                 content_root,
+                provider,
                 created_at,
                 updated_at
             FROM sessions
@@ -155,6 +158,11 @@ class SQLiteSessionRepository:
         ).fetchone()
         if row is None:
             return None
+        provider = (
+            ModelProviderName(row["provider"])
+            if "provider" in row.keys()
+            else ModelProviderName.LOCAL
+        )
         return SessionState(
             id=row["id"],
             world_id=row["world_id"],
@@ -162,6 +170,7 @@ class SQLiteSessionRepository:
             active_persona_id=row["active_persona_id"],
             player_name=row["player_name"],
             content_root=row["content_root"],
+            provider=provider,
             created_at=parse_datetime(row["created_at"]),
             updated_at=parse_datetime(row["updated_at"]),
         )
@@ -178,6 +187,7 @@ class SQLiteSessionRepository:
                 active_persona_id,
                 player_name,
                 content_root,
+                provider,
                 created_at,
                 updated_at
             FROM sessions
@@ -194,6 +204,11 @@ class SQLiteSessionRepository:
                 active_persona_id=row["active_persona_id"],
                 player_name=row["player_name"],
                 content_root=row["content_root"],
+                provider=(
+                    ModelProviderName(row["provider"])
+                    if "provider" in row.keys()
+                    else ModelProviderName.LOCAL
+                ),
                 created_at=parse_datetime(row["created_at"]),
                 updated_at=parse_datetime(row["updated_at"]),
             )
