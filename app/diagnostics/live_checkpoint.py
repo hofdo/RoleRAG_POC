@@ -433,10 +433,7 @@ def run_checkpoint(
                 f"empty actor text on turn {turn_index}",
             )
             response = cast(str, raw_response)
-            _require(
-                route.get("provider") != "controlled_failure",
-                f"controlled failure on turn {turn_index}: {route}",
-            )
+            outcome = str(turn.get("outcome") or "success")
             _require(
                 route.get("provider") == "local",
                 f"unexpected route provider on turn {turn_index}: {route}",
@@ -455,6 +452,7 @@ def run_checkpoint(
                     "turn_index": turn_index,
                     "prompt": prompt,
                     "response": response,
+                    "outcome": outcome,
                     "response_chars": len(response),
                     "duration_seconds": round(duration_seconds, 3),
                     "route": route,
@@ -470,7 +468,10 @@ def run_checkpoint(
 
         lookup = _get_json(client, f"/sessions/{session_id}")
 
-    expected_recent = list(messages[-min(turn_count, 8) :])
+    # Controlled-failure turns are persisted but excluded from the recent-dialogue
+    # view, so the expected window is the last 8 *successful* prompts.
+    successful_prompts = [turn["prompt"] for turn in turns if turn["outcome"] == "success"]
+    expected_recent = list(successful_prompts[-min(len(successful_prompts), 8) :])
     actual_recent = [
         turn.get("user_message")
         for turn in lookup.get("recent_turns", [])
@@ -551,6 +552,11 @@ def run_checkpoint(
         "lookup_recent_turn_count": len(actual_recent),
         "warning_counts": total_warning_counts,
         "quality_metrics": {
+            # Report-only: fail-closed turns are model quality, not an
+            # infrastructure failure; the operator reads the number.
+            "controlled_failure_count": sum(
+                1 for turn in turns if turn["outcome"] != "success"
+            ),
             "memory_extraction_misses": sum(not event["extracted"] for event in event_payloads),
             "callback_recall_misses": sum(not event["recalled"] for event in event_payloads),
             "retrieval_selection_misses": sum(

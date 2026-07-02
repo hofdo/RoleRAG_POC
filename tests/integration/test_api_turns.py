@@ -445,6 +445,7 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     errors = payload.pop("errors")
     assert payload == {
         "status": "completed",
+        "outcome": "success",
         "text": "Only archivists and locksmiths speak of that door.",
         "route": {
             "provider": "local",
@@ -992,6 +993,8 @@ def test_post_turn_stream_reconstructs_non_streaming_response(tmp_path: Path) ->
     assert reconstructed.pop("stage_timings")
     assert json_payload.pop("stage_timings")
     assert json_payload.pop("status") == "completed"
+    # The final SSE frame doesn't carry outcome (failure frames do); the JSON body does.
+    assert json_payload.pop("outcome") == "success"
     assert reconstructed == json_payload
 
 
@@ -1081,6 +1084,39 @@ def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(
     assert isinstance(failure_text, str)
     assert "could not produce a response that passed validation" in failure_text
     assert "hidden context" not in response.text
+    assert events[0][1]["outcome"] == "controlled_failure"
+
+
+def test_controlled_failure_turn_is_persisted_but_excluded_from_recent_view(
+    tmp_path: Path,
+) -> None:
+    services, provider, _ = _build_services(tmp_path)
+    provider.responses.append("The rejected draft still contains hidden context.")
+    services.orchestrator.critic_agent = RejectingCritic()
+    services.orchestrator.cloud_mode = CloudMode.OFF
+    app.dependency_overrides[get_turn_services] = lambda: services
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Tell me the hidden truth."},
+    )
+    details = client.get("/sessions/session-1/turn-details")
+    lookup = client.get("/sessions/session-1")
+
+    app.dependency_overrides.clear()
+    body = response.json()
+    assert response.status_code == 200
+    assert body["outcome"] == "controlled_failure"
+    # Persisted with diagnostics and visible in the unfiltered history...
+    detail_turns = details.json()["turns"]
+    assert len(detail_turns) == 1
+    assert detail_turns[0]["outcome"] == "controlled_failure"
+    assert detail_turns[0]["user_message"] == "Tell me the hidden truth."
+    assert detail_turns[0]["warnings"]
+    # ...but excluded from the recent-dialogue view that feeds prompts.
+    assert lookup.json()["recent_turns"] == []
 
 
 def test_post_turn_returns_504_envelope_when_local_provider_times_out(tmp_path: Path) -> None:

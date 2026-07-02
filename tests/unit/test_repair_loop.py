@@ -334,11 +334,15 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
         ],
         "retrieval": None,
     }
-    assert turn_repository.count_turns("demo-session") == 0
+    # New contract: the failed turn persists (outcome flag, queryable diagnostics)
+    # but never re-enters the recent-dialogue prompt context.
+    stored = turn_repository.list_all_turns("demo-session")
+    assert [turn.outcome.value for turn in stored] == ["controlled_failure"]
+    assert turn_repository.list_recent_turns("demo-session", limit=8) == []
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_fails_closed_and_persists_nothing_when_critic_fails(
+async def test_orchestrator_fails_closed_and_records_failed_turn_when_critic_fails(
     tmp_path: Path,
 ) -> None:
     from app.domain import TurnOutcome
@@ -360,7 +364,11 @@ async def test_orchestrator_fails_closed_and_persists_nothing_when_critic_fails(
     assert result.memory_written is False
     assert "critic skipped: invalid critic output" in result.warnings
     assert "draft withheld: critic validation unavailable" in result.warnings
-    assert turn_repository.count_turns("demo-session") == 0
+    # New contract: the failed turn persists (outcome flag, queryable diagnostics)
+    # but never re-enters the recent-dialogue prompt context.
+    stored = turn_repository.list_all_turns("demo-session")
+    assert [turn.outcome.value for turn in stored] == ["controlled_failure"]
+    assert turn_repository.list_recent_turns("demo-session", limit=8) == []
 
 
 @pytest.mark.asyncio
@@ -471,4 +479,8 @@ async def test_repair_recheck_critic_error_fails_closed(tmp_path: Path) -> None:
     assert result.critic_status == CriticStatus.REJECTED
     assert "Repaired but unvalidated draft" not in result.text
     assert "could not produce a response" in result.text.lower()
-    assert turn_repository.count_turns("demo-session") == 0
+    # New contract: the failed turn persists (outcome flag, queryable diagnostics)
+    # but never re-enters the recent-dialogue prompt context.
+    stored = turn_repository.list_all_turns("demo-session")
+    assert [turn.outcome.value for turn in stored] == ["controlled_failure"]
+    assert turn_repository.list_recent_turns("demo-session", limit=8) == []

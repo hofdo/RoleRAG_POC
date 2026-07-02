@@ -310,6 +310,11 @@ async def test_persona_override_is_not_persisted_when_the_turn_fails(tmp_path: P
     reloaded = orchestrator.session_repository.get_session("demo-session")
     assert reloaded is not None
     assert reloaded.active_persona_id == "archivist"
+    # The failed turn is persisted (with the attempted persona on the row), but
+    # the session-level persona switch still must not commit.
+    stored = orchestrator.turn_repository.list_all_turns("demo-session")
+    assert [turn.outcome for turn in stored] == [TurnOutcome.CONTROLLED_FAILURE]
+    assert stored[0].persona_id == "warden"
 
 
 @pytest.mark.asyncio
@@ -752,6 +757,7 @@ async def test_turn_orchestrator_retries_once_after_empty_actor_response(
 async def test_turn_orchestrator_returns_controlled_failure_for_repeated_empty_responses(
     tmp_path: Path,
 ) -> None:
+    from app.domain import TurnOutcome
     from app.orchestration.turn_orchestrator import CONTROLLED_FAILURE_TEXT
 
     provider = SequencedProvider(["", ""])
@@ -766,6 +772,15 @@ async def test_turn_orchestrator_returns_controlled_failure_for_repeated_empty_r
     assert result.memory_written is False
     assert len(provider.requests) == 2
     assert any("empty" in warning for warning in result.warnings)
+    # The failed turn stays in history: the player's message survives with
+    # queryable diagnostics, but it never re-enters the prompt context.
+    stored = orchestrator.turn_repository.list_all_turns("demo-session")
+    assert [turn.outcome for turn in stored] == [TurnOutcome.CONTROLLED_FAILURE]
+    assert stored[0].user_message == "What now?"
+    assert stored[0].assistant_message == CONTROLLED_FAILURE_TEXT
+    assert stored[0].diagnostics is not None
+    assert any("empty" in warning for warning in stored[0].diagnostics.warnings)
+    assert orchestrator.recent_dialogue_store.load_recent_dialogue("demo-session") == []
 
 
 class FinishReasonScriptedProvider(LlmProvider):
