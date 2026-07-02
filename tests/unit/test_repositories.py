@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -16,7 +18,7 @@ from app.persistence.repositories import (
     SQLiteSessionRepository,
     SQLiteTurnRepository,
 )
-from app.persistence.sqlite import connect_sqlite, initialize_database
+from app.persistence.sqlite import connect_sqlite, initialize_database, serialize_datetime
 
 
 def _build_route() -> ModelRoute:
@@ -458,6 +460,108 @@ def test_delete_memories_since_removes_only_at_or_after_cutoff(tmp_path: Path) -
 
     assert deleted_ids == [second.id]
     assert [m.id for m in memory_repository.list_memories_for_session("session-1")] == [first.id]
+
+
+def _insert_memory_row(
+    connection: sqlite3.Connection,
+    *,
+    memory_id: str,
+    session_id: str,
+    created_at: datetime,
+) -> None:
+    # append_memories always stamps created_at via utc_now(), so it can't produce
+    # the microsecond == 0 vs fractional-second adversarial pairing below. Insert
+    # directly to control created_at exactly, matching the memory_episodes schema.
+    connection.execute(
+        """
+        INSERT INTO memory_episodes (
+            id, session_id, scene_id, actor_id, summary, importance,
+            visibility, tags_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            memory_id,
+            session_id,
+            "rose-gallery",
+            "archivist",
+            f"Memory {memory_id}.",
+            2,
+            Visibility.PLAYER.value,
+            json.dumps([]),
+            serialize_datetime(created_at),
+        ),
+    )
+    connection.commit()
+
+
+def test_delete_memories_since_handles_zero_microsecond_text_sort_defect(
+    tmp_path: Path,
+) -> None:
+    # ponytail: regression for the TEXT-lexicographic-compare defect — serialize_datetime
+    # omits ".ffffff" when microsecond == 0. Cutoff is a zero-microsecond timestamp
+    # ("...12:00:00Z"); the adversarial row is 0.5s *later* chronologically but carries a
+    # fractional second ("...12:00:00.500000Z"). As plain strings,
+    # "...12:00:00.500000Z" >= "...12:00:00Z" is FALSE (the byte "." sorts below "Z" is
+    # irrelevant — the string is simply longer with a lower-valued extra "0" segment
+    # before matching further, and Python string compare stops at the first differing
+    # byte: "." (0x2E) < "Z" (0x5A)), so the old SQL `created_at >= cutoff` would wrongly
+    # SKIP this row even though it is chronologically at/after the cutoff and must be
+    # deleted.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+
+    before_cutoff = datetime(2026, 1, 1, 11, 59, 59, 0, tzinfo=UTC)
+    cutoff_zero_microsecond = datetime(2026, 1, 1, 12, 0, 0, 0, tzinfo=UTC)
+    after_cutoff_fractional = datetime(2026, 1, 1, 12, 0, 0, 500_000, tzinfo=UTC)
+
+    assert before_cutoff < cutoff_zero_microsecond < after_cutoff_fractional
+    # The TEXT-sort defect this guards against: the chronologically later row sorts
+    # as lexicographically SMALLER than the cutoff string, so a naive
+    # `created_at >= cutoff` SQL compare would exclude it.
+    assert (
+        serialize_datetime(after_cutoff_fractional)
+        < serialize_datetime(cutoff_zero_microsecond)
+    )
+
+    _insert_memory_row(
+        connection,
+        memory_id="mem-before-cutoff",
+        session_id="session-1",
+        created_at=before_cutoff,
+    )
+    _insert_memory_row(
+        connection,
+        memory_id="mem-at-cutoff",
+        session_id="session-1",
+        created_at=cutoff_zero_microsecond,
+    )
+    _insert_memory_row(
+        connection,
+        memory_id="mem-after-cutoff-fractional",
+        session_id="session-1",
+        created_at=after_cutoff_fractional,
+    )
+
+    deleted_ids = memory_repository.delete_memories_since(
+        "session-1", cutoff_zero_microsecond
+    )
+
+    assert set(deleted_ids) == {"mem-at-cutoff", "mem-after-cutoff-fractional"}
+    remaining_ids = {
+        m.id for m in memory_repository.list_memories_for_session("session-1")
+    }
+    assert remaining_ids == {"mem-before-cutoff"}
 
 
 def test_turn_repository_persists_and_loads_diagnostics(tmp_path: Path) -> None:

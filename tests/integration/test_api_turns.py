@@ -24,10 +24,15 @@ from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import CloudMode
 from app.main import app
-from app.memory import RecentDialogueStore
+from app.memory import MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
-from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
-from app.persistence.sqlite import connect_sqlite, initialize_database
+from app.persistence import (
+    DemoWorldRecord,
+    SQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SQLiteTurnRepository,
+)
+from app.persistence.sqlite import connect_sqlite, initialize_database, serialize_datetime
 from app.rag import ActorContextRetriever, InMemoryVectorStore, RagChunk, RagCollection, Retriever
 
 
@@ -134,6 +139,16 @@ class FailingRetriever:
         raise RuntimeError("qdrant offline")
 
 
+class RecordingFakeMemoryIndexer:
+    """Records unindex() calls instead of touching a real vector store."""
+
+    def __init__(self) -> None:
+        self.unindexed_calls: list[list[str]] = []
+
+    def unindex(self, memory_ids: list[str]) -> None:
+        self.unindexed_calls.append(list(memory_ids))
+
+
 class RejectingCritic:
     async def evaluate(self, **_: object) -> CriticResult:
         return CriticResult(
@@ -233,6 +248,71 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
         ),
         provider,
         retriever,
+    )
+
+
+def _build_services_with_memory(
+    tmp_path: Path,
+) -> tuple[AppServices, SequencedFakeProvider, SQLiteMemoryRepository, RecordingFakeMemoryIndexer]:
+    # Mirrors _build_services, but wires a real SQLiteMemoryRepository and a
+    # recording fake memory_indexer onto AppServices so tests can exercise the
+    # memory-deletion + unindex half of DELETE /turns/last (the plain
+    # _build_services leaves memory_repository=None, so that path is never hit).
+    connection = connect_sqlite(tmp_path / "api-turns-memory.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    provider = SequencedFakeProvider(["Only archivists and locksmiths speak of that door."])
+    retriever = FakeRetriever()
+    memory_indexer = RecordingFakeMemoryIndexer()
+    orchestrator = TurnOrchestrator(
+        loader=FakeLoader(),
+        provider=provider,
+        critic_agent=FakeCritic(),
+        session_repository=session_repository,
+        turn_repository=turn_repository,
+        recent_dialogue_store=RecentDialogueStore(turn_repository=turn_repository, recent_turns=8),
+        memory_store=None,
+        memory_curator=None,
+        actor_context_retriever=retriever,
+        config=TurnOrchestratorConfig(
+            retrieval_top_k=5,
+            max_retrieved_chunk_chars=800,
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+            cloud_mode="ask",
+        ),
+    )
+    return (
+        AppServices(
+            connection=connection,
+            session_repository=session_repository,
+            orchestrator=orchestrator,
+            recent_dialogue_store=RecentDialogueStore(
+                turn_repository=turn_repository,
+                recent_turns=8,
+            ),
+            turn_repository=turn_repository,
+            memory_repository=memory_repository,
+            memory_indexer=cast(MemoryIndexer, memory_indexer),
+        ),
+        provider,
+        memory_repository,
+        memory_indexer,
     )
 
 
@@ -1048,6 +1128,66 @@ def test_delete_last_turn_reroll_flow(tmp_path: Path) -> None:
     second = client.delete("/sessions/session-1/turns/last")
     app.dependency_overrides.clear()
     assert second.status_code == 404
+
+
+def test_delete_last_turn_reroll_flow_deletes_memories_and_unindexes(
+    tmp_path: Path,
+) -> None:
+    # test_delete_last_turn_reroll_flow above only exercises deleted_memory_count == 0
+    # because _build_services wires no memory_repository, so DELETE /turns/last never
+    # touches the memory-deletion branch. This sibling test wires a real
+    # SQLiteMemoryRepository and a recording fake memory_indexer so both the
+    # SQLite deletion and the vector-store unindex() call are actually verified.
+    services, _, memory_repository, memory_indexer = _build_services_with_memory(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+    assert create.status_code == 200
+
+    assert services.turn_repository is not None
+    stored_turn = services.turn_repository.list_all_turns("session-1")[0]
+    assert stored_turn.created_at is not None
+
+    # Insert a memory episode timestamped at/after the turn's created_at, mirroring
+    # how the orchestrator would have written it after generating the turn.
+    memory_created_at = stored_turn.created_at
+    memory_id = "mem-from-turn-1"
+    services.connection.execute(
+        """
+        INSERT INTO memory_episodes (
+            id, session_id, scene_id, actor_id, summary, importance,
+            visibility, tags_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            memory_id,
+            "session-1",
+            "rose-gallery",
+            "archivist",
+            "The archivist mentioned the locked door.",
+            3,
+            Visibility.PLAYER.value,
+            "[]",
+            serialize_datetime(memory_created_at),
+        ),
+    )
+    services.connection.commit()
+    assert [m.id for m in memory_repository.list_memories_for_session("session-1")] == [
+        memory_id
+    ]
+
+    response = client.delete("/sessions/session-1/turns/last")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted_memory_count"] == 1
+    assert memory_repository.list_memories_for_session("session-1") == []
+    assert memory_indexer.unindexed_calls == [[memory_id]]
 
 
 def test_delete_last_turn_returns_404_for_unknown_session(tmp_path: Path) -> None:

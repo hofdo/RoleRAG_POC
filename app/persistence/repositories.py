@@ -505,12 +505,16 @@ class SQLiteMemoryRepository:
         self.connection.commit()
 
     def delete_memories_since(self, session_id: str, created_at: datetime) -> list[str]:
-        cutoff = serialize_datetime(created_at)
+        # ponytail: don't compare created_at as TEXT in SQL — serialize_datetime
+        # omits .ffffff when microsecond == 0, so a zero-microsecond timestamp can
+        # lexicographically sort *after* an earlier timestamp that has fractional
+        # seconds (e.g. "...T12:00:01Z" > "...T12:00:00.500000Z" as strings, even
+        # though 12:00:00.5 is later). Parse and compare as datetimes instead.
         rows = self.connection.execute(
-            "SELECT id FROM memory_episodes WHERE session_id = ? AND created_at >= ?",
-            (session_id, cutoff),
+            "SELECT id, created_at FROM memory_episodes WHERE session_id = ?",
+            (session_id,),
         ).fetchall()
-        ids = [row["id"] for row in rows]
+        ids = [row["id"] for row in rows if parse_datetime(row["created_at"]) >= created_at]
         if ids:
             placeholders = ",".join("?" for _ in ids)
             self.connection.execute(
