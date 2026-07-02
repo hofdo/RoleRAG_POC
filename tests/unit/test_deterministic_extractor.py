@@ -149,3 +149,24 @@ def test_coverage_rejects_unrelated_summary() -> None:
         "Player commitment: I promise to return before dawn.",
         ["The player admired the rose arrangements in the gallery."],
     )
+
+
+def test_reversal_candidate_is_not_covered_by_the_fact_it_contradicts() -> None:
+    assert not is_covered_by_summaries(
+        "Mira no longer trusts the player and revoked the safehouse offer",
+        ["Mira trusts the player and offered the player the safehouse"],
+    )
+
+
+def test_identical_summary_is_still_covered() -> None:
+    assert is_covered_by_summaries(
+        "The player promised to guard the ledger",
+        ["The player promised to guard the ledger"],
+    )
+
+
+def test_reversal_present_in_both_summaries_is_still_covered() -> None:
+    assert is_covered_by_summaries(
+        "Mira no longer trusts the player",
+        ["Mira no longer trusts the player and revoked the safehouse offer"],
+    )

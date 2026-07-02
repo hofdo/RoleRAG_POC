@@ -17,6 +17,16 @@ from app.rag.ranking import content_terms
 DETERMINISTIC_EVENT_IMPORTANCE = 4
 COVERAGE_THRESHOLD = 0.5
 
+_REVERSAL_MARKERS = re.compile(
+    r"\b(?:not|never|no\s+longer|stopped|refused?|betray(?:ed|s)?|broke|broken"
+    r"|revoked?|withdrew|withdrawn|abandoned|died|dead|ended)\b",
+    re.IGNORECASE,
+)
+
+
+def _reversal_markers(text: str) -> set[str]:
+    return {" ".join(match.split()).lower() for match in _REVERSAL_MARKERS.findall(text)}
+
 _PROMISE_PATTERN = re.compile(
     # Explicit first-person commitment verbs, "(you have) my word", and narrow
     # negative commitments that are durable only because of the never/not before
@@ -109,8 +119,14 @@ def is_covered_by_summaries(
     candidate_terms = content_terms(candidate_summary)
     if not candidate_terms:
         return True
+    candidate_markers = _reversal_markers(candidate_summary)
     for summary in summaries:
         overlap = len(candidate_terms & content_terms(summary))
-        if overlap / len(candidate_terms) >= threshold:
-            return True
+        if overlap / len(candidate_terms) < threshold:
+            continue
+        # A reversal marker present in the candidate but absent from the covering
+        # summary means this is a state CHANGE, not a duplicate — always write it.
+        if candidate_markers - _reversal_markers(summary):
+            continue
+        return True
     return False
