@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import cast
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.api.routes import get_read_services, get_turn_services
+from app.api.routes import get_read_services, get_turn_services, stream_turn
+from app.api.schemas import CreateTurnRequest
 from app.composition import AppServices
+from app.config import Settings
 from app.domain import (
     CriticResult,
     PersonaCard,
@@ -805,6 +811,66 @@ def test_post_turn_stream_reconstructs_non_streaming_response(tmp_path: Path) ->
     assert json_payload.pop("stage_timings")
     assert json_payload.pop("status") == "completed"
     assert reconstructed == json_payload
+
+
+class _StallingOrchestrator:
+    """Stands in for TurnOrchestrator.run_turn: blocks until cancelled and records
+    whether cancellation actually propagated into the running turn, so the test can
+    assert the disconnect path leaves nothing running."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def run_turn(self, *, turn_input: object, on_stage: object = None) -> object:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()  # blocks forever unless cancelled
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise AssertionError("unreachable: run_turn should only end via cancellation")
+
+
+@pytest.mark.asyncio
+async def test_event_stream_cancels_in_flight_turn_on_client_disconnect(
+    tmp_path: Path,
+) -> None:
+    # Regression test: Starlette closes the `event_stream` async generator
+    # (GeneratorExit) when a client disconnects mid-stream. Before the fix, nothing
+    # cancelled the orchestrator task, so it kept running orphaned and held the
+    # request-scoped SQLite connection open past the request's lifetime.
+    services, _, _ = _build_services(tmp_path)
+    stalling_orchestrator = _StallingOrchestrator()
+    services.orchestrator = stalling_orchestrator  # type: ignore[assignment]
+
+    response = await stream_turn(
+        session_id="session-1",
+        request=CreateTurnRequest(message="Hello there."),
+        services=services,
+        settings=Settings(),
+    )
+
+    # StreamingResponse.body_iterator is declared as the broader AsyncIterable, but
+    # stream_turn's event_stream() always constructs it as an async generator; narrow
+    # the type so __anext__/aclose (used below to drive and then simulate a client
+    # disconnect) type-check under mypy strict.
+    body_iterator = cast("AsyncGenerator[str, None]", response.body_iterator)
+    # Pulling the first item drives event_stream() to its first await point, which
+    # creates the orchestrator task (asyncio generators are lazy: nothing inside
+    # runs until __anext__ is called).
+    pump = asyncio.ensure_future(body_iterator.__anext__())
+    await asyncio.wait_for(stalling_orchestrator.started.wait(), timeout=1.0)
+    assert not pump.done()  # still streaming; the turn is genuinely in flight
+    pump.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pump
+
+    # Simulate a client disconnect: Starlette calls aclose() on the generator when
+    # the response is torn down before the stream finished.
+    await asyncio.wait_for(body_iterator.aclose(), timeout=1.0)
+
+    assert stalling_orchestrator.cancelled is True
 
 
 def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(

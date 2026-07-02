@@ -65,16 +65,17 @@ def test_fastapi_openapi_exposes_mvp_route_shape() -> None:
         ]["schema"]["$ref"]
         == "#/components/schemas/ErrorResponse"
     )
-    assert "text/event-stream" in schema["paths"]["/sessions/{session_id}/turns/stream"]["post"][
+    stream_responses = schema["paths"]["/sessions/{session_id}/turns/stream"]["post"][
         "responses"
-    ]["200"]["content"]
-    for status_code in ("400", "404", "422"):
-        assert (
-            schema["paths"]["/sessions/{session_id}/turns/stream"]["post"]["responses"][
-                status_code
-            ]["content"]["application/json"]["schema"]["$ref"]
-            == "#/components/schemas/ErrorResponse"
-        )
+    ]
+    assert "text/event-stream" in stream_responses["200"]["content"]
+    # Once streaming starts, errors travel as `event: error` SSE frames on HTTP 200
+    # rather than HTTP error responses, so only pre-stream 422 validation remains.
+    assert set(stream_responses) == {"200", "422"}
+    assert (
+        stream_responses["422"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/ErrorResponse"
+    )
 
 
 def test_spa_assets_are_served_with_javascript_mime_when_built() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Generator
+from contextlib import suppress
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
@@ -260,14 +261,7 @@ async def create_turn(
 @router.post(
     "/sessions/{session_id}/turns/stream",
     response_class=StreamingResponse,
-    responses={
-        **SSE_200_RESPONSE,
-        **ERROR_400_RESPONSE,
-        **ERROR_404_RESPONSE,
-        **ERROR_422_RESPONSE,
-        **ERROR_503_RESPONSE,
-        **ERROR_504_RESPONSE,
-    },
+    responses={**SSE_200_RESPONSE, **ERROR_422_RESPONSE},
 )
 async def stream_turn(
     session_id: str,
@@ -284,28 +278,48 @@ async def stream_turn(
         turn = asyncio.create_task(
             _run_turn(session_id, request, services, on_stage=on_stage)
         )
+        frame: asyncio.Task[str] | None = None
         try:
-            while not turn.done():
-                frame: asyncio.Task[str] = asyncio.create_task(queue.get())
-                done, _ = await asyncio.wait({frame, turn}, return_when=asyncio.FIRST_COMPLETED)
-                if frame in done:
-                    yield frame.result()
-                else:
-                    frame.cancel()
-            while not queue.empty():
-                yield queue.get_nowait()
-            result = await turn
-        except ApiError as exc:
-            # The HTTP status is already 200 once streaming starts; errors must
-            # travel as a terminal frame instead.
-            yield serialize_error_frame(
-                code=exc.code, message=exc.message, status=exc.status_code
-            )
-            return
-        for out in build_turn_stream_frames(
-            result, text_chunk_chars=settings.sse_text_chunk_chars
-        ):
-            yield out
+            try:
+                while not turn.done():
+                    frame = asyncio.create_task(queue.get())
+                    done, _ = await asyncio.wait(
+                        {frame, turn}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if frame in done:
+                        yield frame.result()
+                    else:
+                        frame.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await frame
+                    frame = None
+                while not queue.empty():
+                    yield queue.get_nowait()
+                result = await turn
+            except ApiError as exc:
+                # The HTTP status is already 200 once streaming starts; errors must
+                # travel as a terminal frame instead.
+                yield serialize_error_frame(
+                    code=exc.code, message=exc.message, status=exc.status_code
+                )
+                return
+            for out in build_turn_stream_frames(
+                result, text_chunk_chars=settings.sse_text_chunk_chars
+            ):
+                yield out
+        finally:
+            # If the client disconnects (or any other early exit closes this
+            # generator) before the turn finished, cancel it so it doesn't run
+            # orphaned while still holding request-scoped services (e.g. the
+            # SQLite connection).
+            if frame is not None and not frame.done():
+                frame.cancel()
+                with suppress(asyncio.CancelledError):
+                    await frame
+            if not turn.done():
+                turn.cancel()
+                with suppress(asyncio.CancelledError):
+                    await turn
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
