@@ -9,7 +9,6 @@ import type {
   ContentCatalog,
   CreateSessionRequest,
   CreateTurnRequest,
-  GetSessionResponse,
   MemoryEpisode,
   RecentSessionResponse,
   RetrievalCandidate,
@@ -216,25 +215,12 @@ export function formatStageTimings(stageTimings: StageTimings | undefined): stri
   return entries.map(([stage, seconds]) => `${stage} ${seconds.toFixed(1)}s`).join('; ');
 }
 
-export function resumeTranscript(sessionResponse: GetSessionResponse): TranscriptEntry[] {
-  const recentTurns = [...sessionResponse.recent_turns].sort(
-    (left, right) => left.turn_index - right.turn_index,
-  );
-  return recentTurns.flatMap((turn): TranscriptEntry[] => {
-    const label = `Resumed turn #${turn.turn_index}`;
-    return [
-      { role: 'player', text: turn.user_message, label, source: 'resumed' },
-      { role: 'assistant', text: turn.assistant_message, label, source: 'resumed' },
-    ];
-  });
-}
-
 export function canonFactList(facts: CanonFact[]): CanonFact[] {
   return facts;
 }
 
-// Full transcript for resume, built from every turn's detail (vs. resumeTranscript's 8-turn
-// recent-turns summary). Used by SessionStore.resume() so the resumed conversation is complete.
+// Full transcript for resume, built from every turn's detail. Used by
+// SessionStore.resume() so the resumed conversation is complete.
 export function fullTranscript(details: SessionTurnDetailsResponse): TranscriptEntry[] {
   const turns = [...details.turns].sort((left, right) => left.turn_index - right.turn_index);
   return turns.flatMap((turn): TranscriptEntry[] => {

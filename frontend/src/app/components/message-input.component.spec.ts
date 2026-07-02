@@ -121,7 +121,7 @@ describe('MessageInputComponent', () => {
     expect(c.stageLabel('mystery')).toBe('mystery');
   });
 
-  it('disables Reroll last with no session or while busy', () => {
+  it('disables Reroll last with no session, while busy, or with a pending confirm', () => {
     const { fixture, store } = make();
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
@@ -138,6 +138,17 @@ describe('MessageInputComponent', () => {
     store.busy.set(true);
     fixture.detectChanges();
     expect(rerollButton.disabled).toBe(true);
+    store.busy.set(false);
+
+    // A pending cloud-route confirmation means the last turn hasn't landed yet;
+    // rerolling would race deleting a turn that doesn't exist as a completed turn.
+    store.pendingConfirm.set({ message: 'go cloud?' });
+    fixture.detectChanges();
+    expect(rerollButton.disabled).toBe(true);
+
+    store.pendingConfirm.set(null);
+    fixture.detectChanges();
+    expect(rerollButton.disabled).toBe(false);
   });
 
   it('Reroll last click delegates to store.rerollLast()', () => {

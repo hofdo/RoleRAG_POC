@@ -50,7 +50,7 @@ import { SessionStore } from '../session-store';
           type="button"
           class="ghost"
           (click)="store.rerollLast()"
-          [disabled]="store.busy() || !store.sessionId()"
+          [disabled]="store.busy() || !store.sessionId() || !!store.pendingConfirm()"
         >
           Reroll last
         </button>
