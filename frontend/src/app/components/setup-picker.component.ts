@@ -1,5 +1,6 @@
 import { Component, signal, inject } from '@angular/core';
 import { SessionStore } from '../session-store';
+import { formatRecentSessionOption } from '../play-model';
 
 // Grimoire Console styling
 @Component({
@@ -64,6 +65,20 @@ import { SessionStore } from '../session-store';
         @if (store.loadError(); as error) {
           <p class="warning">{{ error }}</p>
         }
+
+        @if (store.recentSessions().length > 0) {
+          <label>
+            Resume session
+            <select #resumeSel id="resume-select">
+              @for (s of store.recentSessions(); track s.session_id) {
+                <option [value]="s.session_id">{{ formatOption(s) }}</option>
+              }
+            </select>
+          </label>
+          <button type="button" (click)="store.resume(resumeSel.value)" [disabled]="store.busy()">
+            Resume
+          </button>
+        }
       </form>
     }
   `,
@@ -77,4 +92,9 @@ import { SessionStore } from '../session-store';
 export class SetupPickerComponent {
   readonly store = inject(SessionStore);
   readonly playerName = signal('');
+  readonly formatOption = formatRecentSessionOption;
+
+  constructor() {
+    void this.store.loadRecentSessions();
+  }
 }

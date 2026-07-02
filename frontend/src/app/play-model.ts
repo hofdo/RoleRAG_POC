@@ -16,6 +16,7 @@ import type {
   RetrievalDiagnostics,
   RuntimeStatus,
   SessionMemoriesResponse,
+  SessionTurnDetailsResponse,
   StageTimings,
   TurnResult,
 } from './models';
@@ -225,4 +226,17 @@ export function resumeTranscript(sessionResponse: GetSessionResponse): Transcrip
 
 export function canonFactList(facts: CanonFact[]): CanonFact[] {
   return facts;
+}
+
+// Full transcript for resume, built from every turn's detail (vs. resumeTranscript's 8-turn
+// recent-turns summary). Used by SessionStore.resume() so the resumed conversation is complete.
+export function fullTranscript(details: SessionTurnDetailsResponse): TranscriptEntry[] {
+  const turns = [...details.turns].sort((left, right) => left.turn_index - right.turn_index);
+  return turns.flatMap((turn): TranscriptEntry[] => {
+    const label = `Resumed turn #${turn.turn_index}`;
+    return [
+      { role: 'player', text: turn.user_message, label, source: 'resumed' },
+      { role: 'assistant', text: turn.assistant_message, label, source: 'resumed' },
+    ];
+  });
 }

@@ -1,7 +1,13 @@
 import { TestBed } from '@angular/core/testing';
-import { ApiService } from './api.service';
+import { ApiError, ApiService } from './api.service';
 import { SessionStore } from './session-store';
-import type { CreateTurnRequest, TurnResult } from './models';
+import type {
+  CreateTurnRequest,
+  GetSessionResponse,
+  RecentSessionsResponse,
+  SessionTurnDetailsResponse,
+  TurnResult,
+} from './models';
 
 // SessionStore is the logic hub (turn execution, cloud-confirm, memory). Tested against a fake
 // ApiService so the turn flow is exercised without a backend.
@@ -29,6 +35,39 @@ const confirmationTurn: TurnResult = {
   critic_status: 'skipped',
   warnings: [],
   retrieval: null,
+};
+
+const sessionDetailFixture: GetSessionResponse = {
+  session_id: 's1',
+  world_id: 'w',
+  active_scene_id: 'sc',
+  active_persona_id: 'p',
+  recent_turns: Array.from({ length: 8 }, (_, i) => ({
+    turn_index: i,
+    user_message: `recent player ${i}`,
+    assistant_message: `recent assistant ${i}`,
+    created_at: '2026-01-01T00:00:00Z',
+  })),
+};
+
+const turnDetailsFixture: SessionTurnDetailsResponse = {
+  session_id: 's1',
+  turns: Array.from({ length: 20 }, (_, i) => ({
+    turn_index: i,
+    scene_id: 'sc',
+    persona_id: 'p',
+    user_message: `full player ${i}`,
+    assistant_message: `full assistant ${i}`,
+    route: { provider: 'local', model: 'm', reason: 'r' },
+    created_at: '2026-01-01T00:00:00Z',
+    finish_reason: 'stop',
+    memory_written: false,
+    critic_status: 'accepted',
+    warnings: [],
+    errors: [],
+    stage_timings: {},
+    retrieval: null,
+  })),
 };
 
 class FakeApi {
@@ -66,6 +105,15 @@ class FakeApi {
   deleteCanonFact(_sessionId: string, _factId: string): Promise<void> {
     if (this.failPanels) return Promise.reject(new Error('backend down'));
     return Promise.resolve();
+  }
+  getSession(_sessionId: string): Promise<GetSessionResponse> {
+    return Promise.resolve(sessionDetailFixture);
+  }
+  getSessionTurnDetails(_sessionId: string): Promise<SessionTurnDetailsResponse> {
+    return Promise.resolve(turnDetailsFixture);
+  }
+  getRecentSessions(): Promise<RecentSessionsResponse> {
+    return Promise.resolve({ sessions: [] });
   }
 }
 
@@ -161,6 +209,84 @@ describe('SessionStore turn flow', () => {
 
     expect(store.currentStage()).toBeNull();
     expect(store.turnError()).toContain('boom');
+  });
+
+  it('keeps returning false from sendMessage when the turn fails', async () => {
+    const { store, api } = setup();
+    api.createBufferedTurn = () =>
+      Promise.reject(new ApiError('provider_timeout', 'boom', 504));
+
+    const ok = await store.sendMessage('hello', false);
+
+    expect(ok).toBeFalse();
+    expect(store.turnError()).toContain('provider_timeout');
+  });
+
+  it('returns true from sendMessage when the turn completes', async () => {
+    const { store } = setup();
+    const ok = await store.sendMessage('hello', false);
+    expect(ok).toBeTrue();
+  });
+
+  it('returns true from sendMessage when confirmation is required', async () => {
+    const { store, api } = setup();
+    api.next = confirmationTurn;
+    const ok = await store.sendMessage('go cloud?', true);
+    expect(ok).toBeTrue();
+  });
+
+  it('confirmCloud/forceLocal resolve true with no pending confirmation', async () => {
+    const { store } = setup();
+    expect(await store.confirmCloud()).toBeTrue();
+    expect(await store.forceLocal()).toBeTrue();
+  });
+});
+
+describe('SessionStore resume', () => {
+  it('resume loads the full transcript from turn-details', async () => {
+    const { store } = setup();
+
+    await store.resume('s1');
+
+    expect(store.transcript().length).toBe(40); // 20 player + 20 assistant entries
+    expect(store.transcript()[0]).toEqual({
+      role: 'player',
+      text: 'full player 0',
+      label: 'Resumed turn #0',
+      source: 'resumed',
+    });
+  });
+
+  it('loadRecentSessions populates recentSessions from the API', async () => {
+    const { store, api } = setup();
+    api.getRecentSessions = () =>
+      Promise.resolve({
+        sessions: [
+          {
+            session_id: 's9',
+            world_id: 'w',
+            active_scene_id: 'sc',
+            active_persona_id: 'p',
+            player_name: 'Ada',
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-02T00:00:00Z',
+          },
+        ],
+      });
+
+    await store.loadRecentSessions();
+
+    expect(store.recentSessions().length).toBe(1);
+    expect(store.recentSessions()[0].session_id).toBe('s9');
+  });
+
+  it('loadRecentSessions clears the list on failure instead of throwing', async () => {
+    const { store, api } = setup();
+    api.getRecentSessions = () => Promise.reject(new Error('backend down'));
+
+    await store.loadRecentSessions();
+
+    expect(store.recentSessions()).toEqual([]);
   });
 });
 

@@ -69,8 +69,10 @@ Order: value + independence, decisions last. Each item gate-verified
 
 ## Follow-ups (SPA)
 
-- [ ] SPA session resume: `SessionStore.resume()` exists and is tested; no UI component calls
-  it. Wire a resume selector (recent sessions via `GET /sessions`) into the setup picker.
+- [x] SPA session resume: wired into the setup picker (resume select + Resume button, backed by
+  `GET /sessions`). `resume()` now loads the full transcript via `GET /sessions/{id}/turn-details`
+  instead of only the 8 recent turns, and the composer keeps the draft when a turn fails
+  (`sendMessage`/`confirmCloud`/`forceLocal` return `Promise<boolean>`).
 
 ## Not doing (personal-use scope)
 

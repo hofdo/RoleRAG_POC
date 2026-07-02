@@ -94,8 +94,8 @@ export class MessageInputComponent {
     return MessageInputComponent.STAGE_LABELS[stage] ?? stage;
   }
 
-  send(): void {
-    void this.store.sendMessage(this.draft().trim(), this.requestCloud());
-    this.draft.set('');
+  async send(): Promise<void> {
+    const ok = await this.store.sendMessage(this.draft().trim(), this.requestCloud());
+    if (ok) this.draft.set('');
   }
 }

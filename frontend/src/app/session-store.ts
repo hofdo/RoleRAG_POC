@@ -7,8 +7,8 @@ import {
   describeMemories,
   describeRuntimeStatus,
   formatStageTimings,
+  fullTranscript,
   isConfirmationRequired,
-  resumeTranscript,
   type CatalogSelection,
   type TranscriptEntry,
 } from './play-model';
@@ -17,6 +17,7 @@ import type {
   ContentCatalog,
   CreateSessionResponse,
   MemoryEpisode,
+  RecentSessionResponse,
   RuntimeStatus,
   TurnResult,
 } from './models';
@@ -61,6 +62,7 @@ export class SessionStore {
   // Set when CLOUD_MODE=ask and the router wants cloud: holds the message to resubmit on confirm.
   readonly pendingConfirm = signal<{ message: string } | null>(null);
   readonly lastDebug = signal<TurnDebug | null>(null);
+  readonly recentSessions = signal<RecentSessionResponse[]>([]);
 
   readonly statusView = computed(() => describeRuntimeStatus(this.runtimeStatus()));
   readonly sessionId = computed(() => this.session()?.session_id ?? null);
@@ -130,7 +132,8 @@ export class SessionStore {
         active_scene_id: detail.active_scene_id,
         active_persona_id: detail.active_persona_id,
       });
-      this.transcript.set(resumeTranscript(detail));
+      const details = await this.api.getSessionTurnDetails(sessionId);
+      this.transcript.set(fullTranscript(details));
       this.pendingConfirm.set(null);
       await Promise.all([this.refreshMemories(), this.loadCanon()]);
     } catch (error) {
@@ -140,27 +143,35 @@ export class SessionStore {
     }
   }
 
-  sendMessage(message: string, requestCloud: boolean): Promise<void> {
+  async loadRecentSessions(): Promise<void> {
+    try {
+      this.recentSessions.set((await this.api.getRecentSessions()).sessions);
+    } catch {
+      this.recentSessions.set([]);
+    }
+  }
+
+  sendMessage(message: string, requestCloud: boolean): Promise<boolean> {
     return this.runTurn(message, buildTurnRequest(message, requestCloud));
   }
 
   // Resubmit the held message after the user approves cloud routing.
-  confirmCloud(): Promise<void> {
+  confirmCloud(): Promise<boolean> {
     const pending = this.pendingConfirm();
-    if (!pending) return Promise.resolve();
+    if (!pending) return Promise.resolve(true);
     return this.runTurn(pending.message, buildTurnRequest(pending.message, true, { cloudConfirmed: true }));
   }
 
   // Resubmit the held message but pin it to the local provider.
-  forceLocal(): Promise<void> {
+  forceLocal(): Promise<boolean> {
     const pending = this.pendingConfirm();
-    if (!pending) return Promise.resolve();
+    if (!pending) return Promise.resolve(true);
     return this.runTurn(pending.message, buildTurnRequest(pending.message, false, { forceLocal: true }));
   }
 
-  private async runTurn(message: string, request: ReturnType<typeof buildTurnRequest>): Promise<void> {
+  private async runTurn(message: string, request: ReturnType<typeof buildTurnRequest>): Promise<boolean> {
     const sessionId = this.sessionId();
-    if (!sessionId) return;
+    if (!sessionId) return false;
     this.busy.set(true);
     this.turnError.set(null);
     this.currentStage.set(null);
@@ -169,8 +180,10 @@ export class SessionStore {
         onStage: (stage) => this.currentStage.set(stage),
       });
       this.applyTurn(message, turn);
+      return true;
     } catch (error) {
       this.turnError.set(errorMessage(error));
+      return false;
     } finally {
       this.currentStage.set(null);
       this.busy.set(false);

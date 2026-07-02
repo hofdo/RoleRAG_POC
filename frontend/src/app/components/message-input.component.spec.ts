@@ -6,8 +6,12 @@ import type { CreateTurnRequest, TurnResult } from '../models';
 
 class FakeApi {
   calls: CreateTurnRequest[] = [];
+  shouldFail = false;
   createBufferedTurn(_sessionId: string, request: CreateTurnRequest): Promise<TurnResult> {
     this.calls.push(request);
+    if (this.shouldFail) {
+      return Promise.reject(new Error('boom'));
+    }
     return Promise.resolve({
       status: 'completed',
       text: 'reply',
@@ -52,18 +56,29 @@ describe('MessageInputComponent', () => {
     expect(c.sendDisabled()).toBe(true);
   });
 
-  it('send() submits the trimmed draft and clears it', async () => {
+  it('send() submits the trimmed draft and clears it on success', async () => {
     const { fixture, store, api } = make();
     const c = fixture.componentInstance;
     store.session.set({ session_id: 's1', world_id: 'w', active_scene_id: 'sc', active_persona_id: 'p' });
     c.draft.set('  hello  ');
 
-    c.send();
-    await Promise.resolve();
-    await Promise.resolve();
+    await c.send();
 
     expect(api.calls.at(-1)?.message).toBe('hello');
     expect(c.draft()).toBe('');
+  });
+
+  it('send() keeps the draft when the turn fails', async () => {
+    const { fixture, store, api } = make();
+    const c = fixture.componentInstance;
+    store.session.set({ session_id: 's1', world_id: 'w', active_scene_id: 'sc', active_persona_id: 'p' });
+    api.shouldFail = true;
+    c.draft.set('  hello  ');
+
+    await c.send();
+
+    expect(c.draft()).toBe('  hello  ');
+    expect(store.turnError()).toContain('boom');
   });
 
   it('shows the cloud-confirm banner when a confirmation is pending', () => {
