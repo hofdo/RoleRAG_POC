@@ -44,7 +44,9 @@ Implemented in this repository:
   `import-session`, `inspect-memories`, `reset-db`
 - read-only memory viewer in the web UI and `GET /sessions/{id}/memories`
 - one-command startup and teardown via `scripts/dev-up.sh` and `scripts/dev-down.sh`
-- local-only memory extraction
+- hidden authored content (persona `secrets`/`forbidden_knowledge`, scene
+  `gm_private_summary`) never leaves the machine on any provider; memory extraction runs
+  on the session's bound provider like every other task
 - deterministic eval harness using fake providers and in-memory retrieval fixtures
 
 Not implemented:
@@ -276,7 +278,9 @@ More detail:
 - FastAPI route handlers stay thin and delegate to shared composition and orchestration code.
 - Player-facing actor prompts only include `player`-visible retrieved chunks.
 - `CriticAgent` may inspect hidden context to detect leakage, but that output is not player-facing.
-- Memory extraction stays local even when actor or repair routing uses cloud.
+- Hidden authored content — persona `secrets`/`forbidden_knowledge` and scene
+  `gm_private_summary` — never leaves the machine on any provider; memory extraction runs
+  on the session's bound provider like every other task.
 - Tests and evals use fake/mock providers and in-memory vector stores rather than real external services.
 
 ## CLI Usage

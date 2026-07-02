@@ -91,9 +91,21 @@ def resolve_provider(
     """One source of dispatch truth: every stage (actor, critic, memory) picks its
     provider by asking this function, so a route's provider field is the only thing
     that decides where a request goes. Raises when a route says cloud but no cloud
-    provider was configured, instead of silently falling back to local."""
+    provider was configured, instead of silently falling back to local.
+
+    Reachable in production: a cloud session created while a cloud API key was
+    configured keeps routing to cloud for its whole lifetime (session-bound provider,
+    no per-turn fallback) even if the key is later removed from the environment and
+    the process restarts with cloud_provider=None. That is a real operator error, not
+    a programming error, so it surfaces as ProviderUnavailableError (API 503) rather
+    than a bare RuntimeError (API 500).
+    """
     if route.provider == ModelProviderName.LOCAL:
         return local
     if cloud is None:
-        raise RuntimeError(f"Missing provider for route: {route.provider.value}")
+        raise ProviderUnavailableError(
+            provider=route.provider.value,
+            model=route.model,
+            base_url="(no cloud provider configured -- check CLOUD_LLM_API_KEY)",
+        )
     return cloud
