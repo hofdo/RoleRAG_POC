@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.api.sse import build_turn_stream_frames
+from app.api.sse import build_turn_stream_frames, serialize_error_frame, serialize_stage_frame
 from app.domain import TurnResult
 from app.llm.router import ModelProviderName, ModelRoute
 
@@ -50,3 +50,13 @@ def test_short_text_stays_single_frame_even_when_chunking_enabled() -> None:
     frames = build_turn_stream_frames(_result("hi"), text_chunk_chars=10)
 
     assert _text_payloads(frames) == ["hi"]
+
+
+def test_serialize_stage_frame() -> None:
+    assert serialize_stage_frame("generation") == 'event: stage\ndata: {"stage":"generation"}\n\n'
+
+
+def test_serialize_error_frame() -> None:
+    frame = serialize_error_frame(code="provider_timeout", message="timed out", status=504)
+    assert frame.startswith("event: error\n")
+    assert '"code":"provider_timeout"' in frame

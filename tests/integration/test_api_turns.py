@@ -170,6 +170,12 @@ def _parse_sse(response_text: str) -> list[tuple[str, dict[str, object]]]:
     return events
 
 
+def _non_stage_frames(response_text: str) -> list[tuple[str, dict[str, object]]]:
+    # Progress frames (event: stage) now precede the buffered content frames; strip them
+    # so assertions about the terminal payload shape don't need to know the stage sequence.
+    return [event for event in _parse_sse(response_text) if event[0] != "stage"]
+
+
 def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider, FakeRetriever]:
     connection = connect_sqlite(tmp_path / "api-turns.db")
     initialize_database(connection)
@@ -608,7 +614,7 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
     app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    frames = _parse_sse(response.text)
+    frames = _non_stage_frames(response.text)
     assert frames[1][1].pop("stage_timings")
     assert frames == [
         ("text", {"text": "Only archivists and locksmiths speak of that door."}),
@@ -631,7 +637,29 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
     ]
 
 
-def test_post_turn_stream_returns_json_404_before_streaming(tmp_path: Path) -> None:
+def test_stream_turn_emits_stage_frames_before_final(tmp_path: Path) -> None:
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns/stream",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    body = response.text
+    assert "event: stage" in body
+    assert body.index("event: stage") < body.index("event: final")
+    stages = [event[1]["stage"] for event in _parse_sse(body) if event[0] == "stage"]
+    assert stages[:4] == ["session", "retrieval", "routing", "generation"]
+    assert stages[-2:] == ["persistence", "memory"]
+
+
+def test_post_turn_stream_emits_error_frame_for_missing_session(tmp_path: Path) -> None:
+    # Once streaming has started the HTTP status is committed to 200; a session lookup
+    # failure now arrives as a terminal `event: error` frame carrying the original code
+    # and status instead of a 404 JSON envelope.
     services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
@@ -642,12 +670,15 @@ def test_post_turn_stream_returns_json_404_before_streaming(tmp_path: Path) -> N
     )
 
     app.dependency_overrides.clear()
-    assert response.status_code == 404
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json()["error"]["code"] == "session_not_found"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _non_stage_frames(response.text)
+    assert events[-1][0] == "error"
+    assert events[-1][1]["code"] == "session_not_found"
+    assert events[-1][1]["status"] == 404
 
 
-def test_post_turn_stream_returns_json_400_before_streaming(tmp_path: Path) -> None:
+def test_post_turn_stream_emits_error_frame_for_invalid_turn_request(tmp_path: Path) -> None:
     services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
@@ -658,9 +689,12 @@ def test_post_turn_stream_returns_json_400_before_streaming(tmp_path: Path) -> N
     )
 
     app.dependency_overrides.clear()
-    assert response.status_code == 400
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json()["error"]["code"] == "invalid_turn_request"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _non_stage_frames(response.text)
+    assert events[-1][0] == "error"
+    assert events[-1][1]["code"] == "invalid_turn_request"
+    assert events[-1][1]["status"] == 400
 
 
 def test_post_turn_stream_returns_sanitized_json_422_before_streaming(tmp_path: Path) -> None:
@@ -764,7 +798,7 @@ def test_post_turn_stream_reconstructs_non_streaming_response(tmp_path: Path) ->
     )
 
     app.dependency_overrides.clear()
-    text_event, final_event = _parse_sse(stream_response.text)
+    text_event, final_event = _non_stage_frames(stream_response.text)
     reconstructed = {"text": text_event[1]["text"], **final_event[1]}
     json_payload = json_response.json()
     assert reconstructed.pop("stage_timings")
@@ -789,7 +823,7 @@ def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(
     )
 
     app.dependency_overrides.clear()
-    events = _parse_sse(response.text)
+    events = _non_stage_frames(response.text)
     assert len(events) == 1
     assert events[0][0] == "failure"
     assert events[0][1]["memory_written"] is False

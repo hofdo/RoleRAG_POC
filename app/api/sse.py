@@ -8,8 +8,10 @@ from pydantic import BaseModel
 from app.api.schemas import (
     RouteResponse,
     StreamConfirmationPayload,
+    StreamErrorPayload,
     StreamFailurePayload,
     StreamFinalPayload,
+    StreamStagePayload,
     StreamTextPayload,
     to_retrieval_diagnostics_response,
 )
@@ -68,6 +70,14 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
             ),
         ),
     ]
+
+
+def serialize_stage_frame(stage: str) -> str:
+    return _serialize_frame("stage", StreamStagePayload(stage=stage))
+
+
+def serialize_error_frame(*, code: str, message: str, status: int) -> str:
+    return _serialize_frame("error", StreamErrorPayload(code=code, message=message, status=status))
 
 
 def _text_frames(text: str, chunk_chars: int) -> list[str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Generator
+import asyncio
+from collections.abc import AsyncIterator, Callable, Generator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
@@ -35,7 +36,7 @@ from app.api.schemas import (
     TurnDetailResponse,
     to_retrieval_diagnostics_response,
 )
-from app.api.sse import build_turn_stream_frames
+from app.api.sse import build_turn_stream_frames, serialize_error_frame, serialize_stage_frame
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.diagnostics.eval_runs import load_eval_run, load_eval_runs
@@ -274,17 +275,47 @@ async def stream_turn(
     services: Annotated[AppServices, Depends(get_turn_services)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
-    result = await _run_turn(session_id, request, services)
-    return StreamingResponse(
-        iter(build_turn_stream_frames(result, text_chunk_chars=settings.sse_text_chunk_chars)),
-        media_type="text/event-stream",
-    )
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def on_stage(stage: str) -> None:
+        queue.put_nowait(serialize_stage_frame(stage))
+
+    async def event_stream() -> AsyncIterator[str]:
+        turn = asyncio.create_task(
+            _run_turn(session_id, request, services, on_stage=on_stage)
+        )
+        try:
+            while not turn.done():
+                frame: asyncio.Task[str] = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait({frame, turn}, return_when=asyncio.FIRST_COMPLETED)
+                if frame in done:
+                    yield frame.result()
+                else:
+                    frame.cancel()
+            while not queue.empty():
+                yield queue.get_nowait()
+            result = await turn
+        except ApiError as exc:
+            # The HTTP status is already 200 once streaming starts; errors must
+            # travel as a terminal frame instead.
+            yield serialize_error_frame(
+                code=exc.code, message=exc.message, status=exc.status_code
+            )
+            return
+        for out in build_turn_stream_frames(
+            result, text_chunk_chars=settings.sse_text_chunk_chars
+        ):
+            yield out
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def _run_turn(
     session_id: str,
     request: CreateTurnRequest,
     services: AppServices,
+    *,
+    on_stage: Callable[[str], None] | None = None,
 ) -> TurnResult:
     try:
         result = await services.orchestrator.run_turn(
@@ -295,7 +326,8 @@ async def _run_turn(
                 user_requested_cloud=request.request_cloud,
                 cloud_confirmed=request.cloud_confirmed,
                 force_local=request.force_local,
-            )
+            ),
+            on_stage=on_stage,
         )
     except SessionNotFoundError as exc:
         raise ApiError(

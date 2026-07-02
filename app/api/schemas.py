@@ -179,6 +179,16 @@ class StreamConfirmationPayload(BaseModel):
     errors: list[TurnError] = Field(default_factory=list)
 
 
+class StreamStagePayload(BaseModel):
+    stage: str
+
+
+class StreamErrorPayload(BaseModel):
+    code: str
+    message: str
+    status: int
+
+
 class RecentTurnResponse(BaseModel):
     turn_index: int
     user_message: str

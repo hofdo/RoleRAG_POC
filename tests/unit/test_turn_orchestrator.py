@@ -1079,6 +1079,22 @@ async def test_turn_orchestrator_keeps_original_draft_when_validator_only_repair
 
 
 @pytest.mark.asyncio
+async def test_run_turn_reports_stage_progression(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider)
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+    stages: list[str] = []
+
+    await orchestrator.run_turn(turn_input=turn_input, on_stage=stages.append)
+
+    assert stages[:4] == ["session", "retrieval", "routing", "generation"]
+    assert stages[-2:] == ["persistence", "memory"]
+
+
+@pytest.mark.asyncio
 async def test_run_turn_persists_diagnostics_matching_result(tmp_path: Path) -> None:
     provider = FakeProvider()
     curator = StubMemoryCurator(

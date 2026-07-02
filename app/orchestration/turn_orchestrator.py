@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from time import perf_counter
@@ -82,6 +82,15 @@ def _stage_timer(timings: dict[str, float], stage: str) -> Iterator[None]:
         yield
     finally:
         timings[stage] = perf_counter() - started
+
+
+def _emit_stage(on_stage: Callable[[str], None] | None, stage: str) -> None:
+    if on_stage is None:
+        return
+    try:
+        on_stage(stage)
+    except Exception:  # noqa: BLE001 - progress reporting must never fail a turn
+        pass
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -272,12 +281,20 @@ class TurnOrchestrator:
     def resume_session(self, session_id: str) -> SessionState:
         return self.session_stage.resume_session(session_id)
 
-    async def run_turn(self, *, turn_input: TurnInput) -> TurnResult:
+    async def run_turn(
+        self,
+        *,
+        turn_input: TurnInput,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> TurnResult:
         timings: dict[str, float] = {}
+        _emit_stage(on_stage, "session")
         with _stage_timer(timings, "session"):
             context = self.session_stage.load(turn_input)
+        _emit_stage(on_stage, "retrieval")
         with _stage_timer(timings, "retrieval"):
             retrieval = self.retrieval_stage.run(turn_input=turn_input, context=context)
+        _emit_stage(on_stage, "routing")
         with _stage_timer(timings, "routing"):
             routing = self.routing_stage.actor(
                 turn_input=turn_input,
@@ -297,6 +314,7 @@ class TurnOrchestrator:
                 outcome=TurnOutcome.CONFIRMATION_REQUIRED,
             )
         try:
+            _emit_stage(on_stage, "generation")
             with _stage_timer(timings, "generation"):
                 generation = await self.generation_stage.run(
                     turn_input=turn_input,
@@ -325,6 +343,7 @@ class TurnOrchestrator:
             *routing.warnings,
             *generation.warnings,
         ]
+        _emit_stage(on_stage, "validation")
         with _stage_timer(timings, "validation"):
             validation = validate_draft(
                 draft=generation.text,
@@ -332,6 +351,7 @@ class TurnOrchestrator:
                 visible_texts=_visible_texts(context=context, retrieval=retrieval),
             )
         warnings.extend(validation.flags)
+        _emit_stage(on_stage, "critique")
         with _stage_timer(timings, "critique"):
             critique = await self.critique_stage.run(
                 persona=context.persona,
@@ -346,6 +366,7 @@ class TurnOrchestrator:
             )
         warnings.extend(critique.warnings)
 
+        _emit_stage(on_stage, "repair")
         resolution = await self.repair_stage.resolve(
             context=context,
             user_message=turn_input.message,
@@ -392,6 +413,7 @@ class TurnOrchestrator:
                 f"({len(containment.paraphrased_facts)} flagged)"
             )
 
+        _emit_stage(on_stage, "persistence")
         with _stage_timer(timings, "persistence"):
             persistence = self.persistence_stage.run(
                 session=context.session,
@@ -399,6 +421,7 @@ class TurnOrchestrator:
                 assistant_message=final_text,
                 route=final_route,
             )
+        _emit_stage(on_stage, "memory")
         with _stage_timer(timings, "memory"):
             memory = await self.memory_stage.run(
                 session=context.session,
