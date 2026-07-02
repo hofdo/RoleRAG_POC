@@ -756,6 +756,13 @@ def _delete_session_vectors(session_id: str) -> None:
     try:
         vector_store = _build_vector_store(settings)
         vector_store.delete_session_points(RagCollection.SESSION_MEMORY, session_id)
+        # PERSONA_MEMORY chunks retain the originating session_id payload (cross-session
+        # persona memory dual-writes there -- see app/memory/indexer.py), so they are NOT
+        # cleaned up by dropping the session's SQLite row alone. Purge them here too on
+        # every path that deletes a session (delete-session AND reset-db), or they orphan
+        # in Qdrant forever: "SQLite is authoritative / Qdrant rebuildable" only holds if
+        # nothing outlives its SQLite source of truth.
+        vector_store.delete_session_points(RagCollection.PERSONA_MEMORY, session_id)
     except Exception as exc:
         typer.secho(
             f"Warning: session vector cleanup skipped: {exc}", fg=typer.colors.YELLOW, err=True

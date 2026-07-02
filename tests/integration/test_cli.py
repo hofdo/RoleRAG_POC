@@ -104,12 +104,16 @@ class RecordingVectorStore:
         self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
         self.drop_calls: list[RagCollection] = []
+        self.delete_session_calls: list[tuple[RagCollection, str]] = []
 
     def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
         self.ensure_calls.append((collection, vector_size))
 
     def drop_collection(self, collection: RagCollection) -> None:
         self.drop_calls.append(collection)
+
+    def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
+        self.delete_session_calls.append((collection, session_id))
 
     def replace_source(
         self,
@@ -1111,3 +1115,74 @@ def test_cli_reset_index_rejects_unknown_collection() -> None:
     assert result.exit_code == 1
     assert "unknown_name" in result.stdout
     assert vector_store.drop_calls == []
+
+
+def test_delete_session_vectors_purges_both_session_and_persona_memory() -> None:
+    # Controller decision (finding 4): PERSONA_MEMORY chunks retain their
+    # originating session_id payload (cross-session persona memory dual-write --
+    # see app/memory/indexer.py), so cleaning up only SESSION_MEMORY orphans them
+    # in Qdrant forever. _delete_session_vectors must purge the session-scoped
+    # points from BOTH collections. Exercised directly against the CLI helper
+    # with a fake vector store (this is the "live Qdrant only" fallback the
+    # controller decision calls out).
+    from app.cli import _delete_session_vectors
+
+    vector_store = RecordingVectorStore()
+
+    with patch("app.cli._build_vector_store", return_value=vector_store):
+        _delete_session_vectors("session-1")
+
+    assert vector_store.delete_session_calls == [
+        (RagCollection.SESSION_MEMORY, "session-1"),
+        (RagCollection.PERSONA_MEMORY, "session-1"),
+    ]
+
+
+def test_cli_delete_session_purges_persona_memory_vectors(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=1)
+    vector_store = RecordingVectorStore()
+    backup_dir = tmp_path / "backups"
+
+    with (
+        patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.cli._backup_database", return_value=backup_dir / "backup.db"),
+    ):
+        result = runner.invoke(
+            app,
+            ["delete-session", "--session-id", "demo-session", "--yes"],
+            env={"DATABASE_PATH": str(database_path)},
+        )
+
+    assert result.exit_code == 0
+    assert vector_store.delete_session_calls == [
+        (RagCollection.SESSION_MEMORY, "demo-session"),
+        (RagCollection.PERSONA_MEMORY, "demo-session"),
+    ]
+
+
+def test_cli_reset_db_purges_persona_memory_vectors_for_every_session(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="session-a", turn_count=1)
+    _seed_session_with_turns(database_path, session_id="session-b", turn_count=1)
+    vector_store = RecordingVectorStore()
+    backup_dir = tmp_path / "backups"
+
+    with (
+        patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.cli._backup_database", return_value=backup_dir / "backup.db"),
+    ):
+        result = runner.invoke(
+            app,
+            ["reset-db", "--yes"],
+            env={"DATABASE_PATH": str(database_path)},
+        )
+
+    assert result.exit_code == 0
+    calls_by_collection: dict[RagCollection, set[str]] = {}
+    for collection, session_id in vector_store.delete_session_calls:
+        calls_by_collection.setdefault(collection, set()).add(session_id)
+    assert calls_by_collection[RagCollection.SESSION_MEMORY] == {"session-a", "session-b"}
+    assert calls_by_collection[RagCollection.PERSONA_MEMORY] == {"session-a", "session-b"}
