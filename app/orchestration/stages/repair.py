@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -22,6 +23,18 @@ CONTROLLED_FAILURE_TEXT = (
     "The system could not produce a response that passed validation. "
     "No memory or world state was changed."
 )
+
+
+def _emit_stage(on_stage: Callable[[str], None] | None, stage: str) -> None:
+    # Private duplicate of turn_orchestrator._emit_stage: importing from turn_orchestrator here
+    # would create an import cycle (turn_orchestrator imports this module via
+    # app.orchestration.stages).
+    if on_stage is None:
+        return
+    try:
+        on_stage(stage)
+    except Exception:  # noqa: BLE001 - progress reporting must never fail a turn
+        pass
 
 
 @dataclass(frozen=True)
@@ -203,6 +216,7 @@ class TurnRepairStage:
         critique: CritiqueStageResult,
         retrieval: RetrievalStageResult,
         routing: RoutingStageResult,
+        on_stage: Callable[[str], None] | None = None,
     ) -> RepairResolution:
         """Decide critique→repair end-to-end and return an orchestrator-applicable resolution."""
         if critique.failed:
@@ -239,6 +253,9 @@ class TurnRepairStage:
                 controlled_failure=False,
             )
 
+        # A repair pass will actually run from here on, so this is the first point where
+        # emitting the "repair" stage frame is not misleading to the SPA's progress display.
+        _emit_stage(on_stage, "repair")
         warnings: list[str] = []
         repair: RepairStageResult | None = None
         repair_failure: str | None = None

@@ -366,7 +366,6 @@ class TurnOrchestrator:
             )
         warnings.extend(critique.warnings)
 
-        _emit_stage(on_stage, "repair")
         resolution = await self.repair_stage.resolve(
             context=context,
             user_message=turn_input.message,
@@ -375,6 +374,7 @@ class TurnOrchestrator:
             critique=critique,
             retrieval=retrieval,
             routing=routing,
+            on_stage=on_stage,
         )
         warnings.extend(resolution.warnings)
         if resolution.repair_duration is not None:

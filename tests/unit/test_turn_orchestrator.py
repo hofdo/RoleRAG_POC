@@ -1092,6 +1092,33 @@ async def test_run_turn_reports_stage_progression(tmp_path: Path) -> None:
 
     assert stages[:4] == ["session", "retrieval", "routing", "generation"]
     assert stages[-2:] == ["persistence", "memory"]
+    # Clean-draft happy path: no repair pass runs, so no "repair" stage frame should fire.
+    assert "repair" not in stages
+
+
+@pytest.mark.asyncio
+async def test_run_turn_reports_repair_stage_when_critic_rejects(tmp_path: Path) -> None:
+    provider = SequencedProvider(
+        [
+            "Duke Erran handed me a silver map this morning.",
+            "I have heard enough to know the regent fears open daylight.",
+        ]
+    )
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider(), critic=RepairFriendlyCritic())
+    orchestrator.generation_stage.provider = provider
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+    stages: list[str] = []
+
+    result = await orchestrator.run_turn(turn_input=turn_input, on_stage=stages.append)
+
+    assert result.critic_status == CriticStatus.REPAIRED
+    assert "repair" in stages
+    # "repair" must fire after critique (the stage that decides whether repair is needed)
+    # and before persistence (which happens once the resolved draft is final).
+    assert stages.index("critique") < stages.index("repair") < stages.index("persistence")
 
 
 @pytest.mark.asyncio
