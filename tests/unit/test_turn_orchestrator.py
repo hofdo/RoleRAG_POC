@@ -1218,3 +1218,59 @@ async def test_run_turn_persists_diagnostics_matching_result(tmp_path: Path) -> 
     assert stored.diagnostics.warnings == result.warnings
     assert stored.diagnostics.memory_written == result.memory_written
     assert stored.diagnostics.finish_reason == result.finish_reason
+
+
+@pytest.mark.asyncio
+async def test_defer_memory_skips_curation_and_returns_a_job(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    fake_curator = StubMemoryCurator(
+        result=MemoryCuratorResult(write_memory=False, reason="should not be called")
+    )
+    orchestrator = _build_orchestrator(tmp_path, provider, memory_curator=fake_curator)
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input, defer_memory=True)
+
+    assert result.memory_written is False
+    assert result.deferred_memory is not None
+    assert result.deferred_memory.assistant_message == result.text
+    assert any("memory curation deferred" in w for w in result.warnings)
+    assert fake_curator.calls == 0  # the fixture's curator was never invoked
+
+
+@pytest.mark.asyncio
+async def test_run_deferred_memory_writes_and_updates_diagnostics(tmp_path: Path) -> None:
+    provider = FakeProvider()
+    fake_curator = StubMemoryCurator(
+        result=MemoryCuratorResult(
+            write_memory=True,
+            reason="durable promise",
+            memories=[
+                MemoryCandidate(
+                    summary="The player promised to return before dawn.",
+                    visibility=Visibility.PLAYER,
+                    importance=4,
+                    tags=["promise"],
+                    scene_id="rose-gallery",
+                    actor_id="archivist",
+                )
+            ],
+        )
+    )
+    orchestrator = _build_orchestrator(tmp_path, provider, memory_curator=fake_curator)
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input, defer_memory=True)
+    assert result.deferred_memory is not None
+    await orchestrator.run_deferred_memory(result.deferred_memory)
+
+    assert fake_curator.calls == 1
+    stored = orchestrator.turn_repository.list_all_turns("demo-session")[-1]
+    assert stored.diagnostics is not None
+    assert stored.diagnostics.memory_written is True

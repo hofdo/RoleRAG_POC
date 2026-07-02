@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable, Generator
 from contextlib import suppress
 from typing import Annotated, Any
@@ -43,7 +44,14 @@ from app.api.sse import build_turn_stream_frames, serialize_error_frame, seriali
 from app.composition import AppServices, build_file_loader, build_services
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.diagnostics.eval_runs import load_eval_run, load_eval_runs
-from app.domain import SessionState, StoredTurn, TurnInput, TurnOutcome, TurnResult
+from app.domain import (
+    DeferredMemoryJob,
+    SessionState,
+    StoredTurn,
+    TurnInput,
+    TurnOutcome,
+    TurnResult,
+)
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.orchestration.turn_errors import classify_warnings
 from app.persistence import (
@@ -55,6 +63,9 @@ from app.persistence import (
 
 router = APIRouter()
 RECENT_SESSIONS_LIMIT = 10
+
+logger = logging.getLogger(__name__)
+_DEFERRED_MEMORY_TASKS: set[asyncio.Task[None]] = set()
 
 ERROR_400_RESPONSE: dict[int | str, dict[str, Any]] = {400: {"model": ErrorResponse}}
 ERROR_404_RESPONSE: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
@@ -296,8 +307,11 @@ async def create_turn(
     session_id: str,
     request: CreateTurnRequest,
     services: Annotated[AppServices, Depends(get_turn_services)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> CreateTurnResponse:
-    return _to_turn_response(await _run_turn(session_id, request, services))
+    result = await _run_turn(session_id, request, services, defer_memory=True)
+    _schedule_deferred_memory(result, settings)
+    return _to_turn_response(result)
 
 
 @router.post(
@@ -318,7 +332,7 @@ async def stream_turn(
 
     async def event_stream() -> AsyncIterator[str]:
         turn = asyncio.create_task(
-            _run_turn(session_id, request, services, on_stage=on_stage)
+            _run_turn(session_id, request, services, on_stage=on_stage, defer_memory=True)
         )
         frame: asyncio.Task[str] | None = None
         try:
@@ -349,6 +363,7 @@ async def stream_turn(
                 result, text_chunk_chars=settings.sse_text_chunk_chars
             ):
                 yield out
+            _schedule_deferred_memory(result, settings)
         finally:
             # If the client disconnects (or any other early exit closes this
             # generator) before the turn finished, cancel it so it doesn't run
@@ -366,12 +381,35 @@ async def stream_turn(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+async def _run_deferred_memory_job(job: DeferredMemoryJob, settings: Settings) -> None:
+    # Fresh services: the request-scoped connection closes with the response.
+    # Cheap because embedding/vector clients are process-cached (Task 3).
+    services = build_services(settings, enable_retrieval=True)
+    try:
+        await services.orchestrator.run_deferred_memory(job)
+    except Exception:  # noqa: BLE001
+        # ponytail: best-effort post-response; single-user, no per-session lock --
+        # add one if concurrent turns per session ever become real
+        logger.warning("deferred memory curation failed", exc_info=True)
+    finally:
+        services.close()
+
+
+def _schedule_deferred_memory(result: TurnResult, settings: Settings) -> None:
+    if result.deferred_memory is None:
+        return
+    task = asyncio.create_task(_run_deferred_memory_job(result.deferred_memory, settings))
+    _DEFERRED_MEMORY_TASKS.add(task)
+    task.add_done_callback(_DEFERRED_MEMORY_TASKS.discard)
+
+
 async def _run_turn(
     session_id: str,
     request: CreateTurnRequest,
     services: AppServices,
     *,
     on_stage: Callable[[str], None] | None = None,
+    defer_memory: bool = False,
 ) -> TurnResult:
     try:
         result = await services.orchestrator.run_turn(
@@ -384,6 +422,7 @@ async def _run_turn(
                 force_local=request.force_local,
             ),
             on_stage=on_stage,
+            defer_memory=defer_memory,
         )
     except SessionNotFoundError as exc:
         raise ApiError(

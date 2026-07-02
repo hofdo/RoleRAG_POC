@@ -53,6 +53,10 @@ class TurnRepository(Protocol):
 
     def update_turn_diagnostics(self, turn_id: int, diagnostics: TurnDiagnostics) -> None: ...
 
+    def append_memory_outcome(
+        self, turn_id: int, *, memory_written: bool, warnings: list[str]
+    ) -> None: ...
+
     def list_recent_turns(self, session_id: str, limit: int) -> list[StoredTurn]: ...
 
     def list_all_turns(self, session_id: str) -> list[StoredTurn]: ...
@@ -296,6 +300,23 @@ class SQLiteTurnRepository:
         self.connection.execute(
             "UPDATE turns SET diagnostics_json = ? WHERE id = ?",
             (diagnostics.model_dump_json(), turn_id),
+        )
+        self.connection.commit()
+
+    def append_memory_outcome(
+        self, turn_id: int, *, memory_written: bool, warnings: list[str]
+    ) -> None:
+        row = self.connection.execute(
+            "SELECT diagnostics_json FROM turns WHERE id = ?", (turn_id,)
+        ).fetchone()
+        if row is None or row["diagnostics_json"] is None:
+            return
+        payload = json.loads(row["diagnostics_json"])
+        payload["memory_written"] = memory_written
+        payload["warnings"] = [*payload.get("warnings", []), *warnings]
+        self.connection.execute(
+            "UPDATE turns SET diagnostics_json = ? WHERE id = ?",
+            (json.dumps(payload), turn_id),
         )
         self.connection.commit()
 

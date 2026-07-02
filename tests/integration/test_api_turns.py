@@ -423,6 +423,8 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     assert response.status_code == 200
     payload = response.json()
     assert payload.pop("stage_timings")
+    warnings = payload.pop("warnings")
+    errors = payload.pop("errors")
     assert payload == {
         "status": "completed",
         "text": "Only archivists and locksmiths speak of that door.",
@@ -434,10 +436,20 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         "finish_reason": "stop",
         "memory_written": False,
         "critic_status": "accepted",
-        "warnings": [],
-        "errors": [],
         "retrieval": None,
     }
+    # Memory curation runs after this response on API turns (Task 8); the
+    # warning is additive and memory_written stays False until the deferred
+    # job completes.
+    assert warnings == ["memory curation deferred: runs after this response"]
+    assert errors == [
+        {
+            "category": "warning",
+            "stage": "general",
+            "message": "memory curation deferred: runs after this response",
+            "suggestion": None,
+        }
+    ]
     assert len(provider.requests) == 1
     assert len(retriever.calls) == 1
     prompt = provider.requests[0].messages[0].content
@@ -446,6 +458,39 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
     assert "cipher key" not in prompt
     assert "The regent ordered the poisoning." not in prompt
     assert "route_max_tokens" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_api_turn_defers_memory_curation(tmp_path: Path) -> None:
+    # API turns (Task 8) return immediately with memory_written=False and a
+    # deferred-curation warning; the curator LLM call runs after the response
+    # via a fire-and-forget task on app.api.routes._DEFERRED_MEMORY_TASKS. The
+    # background job builds its own real AppServices from Settings rather than
+    # reusing this test's injected fakes, so the completion guarantee (that
+    # run_deferred_memory actually writes memory + updates diagnostics) is
+    # covered at the unit level by
+    # test_run_deferred_memory_writes_and_updates_diagnostics; here we only
+    # assert the additive response contract and that scheduling didn't raise.
+    from app.api import routes
+
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "I ask what the locked door hides."},
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["memory_written"] is False
+    assert any("memory curation deferred" in w for w in body["warnings"])
+
+    pending = [task for task in routes._DEFERRED_MEMORY_TASKS if not task.done()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 def test_post_turn_response_includes_stage_timings(tmp_path: Path) -> None:
@@ -570,7 +615,10 @@ def test_post_turn_returns_retrieval_failure_warning_in_success_response(tmp_pat
 
     app.dependency_overrides.clear()
     assert response.status_code == 200
-    assert response.json()["warnings"] == ["retrieval skipped: qdrant offline"]
+    assert response.json()["warnings"] == [
+        "retrieval skipped: qdrant offline",
+        "memory curation deferred: runs after this response",
+    ]
 
 
 def test_post_turn_includes_structured_errors_derived_from_warnings(tmp_path: Path) -> None:
@@ -587,8 +635,13 @@ def test_post_turn_includes_structured_errors_derived_from_warnings(tmp_path: Pa
     app.dependency_overrides.clear()
     assert response.status_code == 200
     payload = response.json()
-    assert payload["warnings"] == ["retrieval skipped: qdrant offline"]
-    assert len(payload["errors"]) == 1
+    assert payload["warnings"] == [
+        "retrieval skipped: qdrant offline",
+        "memory curation deferred: runs after this response",
+    ]
+    # A second, unrelated error is derived from the deferred-memory warning
+    # (Task 8); this test only cares about the retrieval-derived one.
+    assert len(payload["errors"]) == 2
     error = payload["errors"][0]
     assert error["category"] == "degraded"
     assert error["stage"] == "retrieval"
@@ -736,8 +789,15 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 "finish_reason": "stop",
                 "memory_written": False,
                 "critic_status": "accepted",
-                "warnings": [],
-                "errors": [],
+                "warnings": ["memory curation deferred: runs after this response"],
+                "errors": [
+                    {
+                        "category": "warning",
+                        "stage": "general",
+                        "message": "memory curation deferred: runs after this response",
+                        "suggestion": None,
+                    }
+                ],
                 "retrieval": None,
             },
         ),
@@ -760,7 +820,10 @@ def test_stream_turn_emits_stage_frames_before_final(tmp_path: Path) -> None:
     assert body.index("event: stage") < body.index("event: final")
     stages = [event[1]["stage"] for event in _parse_sse(body) if event[0] == "stage"]
     assert stages[:4] == ["session", "retrieval", "routing", "generation"]
-    assert stages[-2:] == ["persistence", "memory"]
+    # API turns defer memory curation until after the response (Task 8), so the
+    # orchestrator no longer emits a "memory" stage frame on this path.
+    assert stages[-1] == "persistence"
+    assert "memory" not in stages
 
 
 def test_post_turn_stream_emits_error_frame_for_missing_session(tmp_path: Path) -> None:
@@ -923,7 +986,9 @@ class _StallingOrchestrator:
         self.started = asyncio.Event()
         self.cancelled = False
 
-    async def run_turn(self, *, turn_input: object, on_stage: object = None) -> object:
+    async def run_turn(
+        self, *, turn_input: object, on_stage: object = None, defer_memory: bool = False
+    ) -> object:
         self.started.set()
         try:
             await asyncio.Event().wait()  # blocks forever unless cancelled
@@ -1088,7 +1153,7 @@ def test_api_get_turn_detail_returns_stored_fields_and_diagnostics(tmp_path: Pat
     assert payload["finish_reason"] == "stop"
     assert payload["memory_written"] is False
     assert payload["critic_status"] == "accepted"
-    assert payload["warnings"] == []
+    assert payload["warnings"] == ["memory curation deferred: runs after this response"]
     assert {"retrieval", "routing", "generation", "critique"} <= set(payload["stage_timings"])
 
     retrieval = payload["retrieval"]

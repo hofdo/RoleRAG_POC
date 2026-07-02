@@ -629,3 +629,53 @@ def test_turn_repository_persists_and_loads_diagnostics(tmp_path: Path) -> None:
     reloaded = turn_repository.list_recent_turns("session-1", limit=1)[0]
     assert reloaded.diagnostics == diagnostics
     assert turn_repository.list_all_turns("session-1")[0].diagnostics == diagnostics
+
+
+def test_append_memory_outcome_merges_into_diagnostics(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    turn_repository.update_turn_diagnostics(
+        turn.id,
+        TurnDiagnostics(
+            retrieval=None,
+            stage_timings={"gen": 0.5},
+            critic_status=CriticStatus.ACCEPTED,
+            finish_reason="stop",
+            warnings=["memory curation deferred: runs after this response"],
+            memory_written=False,
+        ),
+    )
+
+    turn_repository.append_memory_outcome(
+        turn.id,
+        memory_written=True,
+        warnings=["memory dedup dropped 1 duplicate candidate(s)"],
+    )
+
+    stored = turn_repository.list_all_turns("session-1")[-1]
+    assert stored.diagnostics is not None
+    assert stored.diagnostics.memory_written is True
+    assert len(stored.diagnostics.warnings) == 2
+    assert stored.diagnostics.warnings == [
+        "memory curation deferred: runs after this response",
+        "memory dedup dropped 1 duplicate candidate(s)",
+    ]

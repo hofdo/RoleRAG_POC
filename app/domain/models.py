@@ -186,6 +186,17 @@ class TurnDiagnostics(BaseModel):
     memory_written: bool
 
 
+class DeferredMemoryJob(BaseModel):
+    """Inputs the memory stage needs when it runs after the response is sent."""
+
+    session_id: str
+    turn_id: int
+    user_message: str
+    assistant_message: str
+    retrieval_confidence: float | None
+    scene_complexity: int
+
+
 class TurnResult(BaseModel):
     text: str
     route: ModelRoute
@@ -196,6 +207,7 @@ class TurnResult(BaseModel):
     retrieval: TurnRetrievalDiagnostics | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
+    deferred_memory: "DeferredMemoryJob | None" = Field(default=None, exclude=True)
 
 
 class TurnError(BaseModel):

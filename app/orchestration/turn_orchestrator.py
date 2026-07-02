@@ -13,6 +13,7 @@ from app.agents.secret_guard import (
 )
 from app.domain import (
     CriticStatus,
+    DeferredMemoryJob,
     SessionState,
     TurnDiagnostics,
     TurnInput,
@@ -286,6 +287,7 @@ class TurnOrchestrator:
         *,
         turn_input: TurnInput,
         on_stage: Callable[[str], None] | None = None,
+        defer_memory: bool = False,
     ) -> TurnResult:
         timings: dict[str, float] = {}
         _emit_stage(on_stage, "session")
@@ -431,6 +433,37 @@ class TurnOrchestrator:
             self.session_repository.update_active_persona(
                 context.session.id, context.session.active_persona_id
             )
+        if defer_memory:
+            warnings.append("memory curation deferred: runs after this response")
+            self.turn_repository.update_turn_diagnostics(
+                persistence.turn.id,
+                TurnDiagnostics(
+                    retrieval=retrieval.diagnostics,
+                    stage_timings=timings,
+                    critic_status=critic_status,
+                    finish_reason=final_finish_reason,
+                    warnings=warnings,
+                    memory_written=False,
+                ),
+            )
+            return TurnResult(
+                text=final_text,
+                route=final_route,
+                finish_reason=final_finish_reason,
+                memory_written=False,
+                critic_status=critic_status,
+                warnings=warnings,
+                retrieval=retrieval.diagnostics,
+                stage_timings=timings,
+                deferred_memory=DeferredMemoryJob(
+                    session_id=context.session.id,
+                    turn_id=persistence.turn.id,
+                    user_message=turn_input.message,
+                    assistant_message=final_text,
+                    retrieval_confidence=retrieval.confidence,
+                    scene_complexity=routing.scene_complexity,
+                ),
+            )
         _emit_stage(on_stage, "memory")
         with _stage_timer(timings, "memory"):
             memory = await self.memory_stage.run(
@@ -466,6 +499,33 @@ class TurnOrchestrator:
             warnings=warnings,
             retrieval=retrieval.diagnostics,
             stage_timings=timings,
+        )
+
+    async def run_deferred_memory(self, job: DeferredMemoryJob) -> None:
+        """Memory stage for an already-persisted turn, after the response was sent.
+
+        Loads persona/scene via session_stage using the session's *currently stored*
+        active_persona_id. If Task 7's deferred persona-switch commit fired for this
+        turn, that commit already landed (run_turn commits it before scheduling this
+        job), so this always sees the switched persona -- never the pre-turn one.
+        """
+        session = self.session_stage.resume_session(job.session_id)
+        loader = self.session_stage.loader_for_content_root(session.content_root)
+        persona = loader.load_persona(session.active_persona_id)
+        scene = loader.load_scene(session.active_scene_id)
+        memory = await self.memory_stage.run(
+            session=session,
+            scene=scene,
+            persona=persona,
+            user_message=job.user_message,
+            assistant_message=job.assistant_message,
+            retrieval_confidence=job.retrieval_confidence,
+            scene_complexity=job.scene_complexity,
+        )
+        self.turn_repository.append_memory_outcome(
+            job.turn_id,
+            memory_written=memory.memory_written,
+            warnings=list(memory.warnings),
         )
 
     def loader_for_session(self, session: SessionState) -> TurnDataLoader:
