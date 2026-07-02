@@ -115,7 +115,6 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
 
@@ -139,7 +138,6 @@ async def test_turn_orchestrator_resumes_session_and_uses_recent_turn_window(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
 

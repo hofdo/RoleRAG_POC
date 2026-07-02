@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain import MemoryCandidate, MemoryEpisode, Visibility
 from app.llm.provider import LlmProvider
+from app.llm.router import ModelProviderName
 from app.memory import MemoryEpisodeStore
 from app.memory.consolidation import (
     SUMMARY_TAG,
@@ -64,10 +65,9 @@ class MemoryConsolidator:
             return ()
 
         warnings: list[str] = []
-        route = self.routing_stage.memory(
-            retrieval_confidence=retrieval_confidence,
-            scene_complexity=scene_complexity,
-        )
+        # Task 3 threads the session provider + cloud dispatch; this stage only holds
+        # a local provider object, so it routes (and dispatches) local for now.
+        route = self.routing_stage.memory(provider=ModelProviderName.LOCAL)
         try:
             summary_text = await self.memory_curator.consolidate(
                 provider=self.provider,

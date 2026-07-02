@@ -109,7 +109,9 @@ class TurnCritiqueStage:
                 critique=None,
                 warnings=("critic gated: low-risk turn",),
             )
-        route = self.routing_stage.critic()
+        # Task 3 threads the session provider + cloud dispatch; this stage only holds
+        # a local provider object, so it routes (and dispatches) local for now.
+        route = self.routing_stage.critic(provider=ModelProviderName.LOCAL)
         try:
             critique = await self.critic_agent.evaluate(
                 provider=self.provider,

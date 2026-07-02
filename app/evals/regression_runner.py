@@ -20,7 +20,7 @@ from app.llm.provider import (
     LlmResponse,
     generate_with_truncation_retry,
 )
-from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
+from app.llm.router import ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.orchestration.draft_validator import validate_draft
 
 
@@ -47,7 +47,7 @@ def run_regressions() -> RegressionReport:
         asyncio.run(_memory_result(fixture)),
         _memory_continuity_result(),
         _draft_validation_result(),
-        _cloud_routing_result(fixture),
+        _provider_binding_result(fixture),
         _containment_result(),
         asyncio.run(_structured_resilience_result()),
         _retrieval_miss_result(fixture),
@@ -202,81 +202,39 @@ def _draft_validation_result() -> CategoryResult:
     return CategoryResult(name="draft_validation", passed=all(checks.values()), checks=checks)
 
 
-def _cloud_routing_result(fixture: EvalFixture) -> CategoryResult:
-    off_route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.OFF,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-        user_requested_cloud=True,
-    )
-    ask_route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.ASK,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-    )
-    auto_route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-    )
-    critic_route = choose_route(
-        task=ModelTask.CRITIC,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=2,
-        retrieval_confidence=0.1,
-        scene_complexity=5,
-    )
-    memory_route = choose_route(
-        task=ModelTask.MEMORY_EXTRACTION,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=2,
-        retrieval_confidence=0.1,
-        scene_complexity=5,
-    )
+def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
+    """Every task runs on the session's bound provider; there is no escalation,
+    fallback, or per-turn override (Task 2 routing collapse)."""
+
+    def route_for(task: ModelTask, provider: ModelProviderName) -> ModelRoute:
+        return choose_route(
+            task=task,
+            session_provider=provider,
+            local_model=fixture.local_route.model,
+            cloud_model=fixture.cloud_route.model,
+            local_max_tokens=fixture.local_route.max_tokens,
+            cloud_max_tokens=fixture.cloud_route.max_tokens,
+            local_temperature=fixture.local_route.temperature,
+            cloud_temperature=fixture.cloud_route.temperature,
+        )
+
+    local_actor = route_for(ModelTask.ACTOR_RESPONSE, ModelProviderName.LOCAL)
+    cloud_actor = route_for(ModelTask.ACTOR_RESPONSE, ModelProviderName.CLOUD)
+    local_critic = route_for(ModelTask.CRITIC, ModelProviderName.LOCAL)
+    cloud_critic = route_for(ModelTask.CRITIC, ModelProviderName.CLOUD)
+    local_memory = route_for(ModelTask.MEMORY_EXTRACTION, ModelProviderName.LOCAL)
+    cloud_memory = route_for(ModelTask.MEMORY_EXTRACTION, ModelProviderName.CLOUD)
     checks = {
-        "cloud_mode_off_stays_local": off_route.provider == ModelProviderName.LOCAL,
-        "cloud_mode_ask_requires_confirmation": ask_route.requires_user_confirmation,
-        "cloud_mode_auto_allows_cloud": auto_route.provider == ModelProviderName.CLOUD,
-        "critic_stays_local": critic_route.provider == ModelProviderName.LOCAL,
-        "memory_extraction_stays_local": memory_route.provider == ModelProviderName.LOCAL,
+        "local_session_actor_stays_local": local_actor.provider == ModelProviderName.LOCAL,
+        "cloud_session_actor_routes_cloud": cloud_actor.provider == ModelProviderName.CLOUD,
+        "structured_tasks_greedy_on_local": (
+            local_critic.temperature == 0.0 and local_memory.temperature == 0.0
+        ),
+        "structured_tasks_greedy_on_cloud": (
+            cloud_critic.temperature == 0.0 and cloud_memory.temperature == 0.0
+        ),
     }
-    return CategoryResult(name="cloud_routing", passed=all(checks.values()), checks=checks)
+    return CategoryResult(name="provider_binding", passed=all(checks.values()), checks=checks)
 
 
 def _containment_result() -> CategoryResult:

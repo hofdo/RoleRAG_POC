@@ -74,9 +74,6 @@ export interface RuntimeStatus {
 
 export interface CreateTurnRequest {
   message: string;
-  request_cloud: boolean;
-  cloud_confirmed?: boolean;
-  force_local?: boolean;
   active_persona_id?: string;
 }
 

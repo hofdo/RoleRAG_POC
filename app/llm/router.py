@@ -4,6 +4,8 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+# Still used as default gating thresholds for the critic/curator auto-risk heuristic
+# (TurnCritiqueStage._is_risky_turn); routing itself no longer reads these.
 LOW_RETRIEVAL_CONFIDENCE = 0.45
 HIGH_SCENE_COMPLEXITY = 4
 
@@ -20,12 +22,10 @@ class ModelProviderName(str, Enum):
 
 
 class ModelTask(str, Enum):
-    INTENT_CLASSIFICATION = "intent_classification"
     ACTOR_RESPONSE = "actor_response"
     CRITIC = "critic"
     MEMORY_EXTRACTION = "memory_extraction"
     REPAIR = "repair"
-    SUMMARIZATION = "summarization"
 
 
 class ModelRoute(BaseModel):
@@ -34,99 +34,39 @@ class ModelRoute(BaseModel):
     max_tokens: int
     temperature: float
     reason: str
-    requires_user_confirmation: bool = False
 
 
 def choose_route(
     *,
     task: ModelTask,
-    cloud_mode: CloudMode,
+    session_provider: ModelProviderName,
     local_model: str,
     cloud_model: str,
     local_max_tokens: int,
     cloud_max_tokens: int,
     local_temperature: float,
     cloud_temperature: float,
-    failed_local_attempts: int,
-    retrieval_confidence: float | None,
-    scene_complexity: int,
-    user_requested_cloud: bool = False,
-    local_provider_failed: bool = False,
     local_structured_max_tokens: int | None = None,
-    low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
-    high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
 ) -> ModelRoute:
-    # Structured tasks (critic, memory) pin temperature=0.0 on purpose, overriding
-    # local_temperature: grammar-constrained JSON wants deterministic, greedy decoding,
-    # not the actor's creative sampling. There is intentionally no config knob for this.
-    if task == ModelTask.CRITIC:
-        return ModelRoute(
-            provider=ModelProviderName.LOCAL,
-            model=local_model,
-            max_tokens=local_structured_max_tokens or local_max_tokens,
-            temperature=0.0,
-            reason="critic stays local",
-        )
-
-    if task == ModelTask.MEMORY_EXTRACTION:
-        return ModelRoute(
-            provider=ModelProviderName.LOCAL,
-            model=local_model,
-            max_tokens=local_structured_max_tokens or local_max_tokens,
-            temperature=0.0,
-            reason="memory extraction stays local",
-        )
-
-    should_use_cloud = False
-    reason = "default local route"
-
-    if user_requested_cloud and task == ModelTask.ACTOR_RESPONSE:
-        should_use_cloud = True
-        reason = "user requested cloud"
-    elif local_provider_failed and task in {ModelTask.ACTOR_RESPONSE, ModelTask.REPAIR}:
-        should_use_cloud = True
-        reason = "local provider unavailable"
-    elif task == ModelTask.REPAIR and failed_local_attempts > 1:
-        should_use_cloud = True
-        reason = "local repair failed"
-    elif task == ModelTask.ACTOR_RESPONSE and scene_complexity >= high_scene_complexity:
-        should_use_cloud = True
-        reason = "high scene complexity"
-    elif (
-        task == ModelTask.ACTOR_RESPONSE
-        and retrieval_confidence is not None
-        and retrieval_confidence < low_retrieval_confidence
-    ):
-        should_use_cloud = True
-        reason = "low retrieval confidence"
-
-    if cloud_mode == CloudMode.OFF:
-        if should_use_cloud:
-            reason = f"cloud mode is off; cloud would have been used: {reason}"
-        else:
-            reason = "cloud mode is off"
-        return ModelRoute(
-            provider=ModelProviderName.LOCAL,
-            model=local_model,
-            max_tokens=local_max_tokens,
-            temperature=local_temperature,
-            reason=reason,
-        )
-
-    if should_use_cloud:
+    """Every task runs on the session's provider. There is deliberately no
+    escalation, fallback, or per-turn override: cloud is a peer choice made at
+    session creation, never a rescue mechanism (decision 2026-07-02)."""
+    structured = task in {ModelTask.CRITIC, ModelTask.MEMORY_EXTRACTION}
+    if session_provider == ModelProviderName.CLOUD:
         return ModelRoute(
             provider=ModelProviderName.CLOUD,
             model=cloud_model,
             max_tokens=cloud_max_tokens,
-            temperature=cloud_temperature,
-            reason=reason,
-            requires_user_confirmation=cloud_mode == CloudMode.ASK,
+            # Structured tasks pin greedy decoding on both providers.
+            temperature=0.0 if structured else cloud_temperature,
+            reason="session provider: cloud",
         )
-
     return ModelRoute(
         provider=ModelProviderName.LOCAL,
         model=local_model,
-        max_tokens=local_max_tokens,
-        temperature=local_temperature,
-        reason=reason,
+        max_tokens=(
+            (local_structured_max_tokens or local_max_tokens) if structured else local_max_tokens
+        ),
+        temperature=0.0 if structured else local_temperature,
+        reason="session provider: local",
     )

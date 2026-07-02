@@ -309,7 +309,6 @@ def test_turn_result_accepts_nested_model_route() -> None:
             "max_tokens": 900,
             "temperature": 0.6,
             "reason": "default local route",
-            "requires_user_confirmation": False,
         },
         "finish_reason": None,
         "memory_written": False,

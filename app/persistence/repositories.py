@@ -295,7 +295,9 @@ class SQLiteTurnRepository:
                 route.reason,
                 route.max_tokens,
                 route.temperature,
-                int(route.requires_user_confirmation),
+                # ModelRoute no longer has a confirmation flag; the column stays
+                # (no destructive migration) but is always written as 0 now.
+                0,
                 serialize_datetime(created_at),
                 outcome.value,
             ),
@@ -430,13 +432,14 @@ class SQLiteTurnRepository:
             persona_id=row["persona_id"],
             user_message=row["user_message"],
             assistant_message=row["assistant_message"],
+            # route_requires_user_confirmation is read from the row for legacy DBs but
+            # ModelRoute no longer has that field, so it is intentionally ignored here.
             route=ModelRoute(
                 provider=ModelProviderName(row["route_provider"]),
                 model=row["route_model"],
                 max_tokens=row["route_max_tokens"],
                 temperature=row["route_temperature"],
                 reason=row["route_reason"],
-                requires_user_confirmation=bool(row["route_requires_user_confirmation"]),
             ),
             created_at=parse_datetime(row["created_at"]),
             diagnostics=self._parse_diagnostics(row),

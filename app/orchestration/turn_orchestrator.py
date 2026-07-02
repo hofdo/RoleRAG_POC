@@ -25,7 +25,6 @@ from app.llm.provider import LlmProvider
 from app.llm.router import (
     HIGH_SCENE_COMPLEXITY,
     LOW_RETRIEVAL_CONFIDENCE,
-    CloudMode,
     ModelProviderName,
     ModelRoute,
 )
@@ -110,7 +109,6 @@ class TurnOrchestratorConfig:
     cloud_max_tokens: int
     local_temperature: float
     cloud_temperature: float
-    cloud_mode: CloudMode | str
     content_root: str = "data"
     local_structured_max_tokens: int = 350
     retrieval_top_k: int = 5
@@ -189,9 +187,6 @@ class TurnOrchestrator:
             cloud_max_tokens=config.cloud_max_tokens,
             local_temperature=config.local_temperature,
             cloud_temperature=config.cloud_temperature,
-            cloud_mode=config.cloud_mode,
-            low_retrieval_confidence=config.low_retrieval_confidence,
-            high_scene_complexity=config.high_scene_complexity,
         )
         self.retrieval_stage = TurnRetrievalStage(
             actor_context_retriever=actor_context_retriever,
@@ -254,14 +249,6 @@ class TurnOrchestrator:
     def actor_context_retriever(self, value: ActorContextRetrieving | None) -> None:
         self.retrieval_stage.actor_context_retriever = value
 
-    @property
-    def cloud_mode(self) -> CloudMode:
-        return self.routing_stage.cloud_mode
-
-    @cloud_mode.setter
-    def cloud_mode(self, value: CloudMode | str) -> None:
-        self.routing_stage.cloud_mode = CloudMode(value)
-
     def create_session(
         self,
         *,
@@ -303,21 +290,8 @@ class TurnOrchestrator:
         _emit_stage(on_stage, "routing")
         with _stage_timer(timings, "routing"):
             routing = self.routing_stage.actor(
-                turn_input=turn_input,
+                provider=context.session.provider,
                 scene=context.scene,
-                retrieval_confidence=retrieval.confidence,
-            )
-        if routing.route.requires_user_confirmation:
-            return TurnResult(
-                text="",
-                route=routing.route,
-                finish_reason=None,
-                memory_written=False,
-                critic_status=CriticStatus.SKIPPED,
-                warnings=[*retrieval.warnings, *routing.warnings],
-                retrieval=retrieval.diagnostics,
-                stage_timings=timings,
-                outcome=TurnOutcome.CONFIRMATION_REQUIRED,
             )
         try:
             _emit_stage(on_stage, "generation")
@@ -614,7 +588,13 @@ class TurnOrchestrator:
         return self.session_stage.loader_for_content_root(content_root)
 
     def _build_local_route(self, *, reason: str) -> ModelRoute:
-        return self.routing_stage.build_local_route(reason=reason)
+        return ModelRoute(
+            provider=ModelProviderName.LOCAL,
+            model=self.config.local_model,
+            max_tokens=self.config.local_max_tokens,
+            temperature=self.config.local_temperature,
+            reason=reason,
+        )
 
 
 __all__ = ["CONTROLLED_FAILURE_TEXT", "TurnOrchestrator"]

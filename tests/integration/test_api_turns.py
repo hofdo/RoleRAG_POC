@@ -22,7 +22,6 @@ from app.domain import (
 )
 from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
-from app.llm.router import CloudMode
 from app.main import app
 from app.memory import MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
@@ -250,7 +249,6 @@ def _build_services(tmp_path: Path) -> tuple[AppServices, SequencedFakeProvider,
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
     return (
@@ -312,7 +310,6 @@ def _build_services_with_memory(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
     return (
@@ -408,7 +405,6 @@ def _build_in_memory_retrieval_services(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
     return (
@@ -433,7 +429,6 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         json={
             "message": "I ask what the locked door hides.",
             "active_persona_id": "archivist",
-            "request_cloud": False,
         },
     )
 
@@ -450,7 +445,7 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         "route": {
             "provider": "local",
             "model": "local-model",
-            "reason": "default local route",
+            "reason": "session provider: local",
         },
         "finish_reason": "stop",
         "memory_written": False,
@@ -522,7 +517,6 @@ def test_post_turn_response_includes_stage_timings(tmp_path: Path) -> None:
         json={
             "message": "I ask what the locked door hides.",
             "active_persona_id": "archivist",
-            "request_cloud": False,
         },
     )
 
@@ -668,10 +662,10 @@ def test_post_turn_includes_structured_errors_derived_from_warnings(tmp_path: Pa
     assert "vector store (Qdrant)" in error["suggestion"]
 
 
-def test_post_turn_cloud_request_in_ask_mode_returns_confirmation_required(
-    tmp_path: Path,
-) -> None:
-    services, provider, _ = _build_services(tmp_path)
+def test_post_turn_rejects_the_removed_cloud_request_flags(tmp_path: Path) -> None:
+    # The per-turn confirm flow is gone: request_cloud/cloud_confirmed/force_local are
+    # no longer part of the contract, and CreateTurnRequest is extra="forbid".
+    services, _, _ = _build_services(tmp_path)
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
 
@@ -681,32 +675,7 @@ def test_post_turn_cloud_request_in_ask_mode_returns_confirmation_required(
     )
 
     app.dependency_overrides.clear()
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "confirmation_required"
-    assert payload["text"] == ""
-    assert payload["route"]["provider"] == "cloud"
-    assert payload["route"]["reason"] == "user requested cloud"
-    assert provider.requests == []
-
-
-def test_post_turn_force_local_declines_cloud_route(tmp_path: Path) -> None:
-    services, provider, _ = _build_services(tmp_path)
-    app.dependency_overrides[get_turn_services] = lambda: services
-    client = TestClient(app)
-
-    response = client.post(
-        "/sessions/session-1/turns",
-        json={"message": "Hello there.", "request_cloud": True, "force_local": True},
-    )
-
-    app.dependency_overrides.clear()
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "completed"
-    assert payload["route"]["provider"] == "local"
-    assert payload["route"]["reason"] == "user declined cloud"
-    assert len(provider.requests) == 1
+    assert response.status_code == 422
 
 
 def test_post_turn_response_does_not_expose_hidden_context_or_prompt_text(tmp_path: Path) -> None:
@@ -803,7 +772,7 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 "route": {
                     "provider": "local",
                     "model": "local-model",
-                    "reason": "default local route",
+                    "reason": "session provider: local",
                 },
                 "finish_reason": "stop",
                 "memory_written": False,
@@ -939,15 +908,15 @@ def test_post_turn_stream_terminal_event_includes_fail_open_warnings(tmp_path: P
 
     response = client.post(
         "/sessions/session-1/turns/stream",
-        json={"message": "Hello there.", "request_cloud": True},
+        json={"message": "Hello there."},
     )
 
     app.dependency_overrides.clear()
     assert response.status_code == 200
     events = _parse_sse(response.text)
-    assert events[-1][0] == "confirmation_required"
-    assert events[-1][1]["status"] == "confirmation_required"
-    assert events[-1][1]["warnings"] == ["retrieval skipped: qdrant offline"]
+    assert events[-1][0] == "final"
+    warnings = cast("list[str]", events[-1][1]["warnings"])
+    assert "retrieval skipped: qdrant offline" in warnings
 
 
 def test_post_turn_stream_does_not_expose_input_or_hidden_context(tmp_path: Path) -> None:
@@ -1066,7 +1035,6 @@ def test_post_turn_stream_emits_only_failure_for_controlled_repair_failure(
     services, provider, _ = _build_services(tmp_path)
     provider.responses.append("The rejected draft still contains hidden context.")
     services.orchestrator.critic_agent = RejectingCritic()
-    services.orchestrator.cloud_mode = CloudMode.OFF
     app.dependency_overrides[get_turn_services] = lambda: services
     client = TestClient(app)
 
@@ -1093,7 +1061,6 @@ def test_controlled_failure_turn_is_persisted_but_excluded_from_recent_view(
     services, provider, _ = _build_services(tmp_path)
     provider.responses.append("The rejected draft still contains hidden context.")
     services.orchestrator.critic_agent = RejectingCritic()
-    services.orchestrator.cloud_mode = CloudMode.OFF
     app.dependency_overrides[get_turn_services] = lambda: services
     app.dependency_overrides[get_read_services] = lambda: services
     client = TestClient(app)
@@ -1114,7 +1081,7 @@ def test_controlled_failure_turn_is_persisted_but_excluded_from_recent_view(
     assert len(detail_turns) == 1
     assert detail_turns[0]["outcome"] == "controlled_failure"
     assert detail_turns[0]["user_message"] == "Tell me the hidden truth."
-    assert detail_turns[0]["warnings"]
+    assert detail_turns[0]["critic_status"] == "rejected"
     # ...but excluded from the recent-dialogue view that feeds prompts.
     assert lookup.json()["recent_turns"] == []
 
@@ -1201,7 +1168,7 @@ def test_api_get_turn_detail_returns_stored_fields_and_diagnostics(tmp_path: Pat
     assert payload["route"] == {
         "provider": "local",
         "model": "local-model",
-        "reason": "default local route",
+        "reason": "session provider: local",
     }
     assert "T" in payload["created_at"]
     assert payload["finish_reason"] == "stop"

@@ -116,7 +116,9 @@ def test_turn_repository_appends_turn_and_loads_recent_turns_in_order(tmp_path: 
     assert turns[1].route.reason == "default local route"
 
 
-def test_turn_repository_round_trips_route_confirmation_metadata(tmp_path: Path) -> None:
+def test_turn_repository_writes_zero_for_the_legacy_confirmation_column(tmp_path: Path) -> None:
+    # ModelRoute no longer has a confirmation flag; the column is kept (no destructive
+    # migration) but must always be written as 0, and never read back onto the model.
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
     session_repository = SQLiteSessionRepository(connection)
@@ -136,8 +138,7 @@ def test_turn_repository_round_trips_route_confirmation_metadata(tmp_path: Path)
         model="cloud-model",
         max_tokens=1000,
         temperature=0.65,
-        reason="user requested cloud",
-        requires_user_confirmation=True,
+        reason="session provider: cloud",
     )
     turn_repository.append_turn(
         session_id="session-1",
@@ -151,8 +152,12 @@ def test_turn_repository_round_trips_route_confirmation_metadata(tmp_path: Path)
     turns = turn_repository.list_recent_turns("session-1", limit=1)
 
     assert turns[0].route.provider == ModelProviderName.CLOUD
-    assert turns[0].route.reason == "user requested cloud"
-    assert turns[0].route.requires_user_confirmation is True
+    assert turns[0].route.reason == "session provider: cloud"
+    row = connection.execute(
+        "SELECT route_requires_user_confirmation FROM turns WHERE session_id = ?",
+        ("session-1",),
+    ).fetchone()
+    assert row["route_requires_user_confirmation"] == 0
 
 
 def test_session_repository_updates_activity_timestamp(tmp_path: Path) -> None:

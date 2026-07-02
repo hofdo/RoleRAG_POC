@@ -6,7 +6,7 @@ from time import perf_counter
 
 from app.domain import CriticResult, CriticStatus, TurnOutcome
 from app.llm.provider import LlmMessage
-from app.llm.router import ModelProviderName, ModelRoute, ModelTask
+from app.llm.router import ModelRoute
 from app.orchestration.draft_validator import DraftValidationResult
 from app.orchestration.stages.critique import CritiqueStageResult, TurnCritiqueStage
 from app.orchestration.stages.generation import (
@@ -98,24 +98,21 @@ class TurnRepairStage:
         retrieval: RetrievalStageResult,
         routing: RoutingStageResult,
     ) -> RepairStageResult:
+        """One same-provider repair pass, then a re-critique. A rejection here goes
+        straight to controlled failure -- there is no second (cloud) attempt. The
+        repair route is the session's provider, same as the actor route, so on a
+        cloud session this pass runs on cloud."""
         warnings: list[str] = []
-        local_route = self.routing_stage.repair(
-            failed_local_attempts=1,
-            retrieval_confidence=retrieval.confidence,
-            scene_complexity=routing.scene_complexity,
-        )
+        repair_route = self.routing_stage.repair(provider=context.session.provider)
         repaired_text, repaired_route, repaired_finish_reason, generation_warnings = (
             await self.generation_stage.generate_messages(
-                route=local_route,
+                route=repair_route,
                 messages=self.critique_stage.critic_agent.build_local_repair_messages(
                     actor_messages=list(actor_messages),
                     rejected_draft=draft,
                     issues=critique.issues,
                     repair_instruction=critique.repair_instruction,
                 ),
-                task=ModelTask.REPAIR,
-                retrieval_confidence=retrieval.confidence,
-                scene_complexity=routing.scene_complexity,
             )
         )
         warnings.extend(generation_warnings)
@@ -129,8 +126,7 @@ class TurnRepairStage:
         warnings.extend(repaired_critique.warnings)
         if repaired_critique.failed:
             # The re-check critic errored: same fail-closed rule as the initial critique (#17).
-            # Don't serve the unvalidated repaired draft, and don't escalate to cloud (we have no
-            # validated issues to repair against).
+            # Don't serve the unvalidated repaired draft.
             return self._controlled_failure(
                 repaired_route, warnings, finish_reason=repaired_finish_reason
             )
@@ -142,68 +138,10 @@ class TurnRepairStage:
                 outcome=TurnOutcome.SUCCESS,
                 warnings=tuple(warnings),
             )
-
-        cloud_route = self.routing_stage.repair(
-            failed_local_attempts=2,
-            retrieval_confidence=retrieval.confidence,
-            scene_complexity=routing.scene_complexity,
-        )
-        if cloud_route.provider == ModelProviderName.LOCAL:
-            warnings.append(self.routing_stage.warning_for_skipped_cloud(cloud_route.reason))
-            return self._controlled_failure(
-                cloud_route,
-                warnings,
-                finish_reason=repaired_finish_reason,
-            )
-        if cloud_route.requires_user_confirmation:
-            warnings.append(
-                "cloud repair skipped: "
-                f"confirmation required for {cloud_route.model} ({cloud_route.reason})"
-            )
-            return self._controlled_failure(
-                cloud_route,
-                warnings,
-                finish_reason=repaired_finish_reason,
-            )
-
-        cloud_text, cloud_final_route, cloud_finish_reason, generation_warnings = (
-            await self.generation_stage.generate_messages(
-                route=cloud_route,
-                messages=self.critique_stage.critic_agent.build_cloud_repair_messages(
-                    actor_messages=list(actor_messages),
-                    issues=repaired_critique.critique.issues,
-                ),
-                task=ModelTask.REPAIR,
-                retrieval_confidence=retrieval.confidence,
-                scene_complexity=routing.scene_complexity,
-            )
-        )
-        warnings.extend(generation_warnings)
-        cloud_critique = await self.critique_stage.run(
-            persona=context.persona,
-            scene=context.scene,
-            user_message=user_message,
-            draft=cloud_text,
-            retrieved_chunks=retrieval.chunks,
-        )
-        warnings.extend(cloud_critique.warnings)
-        if cloud_critique.failed:
-            # Cloud re-check critic errored too: fail closed rather than serve unvalidated text.
-            return self._controlled_failure(
-                cloud_final_route, warnings, finish_reason=cloud_finish_reason
-            )
-        if cloud_critique.critique is None or cloud_critique.critique.accepted:
-            return RepairStageResult(
-                text=cloud_text,
-                route=cloud_final_route,
-                finish_reason=cloud_finish_reason,
-                outcome=TurnOutcome.SUCCESS,
-                warnings=tuple(warnings),
-            )
         return self._controlled_failure(
-            cloud_final_route,
+            repaired_route,
             warnings,
-            finish_reason=cloud_finish_reason,
+            finish_reason=repaired_finish_reason,
         )
 
     async def resolve(

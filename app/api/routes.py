@@ -49,7 +49,6 @@ from app.domain import (
     SessionState,
     StoredTurn,
     TurnInput,
-    TurnOutcome,
     TurnResult,
 )
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
@@ -427,9 +426,6 @@ async def _run_turn(
                 session_id=session_id,
                 message=request.message,
                 active_persona_id=request.active_persona_id,
-                user_requested_cloud=request.request_cloud,
-                cloud_confirmed=request.cloud_confirmed,
-                force_local=request.force_local,
             ),
             on_stage=on_stage,
             defer_memory=defer_memory,
@@ -734,11 +730,7 @@ def _to_recent_session_response(session: SessionState) -> RecentSessionResponse:
 
 def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
     return CreateTurnResponse(
-        status=(
-            "confirmation_required"
-            if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
-            else "completed"
-        ),
+        status="completed",
         outcome=result.outcome.value,
         text=result.text,
         route=RouteResponse(

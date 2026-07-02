@@ -15,7 +15,7 @@ from app.domain import (
 )
 from app.domain.visibility import Visibility
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
-from app.llm.router import CloudMode, ModelProviderName, ModelRoute
+from app.llm.router import ModelProviderName, ModelRoute
 from app.memory import RecentDialogueStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
@@ -279,7 +279,7 @@ class EvalFixture:
     def build_orchestrator(
         self,
         *,
-        cloud_mode: CloudMode,
+        session_provider: ModelProviderName,
         actor_response_text: str,
     ) -> tuple[TurnOrchestrator, SequencedFakeProvider, SequencedFakeProvider]:
         temp_dir = Path(tempfile.mkdtemp(prefix="rolerag-evals-"))
@@ -287,7 +287,9 @@ class EvalFixture:
         initialize_database(connection)
         session_repository = SQLiteSessionRepository(connection)
         turn_repository = SQLiteTurnRepository(connection)
-        session_repository.create_session(self.session)
+        session_repository.create_session(
+            self.session.model_copy(update={"provider": session_provider})
+        )
         local_provider = SequencedFakeProvider([actor_response_text])
         cloud_provider = SequencedFakeProvider(["Cloud answer"])
         orchestrator = TurnOrchestrator(
@@ -309,7 +311,6 @@ class EvalFixture:
                 cloud_max_tokens=self.cloud_route.max_tokens,
                 local_temperature=self.local_route.temperature,
                 cloud_temperature=self.cloud_route.temperature,
-                cloud_mode=cloud_mode,
             ),
         )
         return orchestrator, local_provider, cloud_provider

@@ -108,9 +108,6 @@ class CreateTurnRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=4000)
     active_persona_id: str | None = Field(default=None, min_length=1, max_length=200)
-    request_cloud: bool = False
-    cloud_confirmed: bool = False
-    force_local: bool = False
 
 
 class RouteResponse(BaseModel):
@@ -178,13 +175,6 @@ class StreamFinalPayload(BaseModel):
 class StreamFailurePayload(StreamFinalPayload):
     text: str
     outcome: str = "controlled_failure"
-
-
-class StreamConfirmationPayload(BaseModel):
-    status: str = "confirmation_required"
-    route: RouteResponse
-    warnings: list[str]
-    errors: list[TurnError] = Field(default_factory=list)
 
 
 class StreamStagePayload(BaseModel):

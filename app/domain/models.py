@@ -118,15 +118,11 @@ class TurnInput(BaseModel):
     session_id: str
     message: str
     active_persona_id: str | None = None
-    user_requested_cloud: bool = False
-    cloud_confirmed: bool = False
-    force_local: bool = False
 
 
 class TurnOutcome(str, Enum):
     SUCCESS = "success"
     CONTROLLED_FAILURE = "controlled_failure"
-    CONFIRMATION_REQUIRED = "confirmation_required"
 
 
 class StoredTurn(BaseModel):
@@ -140,8 +136,7 @@ class StoredTurn(BaseModel):
     route: ModelRoute
     created_at: datetime
     diagnostics: "TurnDiagnostics | None" = None
-    # CONFIRMATION_REQUIRED turns are never persisted; stored rows are
-    # SUCCESS or CONTROLLED_FAILURE.
+    # stored rows are SUCCESS or CONTROLLED_FAILURE.
     outcome: TurnOutcome = TurnOutcome.SUCCESS
 
 
@@ -149,9 +144,9 @@ class CriticStatus(str, Enum):
     """How critic validation concluded for the returned text.
 
     SKIPPED means the critic did not run -- either the gate judged the turn low-risk (and the
-    draft is served unvalidated by design), or there was no draft to validate (CONFIRMATION_REQUIRED
-    or a generation failure before critique). A critic that ERRORS no longer maps to SKIPPED: it
-    fails the turn closed (REJECTED + CONTROLLED_FAILURE) rather than serving unvalidated text.
+    draft is served unvalidated by design), or there was no draft to validate (a generation
+    failure before critique). A critic that ERRORS no longer maps to SKIPPED: it fails the turn
+    closed (REJECTED + CONTROLLED_FAILURE) rather than serving unvalidated text.
     """
 
     ACCEPTED = "accepted"

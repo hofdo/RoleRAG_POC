@@ -37,9 +37,9 @@ from app.diagnostics import (
     build_runtime_diagnostics,
     run_smoke,
 )
-from app.domain import TurnInput, TurnOutcome, TurnResult, Visibility
+from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
-from app.llm.router import ModelRoute, ModelTask, choose_route
+from app.llm.router import ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
@@ -183,7 +183,6 @@ def _build_services(
             cloud_max_tokens=settings.cloud_llm_max_tokens,
             local_temperature=settings.local_llm_temperature,
             cloud_temperature=settings.cloud_llm_temperature,
-            cloud_mode=settings.cloud_mode,
         ),
     )
     return AppServices(
@@ -400,25 +399,22 @@ def resume(
 @app.command()
 def route(
     task: Annotated[ModelTask, typer.Option(help="Model task to route")],
-    failed_local_attempts: Annotated[int, typer.Option(min=0)] = 0,
-    scene_complexity: Annotated[int, typer.Option(min=1)] = 1,
-    retrieval_confidence: Annotated[float | None, typer.Option(min=0.0, max=1.0)] = None,
-    request_cloud: Annotated[bool, typer.Option(help="Simulate an explicit cloud request")] = False,
+    provider: Annotated[
+        ModelProviderName,
+        typer.Option(help="Session provider to route this task on"),
+    ] = ModelProviderName.LOCAL,
 ) -> None:
     settings = get_settings()
     chosen_route = choose_route(
         task=task,
-        cloud_mode=settings.cloud_mode,
+        session_provider=provider,
         local_model=settings.local_llm_model,
         cloud_model=settings.cloud_llm_model,
         local_max_tokens=settings.local_llm_max_tokens,
         cloud_max_tokens=settings.cloud_llm_max_tokens,
         local_temperature=settings.local_llm_temperature,
         cloud_temperature=settings.cloud_llm_temperature,
-        failed_local_attempts=failed_local_attempts,
-        retrieval_confidence=retrieval_confidence,
-        scene_complexity=scene_complexity,
-        user_requested_cloud=request_cloud,
+        local_structured_max_tokens=settings.local_structured_max_tokens,
     )
     typer.echo(json.dumps(chosen_route.model_dump(), indent=2, sort_keys=True))
 
@@ -676,27 +672,12 @@ def _render_embedding_ab_table(
 def turn(
     message: Annotated[str, typer.Option(help="Player message for the demo turn")],
     session_id: Annotated[str, typer.Option(help="Session identifier")],
-    request_cloud: Annotated[
-        bool,
-        typer.Option(help="Request cloud quality for this turn"),
-    ] = False,
-    confirm_cloud: Annotated[
-        bool,
-        typer.Option(help="Pre-approve a confirmation-required cloud route"),
-    ] = False,
-    force_local: Annotated[
-        bool,
-        typer.Option(help="Decline cloud routing and answer locally"),
-    ] = False,
 ) -> None:
     settings = get_settings()
     services = _build_services(settings, enable_retrieval=True)
     turn_input = TurnInput(
         session_id=session_id,
         message=message,
-        user_requested_cloud=request_cloud,
-        cloud_confirmed=confirm_cloud,
-        force_local=force_local,
     )
     try:
         result = asyncio.run(
@@ -705,24 +686,6 @@ def turn(
                 turn_input=turn_input,
             )
         )
-        if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED:
-            approved = typer.confirm(
-                f"Route this turn to cloud model {result.route.model}? "
-                f"Reason: {result.route.reason}",
-                default=False,
-            )
-            result = asyncio.run(
-                _run_turn(
-                    services=services,
-                    turn_input=turn_input.model_copy(
-                        update=(
-                            {"cloud_confirmed": True}
-                            if approved
-                            else {"force_local": True}
-                        )
-                    ),
-                )
-            )
     except (ProviderTimeoutError, ProviderUnavailableError) as exc:
         services.close()
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)

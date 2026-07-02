@@ -151,7 +151,6 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         cloud_max_tokens=settings.cloud_llm_max_tokens,
         local_temperature=settings.local_llm_temperature,
         cloud_temperature=settings.cloud_llm_temperature,
-        cloud_mode=settings.cloud_mode,
         retrieval_top_k=settings.rag_default_top_k,
         max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
         recent_dialogue_max_message_chars=settings.recent_dialogue_max_message_chars,

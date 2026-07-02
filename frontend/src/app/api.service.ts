@@ -271,9 +271,6 @@ export class ApiService {
       signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
         message: request.message,
-        request_cloud: request.request_cloud,
-        cloud_confirmed: request.cloud_confirmed ?? false,
-        force_local: request.force_local ?? false,
         active_persona_id: request.active_persona_id ?? null,
       }),
     });

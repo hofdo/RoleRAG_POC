@@ -16,7 +16,7 @@ from app.domain import (
     Visibility,
 )
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
-from app.llm.router import CloudMode, ModelProviderName
+from app.llm.router import ModelProviderName
 from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
@@ -159,7 +159,7 @@ def _build_orchestrator(
     *,
     provider: SequencedFakeProvider,
     critic: FakeCritic,
-    cloud_mode: CloudMode = CloudMode.ASK,
+    session_provider: ModelProviderName = ModelProviderName.LOCAL,
     cloud_provider: SequencedFakeProvider | None = None,
     memory_curator: RecordingMemoryCurator | None = None,
     critic_gating: str = "always",
@@ -174,6 +174,7 @@ def _build_orchestrator(
             active_scene_id="rose-gallery",
             active_persona_id="archivist",
             player_name="Avery",
+            provider=session_provider,
         )
     )
     turn_repository = SQLiteTurnRepository(connection)
@@ -195,7 +196,6 @@ def _build_orchestrator(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode=cloud_mode,
             critic_gating=critic_gating,
         ),
     )
@@ -281,12 +281,16 @@ async def test_orchestrator_memory_curator_receives_final_response_not_rejected_
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
+async def test_orchestrator_fails_closed_after_a_single_repair_pass_is_still_rejected(
     tmp_path: Path,
 ) -> None:
+    # Single same-provider repair pass: rejected -> repaired-once -> still rejected ->
+    # controlled failure. There is no second (cloud) attempt -- the provider only
+    # ever emits two responses (initial draft + the one repair attempt).
+    fake_provider = SequencedFakeProvider(["Rejected draft", "Still rejected draft"])
     orchestrator, turn_repository, _ = _build_orchestrator(
         tmp_path,
-        provider=SequencedFakeProvider(["Rejected draft", "Still rejected draft"]),
+        provider=fake_provider,
         critic=FakeCritic(
             [
                 CriticResult(
@@ -301,7 +305,6 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
                 ),
             ]
         ),
-        cloud_mode=CloudMode.OFF,
     )
 
     result = await orchestrator.run_turn(
@@ -322,18 +325,16 @@ async def test_orchestrator_does_not_use_cloud_repair_when_cloud_mode_is_off(
             "model": "local-model",
             "max_tokens": 700,
             "temperature": 0.75,
-            "reason": "cloud mode is off; cloud would have been used: local repair failed",
-            "requires_user_confirmation": False,
+            "reason": "session provider: local",
         },
         "finish_reason": "stop",
         "memory_written": False,
         "critic_status": CriticStatus.REJECTED,
-        "warnings": [
-            "cloud actor skipped: cloud mode is off",
-            "cloud actor skipped: cloud mode is off (local repair failed)",
-        ],
+        "warnings": [],
         "retrieval": None,
     }
+    # Exactly two generation calls: the initial draft and the one repair attempt.
+    assert len(fake_provider.requests) == 2
     # New contract: the failed turn persists (outcome flag, queryable diagnostics)
     # but never re-enters the recent-dialogue prompt context.
     stored = turn_repository.list_all_turns("demo-session")
@@ -424,7 +425,6 @@ async def test_critic_status_is_rejected_when_repair_is_exhausted(tmp_path: Path
                 CriticResult(accepted=False, issues=["leak"]),
             ]
         ),
-        cloud_mode=CloudMode.OFF,
     )
 
     result = await orchestrator.run_turn(
@@ -468,7 +468,6 @@ async def test_repair_recheck_critic_error_fails_closed(tmp_path: Path) -> None:
                 ValueError("critic output invalid on re-check"),
             ]
         ),
-        cloud_mode=CloudMode.OFF,
     )
 
     result = await orchestrator.run_turn(

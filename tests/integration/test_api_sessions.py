@@ -94,7 +94,6 @@ def _build_services(tmp_path: Path) -> AppServices:
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
     return AppServices(

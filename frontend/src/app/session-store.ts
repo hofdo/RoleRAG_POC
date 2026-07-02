@@ -154,11 +154,12 @@ export class SessionStore {
     }
   }
 
+  // requestCloud is accepted (message-input still passes it) but ignored: the
+  // per-turn cloud request flow is gone -- routing is decided entirely by the
+  // session's bound provider now. UI removal of the checkbox is Task 5.
   sendMessage(message: string, requestCloud: boolean): Promise<boolean> {
-    return this.runTurn(
-      message,
-      buildTurnRequest(message, requestCloud, { personaId: this.personaOverride() }),
-    );
+    void requestCloud;
+    return this.runTurn(message, buildTurnRequest(message, { personaId: this.personaOverride() }));
   }
 
   // Switch the active scene mid-campaign. Turns already store per-turn scene_id, so
@@ -187,10 +188,7 @@ export class SessionStore {
     if (!pending) return Promise.resolve(true);
     return this.runTurn(
       pending.message,
-      buildTurnRequest(pending.message, true, {
-        cloudConfirmed: true,
-        personaId: this.personaOverride(),
-      }),
+      buildTurnRequest(pending.message, { personaId: this.personaOverride() }),
     );
   }
 
@@ -201,10 +199,7 @@ export class SessionStore {
     if (!pending) return Promise.resolve(true);
     return this.runTurn(
       pending.message,
-      buildTurnRequest(pending.message, false, {
-        forceLocal: true,
-        personaId: this.personaOverride(),
-      }),
+      buildTurnRequest(pending.message, { personaId: this.personaOverride() }),
     );
   }
 

@@ -136,7 +136,6 @@ async def _evaluate_memory_continuity() -> MemoryContinuityResult:
                 cloud_max_tokens=fixture.cloud_route.max_tokens,
                 local_temperature=fixture.local_route.temperature,
                 cloud_temperature=fixture.cloud_route.temperature,
-                cloud_mode="off",
             ),
         )
 

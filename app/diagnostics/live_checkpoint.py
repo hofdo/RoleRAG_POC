@@ -422,7 +422,7 @@ def run_checkpoint(
             turn = _post_json(
                 client,
                 f"/sessions/{session_id}/turns",
-                {"message": prompt, "request_cloud": False},
+                {"message": prompt},
             )
             duration_seconds = monotonic() - started
             route = turn.get("route", {})

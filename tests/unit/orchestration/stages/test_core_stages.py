@@ -21,7 +21,7 @@ from app.domain import (
     Visibility,
 )
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
-from app.llm.router import CloudMode, ModelProviderName, ModelRoute
+from app.llm.router import ModelProviderName, ModelRoute
 from app.memory import MemoryEpisodeStore
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages import (
@@ -60,7 +60,7 @@ def _context() -> LoadedTurnContext:
     )
 
 
-def _routing(*, cloud_mode: CloudMode = CloudMode.ASK) -> TurnRoutingStage:
+def _routing() -> TurnRoutingStage:
     return TurnRoutingStage(
         local_model="local",
         cloud_model="cloud",
@@ -69,7 +69,6 @@ def _routing(*, cloud_mode: CloudMode = CloudMode.ASK) -> TurnRoutingStage:
         cloud_max_tokens=1000,
         local_temperature=0.75,
         cloud_temperature=0.65,
-        cloud_mode=cloud_mode,
     )
 
 
@@ -129,54 +128,16 @@ def test_retrieval_stage_degrades_to_warning() -> None:
     assert result.warnings == ("retrieval skipped: offline",)
 
 
-def test_routing_stage_keeps_confirmation_required_cloud_route() -> None:
-    result = _routing().actor(
-        turn_input=TurnInput(
-            session_id="session",
-            message="Use cloud.",
-            user_requested_cloud=True,
-        ),
-        scene=_context().scene,
-        retrieval_confidence=None,
-    )
+def test_routing_stage_actor_routes_on_the_given_provider() -> None:
+    local_result = _routing().actor(provider=ModelProviderName.LOCAL, scene=_context().scene)
+    cloud_result = _routing().actor(provider=ModelProviderName.CLOUD, scene=_context().scene)
 
-    assert result.route.provider == ModelProviderName.CLOUD
-    assert result.route.requires_user_confirmation is True
-    assert result.route.reason == "user requested cloud"
-    assert result.warnings == ()
-
-
-def test_routing_stage_cloud_confirmed_clears_confirmation_flag() -> None:
-    result = _routing().actor(
-        turn_input=TurnInput(
-            session_id="session",
-            message="Use cloud.",
-            user_requested_cloud=True,
-            cloud_confirmed=True,
-        ),
-        scene=_context().scene,
-        retrieval_confidence=None,
-    )
-
-    assert result.route.provider == ModelProviderName.CLOUD
-    assert result.route.requires_user_confirmation is False
-
-
-def test_routing_stage_force_local_overrides_cloud_request() -> None:
-    result = _routing().actor(
-        turn_input=TurnInput(
-            session_id="session",
-            message="Use cloud.",
-            user_requested_cloud=True,
-            force_local=True,
-        ),
-        scene=_context().scene,
-        retrieval_confidence=None,
-    )
-
-    assert result.route.provider == ModelProviderName.LOCAL
-    assert result.route.reason == "user declined cloud"
-    assert result.warnings == ()
+    assert local_result.route.provider == ModelProviderName.LOCAL
+    assert local_result.route.reason == "session provider: local"
+    assert local_result.warnings == ()
+    assert cloud_result.route.provider == ModelProviderName.CLOUD
+    assert cloud_result.route.reason == "session provider: cloud"
+    assert cloud_result.warnings == ()
 
 
 def test_persistence_stage_appends_before_updating_session_activity() -> None:

@@ -27,17 +27,6 @@ function completedTurn(text: string): TurnResult {
   };
 }
 
-const confirmationTurn: TurnResult = {
-  status: 'confirmation_required',
-  text: '',
-  route: { provider: 'cloud', model: 'c', reason: 'ask' },
-  finish_reason: null,
-  memory_written: false,
-  critic_status: 'skipped',
-  warnings: [],
-  retrieval: null,
-};
-
 const sessionDetailFixture: GetSessionResponse = {
   session_id: 's1',
   world_id: 'w',
@@ -174,95 +163,14 @@ describe('SessionStore turn flow', () => {
     expect(store.busy()).toBe(false);
   });
 
-  it('holds the message and does not append when confirmation is required', async () => {
+  it('sendMessage sends only message and active_persona_id (no cloud flags)', async () => {
     const { store, api } = setup();
-    api.next = confirmationTurn;
 
-    await store.sendMessage('go cloud?', true);
+    await store.sendMessage('a question', false);
 
-    expect(store.pendingConfirm()).toEqual({ message: 'go cloud?' });
-    expect(store.transcript()).toEqual([]);
-  });
-
-  it('confirmCloud resubmits the held message with cloud_confirmed and clears the prompt', async () => {
-    const { store, api } = setup();
-    api.next = confirmationTurn;
-    await store.sendMessage('go cloud?', true);
-
-    api.next = completedTurn('cloud reply');
-    await store.confirmCloud();
-
-    const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({
-      message: 'go cloud?',
-      request_cloud: true,
-      cloud_confirmed: true,
-      force_local: false,
+    expect(api.calls.at(-1)!.request).toEqual({
+      message: 'a question',
       active_persona_id: undefined,
-    });
-    expect(store.pendingConfirm()).toBeNull();
-    expect(store.transcript().at(-1)).toEqual({ role: 'assistant', text: 'cloud reply', source: 'new' });
-  });
-
-  it('forceLocal resubmits the held message pinned to local', async () => {
-    const { store, api } = setup();
-    api.next = confirmationTurn;
-    await store.sendMessage('go cloud?', true);
-
-    api.next = completedTurn('local reply');
-    await store.forceLocal();
-
-    const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({
-      message: 'go cloud?',
-      request_cloud: false,
-      cloud_confirmed: false,
-      force_local: true,
-      active_persona_id: undefined,
-    });
-    expect(store.pendingConfirm()).toBeNull();
-  });
-
-  // The persona switch is not durably committed by the backend until a turn actually
-  // persists (TurnOrchestrator.run_turn commits it only after the persistence stage
-  // succeeds). The original request that triggered CONFIRMATION_REQUIRED never
-  // persisted, so the resubmit must carry the override again -- it cannot rely on an
-  // already-persisted switch server-side.
-  it('confirmCloud resubmits the persona override that triggered the original confirmation', async () => {
-    const { store, api } = setup();
-    store.personaOverride.set('warden');
-    api.next = confirmationTurn;
-    await store.sendMessage('go cloud?', true);
-
-    api.next = completedTurn('cloud reply');
-    await store.confirmCloud();
-
-    const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({
-      message: 'go cloud?',
-      request_cloud: true,
-      cloud_confirmed: true,
-      force_local: false,
-      active_persona_id: 'warden',
-    });
-  });
-
-  it('forceLocal resubmits the persona override that triggered the original confirmation', async () => {
-    const { store, api } = setup();
-    store.personaOverride.set('warden');
-    api.next = confirmationTurn;
-    await store.sendMessage('go cloud?', true);
-
-    api.next = completedTurn('local reply');
-    await store.forceLocal();
-
-    const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({
-      message: 'go cloud?',
-      request_cloud: false,
-      cloud_confirmed: false,
-      force_local: true,
-      active_persona_id: 'warden',
     });
   });
 
@@ -306,13 +214,6 @@ describe('SessionStore turn flow', () => {
   it('returns true from sendMessage when the turn completes', async () => {
     const { store } = setup();
     const ok = await store.sendMessage('hello', false);
-    expect(ok).toBeTrue();
-  });
-
-  it('returns true from sendMessage when confirmation is required', async () => {
-    const { store, api } = setup();
-    api.next = confirmationTurn;
-    const ok = await store.sendMessage('go cloud?', true);
     expect(ok).toBeTrue();
   });
 

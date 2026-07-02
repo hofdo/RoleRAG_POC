@@ -507,7 +507,6 @@ with httpx.Client(base_url=base_url, timeout=_api_flow_timeout) as client:
         f"/sessions/{session_id}/turns",
         json={
             "message": "I request a quiet account of what the Rose Gallery knows about the regent.",
-            "request_cloud": False,
         },
     )
     duration_seconds = time.monotonic() - started

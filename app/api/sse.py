@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 from app.api.schemas import (
     RouteResponse,
-    StreamConfirmationPayload,
     StreamErrorPayload,
     StreamFailurePayload,
     StreamFinalPayload,
@@ -26,17 +25,6 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
         reason=result.route.reason,
     )
     retrieval = to_retrieval_diagnostics_response(result.retrieval)
-    if result.outcome == TurnOutcome.CONFIRMATION_REQUIRED:
-        return [
-            _serialize_frame(
-                "confirmation_required",
-                StreamConfirmationPayload(
-                    route=route,
-                    warnings=result.warnings,
-                    errors=classify_warnings(result.warnings),
-                ),
-            )
-        ]
     if result.outcome == TurnOutcome.CONTROLLED_FAILURE:
         return [
             _serialize_frame(

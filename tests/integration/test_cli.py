@@ -289,93 +289,26 @@ def test_cli_route_shows_local_route_by_default() -> None:
     assert '"provider": "local"' in result.stdout
 
 
-def test_cli_route_requires_confirmation_in_ask_mode() -> None:
+def test_cli_route_shows_cloud_route_when_provider_is_cloud() -> None:
     result = runner.invoke(
         app,
-        ["route", "--task", "repair", "--failed-local-attempts", "2"],
-        env={"CLOUD_MODE": "ask"},
+        ["route", "--task", "repair", "--provider", "cloud"],
     )
 
     assert result.exit_code == 0
     assert '"provider": "cloud"' in result.stdout
-    assert '"requires_user_confirmation": true' in result.stdout
+    assert '"reason": "session provider: cloud"' in result.stdout
 
 
-def test_cli_route_supports_explicit_cloud_request() -> None:
+def test_cli_route_defaults_to_local_provider() -> None:
     result = runner.invoke(
         app,
-        ["route", "--task", "actor_response", "--request-cloud"],
-        env={"CLOUD_MODE": "ask"},
-    )
-
-    assert result.exit_code == 0
-    assert '"provider": "cloud"' in result.stdout
-    assert '"reason": "user requested cloud"' in result.stdout
-
-
-def test_cli_route_forces_local_in_off_mode() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "route",
-            "--task",
-            "repair",
-            "--failed-local-attempts",
-            "2",
-        ],
-        env={"CLOUD_MODE": "off"},
+        ["route", "--task", "repair"],
     )
 
     assert result.exit_code == 0
     assert '"provider": "local"' in result.stdout
-    assert (
-        '"reason": "cloud mode is off; cloud would have been used: local repair failed"'
-        in result.stdout
-    )
-
-
-def test_cli_turn_prompts_for_confirmation_in_ask_mode(tmp_path: Path) -> None:
-    context_retriever = FakeActorContextRetriever(
-        [
-            RetrievedChunk(
-                id="lore-1",
-                source="demo_lore.md",
-                source_type="lore",
-                text="The Rose Gallery has mirrored columns.",
-                score=0.1,
-                visibility=Visibility.PLAYER,
-            )
-        ]
-    )
-    provider = FakeProvider()
-    with (
-        patch("app.cli._build_local_provider", return_value=provider),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
-        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
-    ):
-        runner.invoke(
-            app,
-            ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
-            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
-        )
-        result = runner.invoke(
-            app,
-            [
-                "turn",
-                "--session-id",
-                "demo-session",
-                "--message",
-                "What do I notice?",
-                "--request-cloud",
-            ],
-            env={"DATABASE_PATH": str(tmp_path / "sessions.db"), "CLOUD_MODE": "ask"},
-            input="n\n",
-        )
-
-    assert result.exit_code == 0
-    assert "Route this turn to cloud model" in result.stdout
-    assert "I have heard enough to know the regent fears open daylight." in result.stdout
+    assert '"reason": "session provider: local"' in result.stdout
 
 
 def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> None:

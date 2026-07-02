@@ -140,7 +140,6 @@ async def test_turn_orchestrator_persists_memory_episodes_after_successful_turn(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
 

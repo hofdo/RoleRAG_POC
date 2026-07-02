@@ -162,7 +162,6 @@ def run_smoke(*, settings: Settings | None = None, real_runtime: bool = False) -
             cloud_max_tokens=resolved_settings.cloud_llm_max_tokens,
             local_temperature=resolved_settings.local_llm_temperature,
             cloud_temperature=resolved_settings.cloud_llm_temperature,
-            cloud_mode=resolved_settings.cloud_mode,
             retrieval_top_k=resolved_settings.rag_default_top_k,
             max_retrieved_chunk_chars=resolved_settings.rag_max_retrieved_chunk_chars,
         ),

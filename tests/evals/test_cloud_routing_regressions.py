@@ -4,116 +4,63 @@ import pytest
 
 from app.domain import TurnInput
 from app.evals.fixtures import build_eval_fixture
-from app.llm.router import CloudMode, ModelProviderName, ModelTask, choose_route
+from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
+from app.llm.router import ModelProviderName, ModelTask, choose_route
 
 
-def test_cloud_mode_off_never_routes_to_cloud() -> None:
+def test_every_task_routes_to_the_session_provider() -> None:
     fixture = build_eval_fixture()
+    for provider in (ModelProviderName.LOCAL, ModelProviderName.CLOUD):
+        for task in (
+            ModelTask.ACTOR_RESPONSE,
+            ModelTask.REPAIR,
+            ModelTask.CRITIC,
+            ModelTask.MEMORY_EXTRACTION,
+        ):
+            route = choose_route(
+                task=task,
+                session_provider=provider,
+                local_model=fixture.local_route.model,
+                cloud_model=fixture.cloud_route.model,
+                local_max_tokens=fixture.local_route.max_tokens,
+                cloud_max_tokens=fixture.cloud_route.max_tokens,
+                local_temperature=fixture.local_route.temperature,
+                cloud_temperature=fixture.cloud_route.temperature,
+            )
+            assert route.provider == provider
 
-    route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.OFF,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-        user_requested_cloud=True,
-    )
 
-    assert route.provider == ModelProviderName.LOCAL
-    assert route.requires_user_confirmation is False
-
-
-def test_cloud_mode_ask_requires_confirmation() -> None:
+def test_structured_tasks_are_greedy_on_both_providers() -> None:
     fixture = build_eval_fixture()
-
-    route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.ASK,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-        user_requested_cloud=False,
-    )
-
-    assert route.provider == ModelProviderName.CLOUD
-    assert route.requires_user_confirmation is True
-
-
-def test_cloud_mode_auto_allows_deterministic_fallback() -> None:
-    fixture = build_eval_fixture()
-
-    route = choose_route(
-        task=ModelTask.ACTOR_RESPONSE,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=0,
-        retrieval_confidence=0.1,
-        scene_complexity=1,
-        user_requested_cloud=False,
-    )
-
-    assert route.provider == ModelProviderName.CLOUD
-    assert route.requires_user_confirmation is False
-
-
-def test_critic_and_memory_extraction_stay_local() -> None:
-    fixture = build_eval_fixture()
-
-    critic_route = choose_route(
-        task=ModelTask.CRITIC,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=2,
-        retrieval_confidence=0.1,
-        scene_complexity=5,
-    )
-    memory_route = choose_route(
-        task=ModelTask.MEMORY_EXTRACTION,
-        cloud_mode=CloudMode.AUTO,
-        local_model=fixture.local_route.model,
-        cloud_model=fixture.cloud_route.model,
-        local_max_tokens=fixture.local_route.max_tokens,
-        cloud_max_tokens=fixture.cloud_route.max_tokens,
-        local_temperature=fixture.local_route.temperature,
-        cloud_temperature=fixture.cloud_route.temperature,
-        failed_local_attempts=2,
-        retrieval_confidence=0.1,
-        scene_complexity=5,
-    )
-
-    assert critic_route.provider == ModelProviderName.LOCAL
-    assert memory_route.provider == ModelProviderName.LOCAL
+    for provider in (ModelProviderName.LOCAL, ModelProviderName.CLOUD):
+        for task in (ModelTask.CRITIC, ModelTask.MEMORY_EXTRACTION):
+            route = choose_route(
+                task=task,
+                session_provider=provider,
+                local_model=fixture.local_route.model,
+                cloud_model=fixture.cloud_route.model,
+                local_max_tokens=fixture.local_route.max_tokens,
+                cloud_max_tokens=fixture.cloud_route.max_tokens,
+                local_temperature=fixture.local_route.temperature,
+                cloud_temperature=fixture.cloud_route.temperature,
+            )
+            assert route.temperature == 0.0
 
 
 @pytest.mark.asyncio
-async def test_ask_mode_does_not_silently_call_cloud_provider() -> None:
+async def test_local_session_never_calls_the_cloud_provider() -> None:
     fixture = build_eval_fixture()
-    orchestrator, local_provider, cloud_provider = fixture.build_orchestrator(
-        cloud_mode=CloudMode.ASK,
+
+    class ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("cloud provider must never be called for a local session")
+
+    orchestrator, local_provider, _ = fixture.build_orchestrator(
+        session_provider=ModelProviderName.LOCAL,
         actor_response_text="Local answer",
     )
+    orchestrator.cloud_provider = ExplodingProvider()
+    orchestrator.generation_stage.cloud_provider = ExplodingProvider()
 
     result = await orchestrator.run_turn(
         turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
@@ -121,4 +68,3 @@ async def test_ask_mode_does_not_silently_call_cloud_provider() -> None:
 
     assert result.route.provider == ModelProviderName.LOCAL
     assert len(local_provider.requests) == 1
-    assert len(cloud_provider.requests) == 0

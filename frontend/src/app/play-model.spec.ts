@@ -38,22 +38,16 @@ describe('play-model', () => {
     expect(sel.sceneId).toBe('');
   });
 
-  it('builds a turn request with cloud flags', () => {
-    expect(buildTurnRequest('hi', true, { cloudConfirmed: true })).toEqual({
+  it('builds a turn request with just the message', () => {
+    expect(buildTurnRequest('hi')).toEqual({
       message: 'hi',
-      request_cloud: true,
-      cloud_confirmed: true,
-      force_local: false,
       active_persona_id: undefined,
     });
   });
 
   it('builds a turn request with a persona override', () => {
-    expect(buildTurnRequest('hi', false, { personaId: 'warden' })).toEqual({
+    expect(buildTurnRequest('hi', { personaId: 'warden' })).toEqual({
       message: 'hi',
-      request_cloud: false,
-      cloud_confirmed: false,
-      force_local: false,
       active_persona_id: 'warden',
     });
   });

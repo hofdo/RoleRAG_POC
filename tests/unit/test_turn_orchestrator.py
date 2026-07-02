@@ -15,6 +15,7 @@ from app.domain import (
     SceneState,
     SessionState,
     TurnInput,
+    TurnOutcome,
     Visibility,
 )
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
@@ -171,6 +172,8 @@ def _build_orchestrator(
     memory_curator: Any = None,
     memory_indexer: StubMemoryIndexer | None = None,
     actor_context_retriever: StubActorContextRetriever | None = None,
+    cloud_provider: LlmProvider | None = None,
+    session_provider: ModelProviderName = ModelProviderName.LOCAL,
 ) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
@@ -182,6 +185,7 @@ def _build_orchestrator(
             active_scene_id="rose-gallery",
             active_persona_id="archivist",
             player_name="Avery",
+            provider=session_provider,
         )
     )
     turn_repository = SQLiteTurnRepository(connection)
@@ -189,6 +193,7 @@ def _build_orchestrator(
     return TurnOrchestrator(
         loader=FakeLoader(),
         provider=provider,
+        cloud_provider=cloud_provider,
         critic_agent=critic or StubCritic(),
         session_repository=session_repository,
         turn_repository=turn_repository,
@@ -209,7 +214,6 @@ def _build_orchestrator(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
 
@@ -227,7 +231,7 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
 
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.route.provider == ModelProviderName.LOCAL
-    assert result.route.reason == "default local route"
+    assert result.route.reason == "session provider: local"
     assert result.memory_written is False
     assert result.warnings == []
     dump = result.model_dump()
@@ -246,8 +250,7 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
             "model": "local-model",
             "max_tokens": 700,
             "temperature": 0.75,
-            "reason": "default local route",
-            "requires_user_confirmation": False,
+            "reason": "session provider: local",
         },
         "finish_reason": "stop",
         "memory_written": False,
@@ -414,7 +417,6 @@ async def test_turn_orchestrator_uses_stored_content_root_for_turns(tmp_path: Pa
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="ask",
         ),
     )
 
@@ -1008,7 +1010,6 @@ def test_turn_orchestrator_constructor_forwards_gating_modes(tmp_path: Path) -> 
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
-            cloud_mode="off",
             critic_gating="auto",
             curator_gating="auto",
         ),
@@ -1034,75 +1035,43 @@ class CloudCapableProvider(LlmProvider):
 
 
 @pytest.mark.asyncio
-async def test_turn_orchestrator_ask_mode_returns_confirmation_required_without_generation(
-    tmp_path: Path,
-) -> None:
-    from app.domain import TurnOutcome
+async def test_local_session_never_touches_the_cloud_provider(tmp_path: Path) -> None:
+    class ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("cloud provider must never be called for a local session")
 
-    provider = FakeProvider()
-    orchestrator = _build_orchestrator(tmp_path, provider)
-
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider(), cloud_provider=ExplodingProvider())
     result = await orchestrator.run_turn(
-        turn_input=TurnInput(
-            session_id="demo-session",
-            message="What have you heard about the regent?",
-            user_requested_cloud=True,
-        )
+        turn_input=TurnInput(session_id="demo-session", message="Hello")
     )
-
-    assert result.outcome == TurnOutcome.CONFIRMATION_REQUIRED
-    assert result.text == ""
-    assert result.route.provider == ModelProviderName.CLOUD
-    assert result.route.requires_user_confirmation is True
-    assert result.memory_written is False
-    assert provider.requests == []
-    assert orchestrator.turn_repository.count_turns("demo-session") == 0
-
-
-@pytest.mark.asyncio
-async def test_turn_orchestrator_cloud_confirmed_turn_routes_to_cloud(
-    tmp_path: Path,
-) -> None:
-    provider = FakeProvider()
-    cloud_provider = CloudCapableProvider()
-    orchestrator = _build_orchestrator(tmp_path, provider)
-    orchestrator.cloud_provider = cloud_provider
-    orchestrator.generation_stage.cloud_provider = cloud_provider
-
-    result = await orchestrator.run_turn(
-        turn_input=TurnInput(
-            session_id="demo-session",
-            message="What have you heard about the regent?",
-            user_requested_cloud=True,
-            cloud_confirmed=True,
-        )
-    )
-
-    assert result.route.provider == ModelProviderName.CLOUD
-    assert result.route.requires_user_confirmation is False
-    assert len(cloud_provider.requests) == 1
-    assert provider.requests == []
-
-
-@pytest.mark.asyncio
-async def test_turn_orchestrator_force_local_declines_cloud_route(
-    tmp_path: Path,
-) -> None:
-    provider = FakeProvider()
-    orchestrator = _build_orchestrator(tmp_path, provider)
-
-    result = await orchestrator.run_turn(
-        turn_input=TurnInput(
-            session_id="demo-session",
-            message="What have you heard about the regent?",
-            user_requested_cloud=True,
-            force_local=True,
-        )
-    )
-
+    assert result.outcome == TurnOutcome.SUCCESS
     assert result.route.provider == ModelProviderName.LOCAL
-    assert result.route.reason == "user declined cloud"
-    assert len(provider.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_cloud_session_never_touches_the_local_provider(tmp_path: Path) -> None:
+    class ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("local provider must never be called for a cloud session")
+
+    cloud_provider = CloudCapableProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        ExplodingProvider(),
+        cloud_provider=cloud_provider,
+        session_provider=ModelProviderName.CLOUD,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    assert result.route.provider == ModelProviderName.CLOUD
+    assert len(cloud_provider.requests) == 1
 
 
 class FirstOnlyProvider(LlmProvider):

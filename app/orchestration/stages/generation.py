@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.agents import ActorAgent
 from app.domain import TurnInput
 from app.llm.provider import LlmMessage, LlmProvider, LlmResponse
-from app.llm.router import ModelProviderName, ModelRoute, ModelTask
+from app.llm.router import ModelProviderName, ModelRoute
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
 from app.orchestration.stages.retrieval import RetrievalStageResult
@@ -82,9 +82,6 @@ class TurnGenerationStage:
         text, route, finish_reason, warnings = await self.generate_messages(
             route=routing.route,
             messages=messages,
-            task=ModelTask.ACTOR_RESPONSE,
-            retrieval_confidence=retrieval.confidence,
-            scene_complexity=routing.scene_complexity,
         )
         return GenerationStageResult(
             text=text,
@@ -129,39 +126,11 @@ class TurnGenerationStage:
         *,
         route: ModelRoute,
         messages: list[LlmMessage] | tuple[LlmMessage, ...],
-        task: ModelTask,
-        retrieval_confidence: float | None,
-        scene_complexity: int,
     ) -> tuple[str, ModelRoute, str | None, tuple[str, ...]]:
-        if route.requires_user_confirmation:
-            raise RuntimeError("confirmation-required route reached provider dispatch")
-        try:
-            response, used_route, complete_warnings = await self._generate_complete(
-                route=route, messages=list(messages)
-            )
-            return response.text, used_route, response.finish_reason, complete_warnings
-        except Exception as exc:
-            if route.provider != ModelProviderName.LOCAL:
-                raise
-            warnings = [f"local actor failed: {exc}"]
-            fallback_route = self.routing_stage.provider_failure(
-                task=task,
-                retrieval_confidence=retrieval_confidence,
-                scene_complexity=scene_complexity,
-            )
-            if fallback_route.provider == ModelProviderName.LOCAL:
-                raise
-            if fallback_route.requires_user_confirmation:
-                warnings.append(
-                    f"cloud actor skipped: confirmation required for {fallback_route.model} "
-                    f"({fallback_route.reason})"
-                )
-                raise
-            response, used_route, complete_warnings = await self._generate_complete(
-                route=fallback_route, messages=list(messages)
-            )
-            warnings.extend(complete_warnings)
-            return response.text, used_route, response.finish_reason, tuple(warnings)
+        response, used_route, complete_warnings = await self._generate_complete(
+            route=route, messages=list(messages)
+        )
+        return response.text, used_route, response.finish_reason, complete_warnings
 
     async def _generate_complete(
         self,

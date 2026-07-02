@@ -20,7 +20,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "memory",
         "memory_continuity",
         "draft_validation",
-        "cloud_routing",
+        "provider_binding",
         "containment",
         "structured_resilience",
         "retrieval_miss",
