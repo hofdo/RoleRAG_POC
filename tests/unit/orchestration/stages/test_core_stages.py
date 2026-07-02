@@ -266,6 +266,7 @@ class FailingCriticAgent:
         user_message: str,
         draft: str,
         retrieved_chunks: list[RetrievedChunk],
+        include_hidden: bool = True,
     ) -> CriticResult:
         raise self.error
 
@@ -1320,6 +1321,10 @@ async def test_critique_stage_auto_gating_runs_critic_on_risk_signals(
     critic = AcceptingCriticAgent()
     stage = TurnCritiqueStage(
         provider=UnusedProvider(),
+        # A cloud-routed risk signal (route_provider=CLOUD, below) now genuinely
+        # dispatches to the cloud provider, so one must be configured even though
+        # this stub critic ignores it.
+        cloud_provider=UnusedProvider(),
         critic_agent=critic,
         routing_stage=_routing(),
         gating="auto",

@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.llm.router import ModelProviderName, ModelRoute
+
 
 class LlmMessage(BaseModel):
     role: str
@@ -81,3 +83,17 @@ async def generate_with_truncation_retry(
         return response
     retried = request.model_copy(update={"max_tokens": request.max_tokens * multiplier})
     return await provider.generate(retried)
+
+
+def resolve_provider(
+    route: ModelRoute, *, local: LlmProvider, cloud: LlmProvider | None
+) -> LlmProvider:
+    """One source of dispatch truth: every stage (actor, critic, memory) picks its
+    provider by asking this function, so a route's provider field is the only thing
+    that decides where a request goes. Raises when a route says cloud but no cloud
+    provider was configured, instead of silently falling back to local."""
+    if route.provider == ModelProviderName.LOCAL:
+        return local
+    if cloud is None:
+        raise RuntimeError(f"Missing provider for route: {route.provider.value}")
+    return cloud

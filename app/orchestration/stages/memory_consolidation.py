@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain import MemoryCandidate, MemoryEpisode, Visibility
-from app.llm.provider import LlmProvider
+from app.llm.provider import LlmProvider, resolve_provider
 from app.llm.router import ModelProviderName
 from app.memory import MemoryEpisodeStore
 from app.memory.consolidation import (
@@ -28,8 +28,10 @@ class MemoryConsolidator:
         cache: SessionSummaryCache,
         consolidation_threshold: int,
         consolidation_importance_ceiling: int,
+        cloud_provider: LlmProvider | None = None,
     ) -> None:
         self.provider = provider
+        self.cloud_provider = cloud_provider
         self.routing_stage = routing_stage
         self.memory_store = memory_store
         self.memory_indexer = memory_indexer
@@ -44,6 +46,7 @@ class MemoryConsolidator:
         session_id: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
+        route_provider: ModelProviderName = ModelProviderName.LOCAL,
     ) -> tuple[str, ...]:
         """Roll up old low-value episodic memories into one dense summary once the
         consolidatable backlog reaches the threshold. Inert when threshold is 0."""
@@ -65,12 +68,12 @@ class MemoryConsolidator:
             return ()
 
         warnings: list[str] = []
-        # Task 3 threads the session provider + cloud dispatch; this stage only holds
-        # a local provider object, so it routes (and dispatches) local for now.
-        route = self.routing_stage.memory(provider=ModelProviderName.LOCAL)
+        # Consolidation reuses the memory route: same provider as regular memory
+        # extraction for this session.
+        route = self.routing_stage.memory(provider=route_provider)
         try:
             summary_text = await self.memory_curator.consolidate(
-                provider=self.provider,
+                provider=resolve_provider(route, local=self.provider, cloud=self.cloud_provider),
                 route=route,
                 summaries=[memory.summary for memory in candidates],
             )

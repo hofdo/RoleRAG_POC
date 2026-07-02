@@ -318,3 +318,51 @@ async def test_critic_agent_prompt_shows_exact_json_shape() -> None:
     assert '"accepted": true | false' in prompt
     assert '"issues": ["..."]' in prompt
     assert '"repair_instruction": "..." | null' in prompt
+
+
+@pytest.mark.asyncio
+async def test_critic_prompt_omits_hidden_content_when_include_hidden_false() -> None:
+    # Cloud critics must never see persona secrets, forbidden knowledge, or GM-private
+    # scene facts -- only the deterministic public prompt is safe to ship off-machine.
+    provider = FakeProvider('{"accepted": true, "issues": [], "repair_instruction": null}')
+
+    await CriticAgent().evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="hi",
+        draft="a draft",
+        retrieved_chunks=[],
+        include_hidden=False,
+    )
+
+    prompt = " ".join(m.content for m in provider.requests[0].messages)
+    assert "cipher key" not in prompt
+    assert "poisoning" not in prompt
+    assert "mirrored column" not in prompt
+    assert "Hidden secrets" not in prompt
+    assert "Forbidden knowledge" not in prompt
+    assert "Hidden scene facts" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_critic_prompt_includes_hidden_content_by_default() -> None:
+    # Local critics keep seeing hidden facts -- containment relies on it, and the
+    # default must stay byte-identical to pre-Task-3 behavior.
+    provider = FakeProvider('{"accepted": true, "issues": [], "repair_instruction": null}')
+
+    await CriticAgent().evaluate(
+        provider=provider,
+        route=_build_route(),
+        persona=_build_persona(),
+        scene=_build_scene(),
+        user_message="hi",
+        draft="a draft",
+        retrieved_chunks=[],
+    )
+
+    prompt = " ".join(m.content for m in provider.requests[0].messages)
+    assert "cipher key" in prompt
+    assert "poisoning" in prompt
+    assert "mirrored column" in prompt

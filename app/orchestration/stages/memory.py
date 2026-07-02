@@ -7,8 +7,7 @@ from app.domain import (
     SceneState,
     SessionState,
 )
-from app.llm.provider import LlmProvider
-from app.llm.router import ModelProviderName
+from app.llm.provider import LlmProvider, resolve_provider
 from app.llm.structured_output import StructuredOutputError
 from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import (
@@ -52,6 +51,7 @@ class TurnMemoryStage:
         memory_curator: MemoryCuratingAgent | None,
         memory_indexer: MemoryIndexing | None,
         routing_stage: TurnRoutingStage,
+        cloud_provider: LlmProvider | None = None,
         failure_sink: StructuredFailureRecording | None = None,
         gating: str = "always",
         embedding_provider: EmbeddingProvider | None = None,
@@ -60,6 +60,7 @@ class TurnMemoryStage:
         consolidation_importance_ceiling: int = 3,
     ) -> None:
         self.provider = provider
+        self.cloud_provider = cloud_provider
         self.memory_store = memory_store
         self.memory_curator = memory_curator
         self.memory_indexer = memory_indexer
@@ -74,6 +75,7 @@ class TurnMemoryStage:
         )
         self._consolidator = MemoryConsolidator(
             provider=provider,
+            cloud_provider=cloud_provider,
             routing_stage=routing_stage,
             memory_store=memory_store,
             memory_indexer=memory_indexer,
@@ -107,6 +109,7 @@ class TurnMemoryStage:
             session_id=session.id,
             retrieval_confidence=retrieval_confidence,
             scene_complexity=scene_complexity,
+            route_provider=session.provider,
         )
         if not consolidation:
             return result
@@ -145,12 +148,11 @@ class TurnMemoryStage:
                 memory_written=False,
                 warnings=("memory curation gated: no durable-event signals",),
             )
-        # Task 3 threads the session provider + cloud dispatch; this stage only holds
-        # a local provider object, so it routes (and dispatches) local for now.
-        route = self.routing_stage.memory(provider=ModelProviderName.LOCAL)
+        # Memory follows the session's provider, same as the actor and critic.
+        route = self.routing_stage.memory(provider=session.provider)
         try:
             memory_result = await self.memory_curator.curate(
-                provider=self.provider,
+                provider=resolve_provider(route, local=self.provider, cloud=self.cloud_provider),
                 route=route,
                 session=session,
                 scene=scene,

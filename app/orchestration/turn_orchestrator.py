@@ -203,6 +203,7 @@ class TurnOrchestrator:
         )
         self.critique_stage = TurnCritiqueStage(
             provider=provider,
+            cloud_provider=cloud_provider,
             critic_agent=critic_agent,
             routing_stage=self.routing_stage,
             failure_sink=structured_failure_sink,
@@ -221,6 +222,7 @@ class TurnOrchestrator:
         )
         self.memory_stage = TurnMemoryStage(
             provider=provider,
+            cloud_provider=cloud_provider,
             memory_store=memory_store,
             memory_curator=memory_curator,
             memory_indexer=memory_indexer,

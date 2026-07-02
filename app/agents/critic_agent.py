@@ -37,6 +37,7 @@ class CriticAgent:
         user_message: str,
         draft: str,
         retrieved_chunks: Sequence[RetrievedChunk],
+        include_hidden: bool = True,
     ) -> CriticResult:
         request = LlmRequest(
             messages=[
@@ -49,6 +50,7 @@ class CriticAgent:
                         user_message=user_message,
                         draft=draft,
                         retrieved_chunks=retrieved_chunks,
+                        include_hidden=include_hidden,
                     ),
                 ),
             ],
@@ -151,6 +153,7 @@ class CriticAgent:
         user_message: str,
         draft: str,
         retrieved_chunks: Sequence[RetrievedChunk],
+        include_hidden: bool = True,
     ) -> str:
         persona_lines = [
             f"Persona name: {persona.name}",
@@ -160,19 +163,20 @@ class CriticAgent:
         ]
         if persona.goals:
             persona_lines.append(f"Goals: {', '.join(persona.goals)}")
-        if persona.secrets:
-            persona_lines.append(f"Hidden secrets: {'; '.join(persona.secrets)}")
-        if persona.forbidden_knowledge:
-            persona_lines.append(
-                f"Forbidden knowledge: {'; '.join(persona.forbidden_knowledge)}"
-            )
+        if include_hidden:
+            if persona.secrets:
+                persona_lines.append(f"Hidden secrets: {'; '.join(persona.secrets)}")
+            if persona.forbidden_knowledge:
+                persona_lines.append(
+                    f"Forbidden knowledge: {'; '.join(persona.forbidden_knowledge)}"
+                )
 
         scene_lines = [
             f"Scene title: {scene.title}",
             f"Location: {scene.location}",
             f"Visible scene summary: {scene.player_visible_summary}",
         ]
-        if scene.gm_private_summary:
+        if include_hidden and scene.gm_private_summary:
             scene_lines.append(f"Hidden scene facts: {scene.gm_private_summary}")
         if scene.recent_events:
             scene_lines.append(f"Recent events: {'; '.join(scene.recent_events)}")

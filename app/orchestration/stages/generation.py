@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from app.agents import ActorAgent
 from app.domain import TurnInput
-from app.llm.provider import LlmMessage, LlmProvider, LlmResponse
-from app.llm.router import ModelProviderName, ModelRoute
+from app.llm.provider import LlmMessage, LlmProvider, LlmResponse, resolve_provider
+from app.llm.router import ModelRoute
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.context_builder import build_actor_messages
 from app.orchestration.stages.retrieval import RetrievalStageResult
@@ -180,11 +180,5 @@ class TurnGenerationStage:
         route: ModelRoute,
         messages: list[LlmMessage],
     ) -> LlmResponse:
-        provider = (
-            self.provider
-            if route.provider == ModelProviderName.LOCAL
-            else self.cloud_provider
-        )
-        if provider is None:
-            raise RuntimeError(f"Missing provider for route: {route.provider.value}")
+        provider = resolve_provider(route, local=self.provider, cloud=self.cloud_provider)
         return await self.actor_agent.generate(provider=provider, route=route, messages=messages)

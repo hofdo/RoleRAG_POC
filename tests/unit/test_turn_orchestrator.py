@@ -174,6 +174,7 @@ def _build_orchestrator(
     actor_context_retriever: StubActorContextRetriever | None = None,
     cloud_provider: LlmProvider | None = None,
     session_provider: ModelProviderName = ModelProviderName.LOCAL,
+    loader: Any = None,
 ) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
@@ -191,7 +192,7 @@ def _build_orchestrator(
     turn_repository = SQLiteTurnRepository(connection)
     memory_repository = SQLiteMemoryRepository(connection)
     return TurnOrchestrator(
-        loader=FakeLoader(),
+        loader=loader or FakeLoader(),
         provider=provider,
         cloud_provider=cloud_provider,
         critic_agent=critic or StubCritic(),
@@ -1050,6 +1051,10 @@ async def test_local_session_never_touches_the_cloud_provider(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_cloud_session_never_touches_the_local_provider(tmp_path: Path) -> None:
+    # Actor-only crossover check: critic uses StubCritic and memory_curator is None
+    # (both no-ops), so this test does not exercise critique/memory dispatch at all --
+    # see test_cloud_session_runs_critic_and_memory_on_cloud_without_secrets below for
+    # the full-stack version with real CriticAgent/MemoryCurator instances.
     class ExplodingProvider(LlmProvider):
         async def generate(self, request: LlmRequest) -> LlmResponse:
             raise AssertionError("local provider must never be called for a cloud session")
@@ -1072,6 +1077,102 @@ async def test_cloud_session_never_touches_the_local_provider(tmp_path: Path) ->
     assert result.outcome == TurnOutcome.SUCCESS
     assert result.route.provider == ModelProviderName.CLOUD
     assert len(cloud_provider.requests) == 1
+
+
+class _HiddenContentLoader(FakeLoader):
+    """FakeLoader variant carrying real secrets/forbidden_knowledge/gm_private_summary,
+    so the privacy test below can pin the literal hidden strings never reaching the
+    cloud provider across actor + critic + memory requests."""
+
+    def load_persona(self, persona_id: str) -> PersonaCard:
+        persona = super().load_persona(persona_id)
+        return persona.model_copy(
+            update={
+                "secrets": ["She hides a cipher key in the gallery clock."],
+                "forbidden_knowledge": ["The regent ordered the poisoning."],
+            }
+        )
+
+    def load_scene(self, scene_id: str) -> SceneState:
+        scene = super().load_scene(scene_id)
+        return scene.model_copy(
+            update={"gm_private_summary": "A spy waits behind the mirrored column."}
+        )
+
+
+@pytest.mark.asyncio
+async def test_cloud_session_runs_critic_and_memory_on_cloud_without_secrets(
+    tmp_path: Path,
+) -> None:
+    # Full-stack privacy pin: a cloud session with REAL critique + memory stages (not
+    # stubs) must dispatch actor, critic, and memory calls all to the cloud provider,
+    # and none of the persona/scene hidden fields may appear in ANY recorded cloud
+    # request. The local provider explodes if touched at all -- cloud sessions must be
+    # fully standalone (no llama-server needed).
+    from app.agents.critic_agent import CriticAgent
+    from app.agents.memory_curator import MemoryCurator
+
+    class ExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("local provider must never be called for a cloud session")
+
+    class CloudDialogueProvider(LlmProvider):
+        """Answers actor (plain text) and critic/memory (structured JSON) requests."""
+
+        def __init__(self) -> None:
+            self.requests: list[LlmRequest] = []
+
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            self.requests.append(request)
+            task = request.metadata.get("task")
+            if task == "critic":
+                text = '{"accepted": true, "issues": [], "repair_instruction": null}'
+            elif task == "memory_extraction":
+                text = '{"write_memory": false, "memories": [], "reason": "nothing durable"}'
+            else:
+                text = "I have heard enough to know the regent fears open daylight."
+            return LlmResponse(
+                text=text,
+                provider="cloud",
+                model=request.model,
+                usage={"total_tokens": 20},
+                finish_reason="stop",
+            )
+
+    cloud_provider = CloudDialogueProvider()
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        ExplodingProvider(),
+        cloud_provider=cloud_provider,
+        session_provider=ModelProviderName.CLOUD,
+        critic=cast(Any, CriticAgent()),
+        memory_curator=MemoryCurator(),
+        memory_indexer=StubMemoryIndexer(),
+        loader=_HiddenContentLoader(),
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    assert result.route.provider == ModelProviderName.CLOUD
+    # actor + critic + memory extraction all dispatched to the cloud provider.
+    tasks = [request.metadata.get("task") for request in cloud_provider.requests]
+    assert "critic" in tasks
+    assert "memory_extraction" in tasks
+
+    all_cloud_text = " ".join(
+        message.content for request in cloud_provider.requests for message in request.messages
+    )
+    # The hidden-content fixture strings must never reach the cloud provider on ANY
+    # request (actor, critic, memory).
+    assert "cipher key" not in all_cloud_text  # persona.secrets
+    assert "poisoning" not in all_cloud_text  # persona.forbidden_knowledge
+    assert "mirrored column" not in all_cloud_text  # scene.gm_private_summary
 
 
 class FirstOnlyProvider(LlmProvider):

@@ -6,7 +6,7 @@ from typing import Protocol
 
 from app.agents.secret_guard import collect_hidden_facts, redact_hidden_facts, scan_reply
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
-from app.llm.provider import LlmMessage, LlmProvider
+from app.llm.provider import LlmMessage, LlmProvider, resolve_provider
 from app.llm.router import (
     HIGH_SCENE_COMPLEXITY,
     LOW_RETRIEVAL_CONFIDENCE,
@@ -38,6 +38,7 @@ class CriticEvaluatingAgent(Protocol):
         user_message: str,
         draft: str,
         retrieved_chunks: list[RetrievedChunk],
+        include_hidden: bool = True,
     ) -> CriticResult: ...
 
     def build_local_repair_messages(
@@ -73,12 +74,14 @@ class TurnCritiqueStage:
         provider: LlmProvider,
         critic_agent: CriticEvaluatingAgent,
         routing_stage: TurnRoutingStage,
+        cloud_provider: LlmProvider | None = None,
         failure_sink: StructuredFailureRecording | None = None,
         gating: str = "always",
         low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE,
         high_scene_complexity: int = HIGH_SCENE_COMPLEXITY,
     ) -> None:
         self.provider = provider
+        self.cloud_provider = cloud_provider
         self.critic_agent = critic_agent
         self.routing_stage = routing_stage
         self.failure_sink = failure_sink
@@ -109,18 +112,22 @@ class TurnCritiqueStage:
                 critique=None,
                 warnings=("critic gated: low-risk turn",),
             )
-        # Task 3 threads the session provider + cloud dispatch; this stage only holds
-        # a local provider object, so it routes (and dispatches) local for now.
-        route = self.routing_stage.critic(provider=ModelProviderName.LOCAL)
+        # The critic follows the session's provider (route_provider is the actor
+        # route's provider, which IS the session provider -- see SessionState.provider).
+        route = self.routing_stage.critic(provider=route_provider)
         try:
             critique = await self.critic_agent.evaluate(
-                provider=self.provider,
+                provider=resolve_provider(route, local=self.provider, cloud=self.cloud_provider),
                 route=route,
                 persona=persona,
                 scene=scene,
                 user_message=user_message,
                 draft=draft,
                 retrieved_chunks=list(retrieved_chunks),
+                # Hidden authored content never leaves the machine: cloud critics
+                # check prose/consistency only; the deterministic local
+                # secret_guard scan remains the containment layer.
+                include_hidden=route.provider == ModelProviderName.LOCAL,
             )
             issues, repair_instruction, leaked = redact_hidden_facts(
                 issues=list(critique.issues),
