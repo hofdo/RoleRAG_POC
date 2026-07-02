@@ -77,6 +77,7 @@ export interface CreateTurnRequest {
   request_cloud: boolean;
   cloud_confirmed?: boolean;
   force_local?: boolean;
+  active_persona_id?: string;
 }
 
 export interface RouteResponse {

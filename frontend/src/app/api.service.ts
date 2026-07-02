@@ -274,11 +274,19 @@ export class ApiService {
         request_cloud: request.request_cloud,
         cloud_confirmed: request.cloud_confirmed ?? false,
         force_local: request.force_local ?? false,
+        active_persona_id: request.active_persona_id ?? null,
       }),
     });
     if (!response.ok) {
       await throwApiError(response);
     }
     return parseEventStream(response, onStage);
+  }
+
+  updateSessionScene(sessionId: string, sceneId: string): Promise<CreateSessionResponse> {
+    return requestJson(`/sessions/${encodeURIComponent(sessionId)}/scene`, {
+      method: 'POST',
+      body: { scene_id: sceneId },
+    });
   }
 }

@@ -128,6 +128,19 @@ class FakeApi {
   getRecentSessions(): Promise<RecentSessionsResponse> {
     return Promise.resolve({ sessions: [] });
   }
+  updateSessionSceneCalls: { sessionId: string; sceneId: string }[] = [];
+  updateSessionSceneShouldFail = false;
+  updateSessionScene(sessionId: string, sceneId: string): Promise<GetSessionResponse> {
+    this.updateSessionSceneCalls.push({ sessionId, sceneId });
+    if (this.updateSessionSceneShouldFail) return Promise.reject(new Error('scene switch failed'));
+    return Promise.resolve({
+      session_id: sessionId,
+      world_id: 'w',
+      active_scene_id: sceneId,
+      active_persona_id: 'p',
+      recent_turns: [],
+    });
+  }
 }
 
 function setup(): { store: SessionStore; api: FakeApi } {
@@ -180,7 +193,13 @@ describe('SessionStore turn flow', () => {
     await store.confirmCloud();
 
     const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({ message: 'go cloud?', request_cloud: true, cloud_confirmed: true, force_local: false });
+    expect(last).toEqual({
+      message: 'go cloud?',
+      request_cloud: true,
+      cloud_confirmed: true,
+      force_local: false,
+      active_persona_id: undefined,
+    });
     expect(store.pendingConfirm()).toBeNull();
     expect(store.transcript().at(-1)).toEqual({ role: 'assistant', text: 'cloud reply', source: 'new' });
   });
@@ -194,7 +213,13 @@ describe('SessionStore turn flow', () => {
     await store.forceLocal();
 
     const last = api.calls.at(-1)!.request;
-    expect(last).toEqual({ message: 'go cloud?', request_cloud: false, cloud_confirmed: false, force_local: true });
+    expect(last).toEqual({
+      message: 'go cloud?',
+      request_cloud: false,
+      cloud_confirmed: false,
+      force_local: true,
+      active_persona_id: undefined,
+    });
     expect(store.pendingConfirm()).toBeNull();
   });
 
@@ -252,6 +277,62 @@ describe('SessionStore turn flow', () => {
     const { store } = setup();
     expect(await store.confirmCloud()).toBeTrue();
     expect(await store.forceLocal()).toBeTrue();
+  });
+
+  it('sendMessage includes the persona override when set', async () => {
+    const { store, api } = setup();
+    store.personaOverride.set('warden');
+
+    await store.sendMessage('a question', false);
+
+    expect(api.calls.at(-1)!.request.active_persona_id).toBe('warden');
+  });
+
+  it('sendMessage omits the persona override when unset', async () => {
+    const { store, api } = setup();
+
+    await store.sendMessage('a question', false);
+
+    expect(api.calls.at(-1)!.request.active_persona_id).toBeUndefined();
+  });
+});
+
+describe('SessionStore switchScene', () => {
+  it('updates the session on a successful scene switch', async () => {
+    const { store, api } = setup();
+
+    await store.switchScene('east-wing');
+
+    expect(api.updateSessionSceneCalls).toEqual([{ sessionId: 's1', sceneId: 'east-wing' }]);
+    expect(store.session()?.active_scene_id).toBe('east-wing');
+    expect(store.turnError()).toBeNull();
+  });
+
+  it('surfaces a failure without touching the session', async () => {
+    const { store, api } = setup();
+    api.updateSessionSceneShouldFail = true;
+
+    await store.switchScene('east-wing');
+
+    expect(store.session()?.active_scene_id).toBe('sc');
+    expect(store.turnError()).toContain('scene switch failed');
+  });
+
+  it('is a no-op without an active session', async () => {
+    const { store, api } = setup();
+    store.session.set(null);
+
+    await store.switchScene('east-wing');
+
+    expect(api.updateSessionSceneCalls).toEqual([]);
+  });
+
+  it('is a no-op with an empty scene id', async () => {
+    const { store, api } = setup();
+
+    await store.switchScene('');
+
+    expect(api.updateSessionSceneCalls).toEqual([]);
   });
 });
 

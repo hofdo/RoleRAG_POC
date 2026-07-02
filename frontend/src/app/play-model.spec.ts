@@ -44,6 +44,17 @@ describe('play-model', () => {
       request_cloud: true,
       cloud_confirmed: true,
       force_local: false,
+      active_persona_id: undefined,
+    });
+  });
+
+  it('builds a turn request with a persona override', () => {
+    expect(buildTurnRequest('hi', false, { personaId: 'warden' })).toEqual({
+      message: 'hi',
+      request_cloud: false,
+      cloud_confirmed: false,
+      force_local: false,
+      active_persona_id: 'warden',
     });
   });
 

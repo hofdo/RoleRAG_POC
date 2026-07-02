@@ -9,6 +9,29 @@ import { formatRecentSessionOption } from '../play-model';
   template: `
     @if (store.session(); as session) {
       <p class="active">Session active: {{ store.sessionId() }}</p>
+      <label>
+        Scene
+        <select #switchScene>
+          @for (scene of store.catalog()?.scenes ?? []; track scene.id) {
+            <option [value]="scene.id" [selected]="scene.id === session.active_scene_id">
+              {{ scene.title }}
+            </option>
+          }
+        </select>
+      </label>
+      <button type="button" (click)="store.switchScene(switchScene.value)" [disabled]="store.busy()">
+        Switch scene
+      </button>
+      <label>
+        Persona (next turn)
+        <select #switchPersona (change)="store.personaOverride.set(switchPersona.value)">
+          @for (persona of store.catalog()?.personas ?? []; track persona.id) {
+            <option [value]="persona.id" [selected]="persona.id === session.active_persona_id">
+              {{ persona.name }}
+            </option>
+          }
+        </select>
+      </label>
     } @else {
       <form class="setup" (submit)="$event.preventDefault()">
         <label>

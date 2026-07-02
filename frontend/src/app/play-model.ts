@@ -145,13 +145,18 @@ export function formatRecentSessionOption(session: RecentSessionResponse): strin
 export function buildTurnRequest(
   message: string,
   requestCloud: boolean,
-  { cloudConfirmed = false, forceLocal = false }: { cloudConfirmed?: boolean; forceLocal?: boolean } = {},
+  {
+    cloudConfirmed = false,
+    forceLocal = false,
+    personaId = null,
+  }: { cloudConfirmed?: boolean; forceLocal?: boolean; personaId?: string | null } = {},
 ): CreateTurnRequest {
   return {
     message,
     request_cloud: requestCloud,
     cloud_confirmed: cloudConfirmed,
     force_local: forceLocal,
+    active_persona_id: personaId ?? undefined,
   };
 }
 

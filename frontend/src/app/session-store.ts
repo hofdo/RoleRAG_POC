@@ -63,6 +63,9 @@ export class SessionStore {
   readonly pendingConfirm = signal<{ message: string } | null>(null);
   readonly lastDebug = signal<TurnDebug | null>(null);
   readonly recentSessions = signal<RecentSessionResponse[]>([]);
+  // Persona to use for the *next* turn only; the backend switches the session's
+  // active persona once that turn lands (see TurnSessionLoader.load).
+  readonly personaOverride = signal<string | null>(null);
 
   readonly statusView = computed(() => describeRuntimeStatus(this.runtimeStatus()));
   readonly sessionId = computed(() => this.session()?.session_id ?? null);
@@ -152,7 +155,23 @@ export class SessionStore {
   }
 
   sendMessage(message: string, requestCloud: boolean): Promise<boolean> {
-    return this.runTurn(message, buildTurnRequest(message, requestCloud));
+    return this.runTurn(
+      message,
+      buildTurnRequest(message, requestCloud, { personaId: this.personaOverride() }),
+    );
+  }
+
+  // Switch the active scene mid-campaign. Turns already store per-turn scene_id, so
+  // history for prior scenes stays intact.
+  async switchScene(sceneId: string): Promise<void> {
+    const sessionId = this.sessionId();
+    if (!sessionId || !sceneId) return;
+    try {
+      this.session.set(await this.api.updateSessionScene(sessionId, sceneId));
+      this.turnError.set(null);
+    } catch (error) {
+      this.turnError.set(errorMessage(error));
+    }
   }
 
   // Resubmit the held message after the user approves cloud routing.
