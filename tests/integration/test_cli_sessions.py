@@ -239,3 +239,22 @@ def test_inspect_memories_lists_episode_summaries(tmp_path: Path) -> None:
         "The player promised to return before dawn."
     )
     assert payload["memories"][0]["visibility"] == "player"
+
+
+def test_backup_writes_timestamped_copy(tmp_path: Path) -> None:
+    database_path = _seed_database(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["backup", "--output-dir", str(tmp_path / "backups")],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    copies = list((tmp_path / "backups").glob("rolerag-*.db"))
+    assert len(copies) == 1
+    import sqlite3
+
+    check = sqlite3.connect(copies[0])
+    assert check.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    check.close()

@@ -173,3 +173,12 @@ def test_connect_sqlite_enables_row_access_by_name(tmp_path: Path) -> None:
 
     assert isinstance(row, sqlite3.Row)
     assert row["value"] == 1
+
+
+def test_connect_sqlite_enables_wal_and_busy_timeout(tmp_path: Path) -> None:
+    connection = connect_sqlite(tmp_path / "wal.db")
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    finally:
+        connection.close()

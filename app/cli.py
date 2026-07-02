@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
 
@@ -760,6 +762,24 @@ def _delete_session_vectors(session_id: str) -> None:
         )
 
 
+def _backup_database(output_dir: Path = Path("data/backups")) -> Path:
+    """Online-consistent copy of the SQLite DB. Vectors are excluded on purpose:
+    Qdrant collections rebuild from SQLite via reindex-memories / ingest."""
+    settings = get_settings()
+    source = connect_sqlite(settings.database_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    destination = output_dir / f"rolerag-{stamp}.db"
+    target = sqlite3.connect(destination)
+    try:
+        with target:
+            source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    return destination
+
+
 @app.command("list-sessions")
 def list_sessions(
     limit: Annotated[int, typer.Option(help="Maximum sessions to list")] = 50,
@@ -785,6 +805,16 @@ def list_sessions(
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+@app.command()
+def backup(
+    output_dir: Annotated[
+        Path, typer.Option(help="Directory for backup files")
+    ] = Path("data/backups"),
+) -> None:
+    destination = _backup_database(output_dir)
+    typer.secho(f"Backup written: {destination}", fg=typer.colors.GREEN)
+
+
 @app.command("delete-session")
 def delete_session(
     session_id: Annotated[str, typer.Option(help="Session identifier to delete")],
@@ -795,6 +825,8 @@ def delete_session(
             f"Delete session {session_id} with all turns and memories?",
             abort=True,
         )
+    backup_path = _backup_database()
+    typer.secho(f"Safety backup: {backup_path}", fg=typer.colors.YELLOW)
     connection, sessions, _, _ = _open_repositories()
     deleted = sessions.delete_session(session_id)
     connection.close()
@@ -992,6 +1024,8 @@ def reset_db(
             "Delete ALL sessions, turns, and memories? This cannot be undone.",
             abort=True,
         )
+    backup_path = _backup_database()
+    typer.secho(f"Safety backup: {backup_path}", fg=typer.colors.YELLOW)
     connection, sessions, _, _ = _open_repositories()
     session_ids = [session.id for session in sessions.list_recent_sessions(1_000_000)]
     connection.execute("DELETE FROM sessions")
