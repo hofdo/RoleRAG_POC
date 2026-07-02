@@ -11,7 +11,7 @@ WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npx ng build --base-href=/app/
+RUN npx ng build
 
 # --- App image ---
 FROM python:3.12-slim
