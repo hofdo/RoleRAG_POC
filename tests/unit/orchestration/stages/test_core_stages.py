@@ -333,6 +333,7 @@ async def test_critique_stage_categorizes_structured_failure_and_records_raw_tex
         user_message="Hello.",
         draft="Good evening.",
         retrieved_chunks=(),
+        route_provider=ModelProviderName.LOCAL,
     )
 
     assert result.critique is None
@@ -397,6 +398,7 @@ async def test_critique_stage_redacts_hidden_fact_leak_from_critic_output() -> N
         user_message="What are you hiding?",
         draft="...",
         retrieved_chunks=(),
+        route_provider=ModelProviderName.LOCAL,
     )
 
     assert result.warnings == ("critic output redacted: prevented hidden-fact leak",)
@@ -434,6 +436,7 @@ async def test_critique_stage_passes_clean_critic_output_through_unchanged() -> 
         user_message="What are you hiding?",
         draft="...",
         retrieved_chunks=(),
+        route_provider=ModelProviderName.LOCAL,
     )
 
     assert result.warnings == ()
@@ -559,6 +562,7 @@ async def test_critique_stage_tolerates_failure_sink_errors() -> None:
         user_message="Hello.",
         draft="Good evening.",
         retrieved_chunks=(),
+        route_provider=ModelProviderName.LOCAL,
     )
 
     assert result.critique is None

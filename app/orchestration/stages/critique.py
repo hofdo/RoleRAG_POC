@@ -100,7 +100,7 @@ class TurnCritiqueStage:
         validator_flagged: bool = False,
         retrieval_confidence: float | None = None,
         scene_complexity: int = 0,
-        route_provider: ModelProviderName = ModelProviderName.LOCAL,
+        route_provider: ModelProviderName,
     ) -> CritiqueStageResult:
         if self.gating == "auto" and not self._is_risky_turn(
             validator_flagged=validator_flagged,

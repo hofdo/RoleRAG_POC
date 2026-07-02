@@ -46,7 +46,7 @@ class MemoryConsolidator:
         session_id: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
-        route_provider: ModelProviderName = ModelProviderName.LOCAL,
+        route_provider: ModelProviderName,
     ) -> tuple[str, ...]:
         """Roll up old low-value episodic memories into one dense summary once the
         consolidatable backlog reaches the threshold. Inert when threshold is 0."""
