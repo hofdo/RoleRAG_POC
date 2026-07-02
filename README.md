@@ -10,7 +10,11 @@ Implemented in this repository:
 
 - typed settings with `pydantic-settings`
 - local/cloud OpenAI-compatible provider abstraction
-- deterministic routing with `CLOUD_MODE=off|ask|auto`
+- session-bound provider: `local` or `cloud` is chosen once at session creation and every
+  task (actor, repair, critic, memory) for that session runs on it for the session's whole
+  lifetime — no per-turn escalation, fallback, or mid-turn switching
+- `CLOUD_MODE=off|ask|auto` gates cloud **session creation** only (see [Environment and
+  Routing](#environment-and-routing))
 - structured JSON world, scene, and persona loading
 - Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
 - FastAPI endpoints for public content catalog lookup, session creation, turn execution, buffered SSE turn streaming, session lookup, bulk turn details, and eval-run summaries
@@ -34,8 +38,8 @@ Implemented in this repository:
   and in live checkpoint reports
 - conditional critic/curator gating (`CRITIC_GATING` / `CURATOR_GATING` = `always|auto`);
   the deterministic promise extractor always runs
-- interactive `CLOUD_MODE=ask` confirmation in the web UI, the CLI, and the API
-  (`status: confirmation_required` two-phase turns)
+- interactive `CLOUD_MODE=ask` confirmation once, at cloud session creation, in the web UI
+  and the CLI (there is no per-turn confirmation and no `confirmation_required` turn status)
 - session management CLI: `list-sessions`, `delete-session`, `export-session`,
   `import-session`, `inspect-memories`, `reset-db`
 - read-only memory viewer in the web UI and `GET /sessions/{id}/memories`
@@ -222,13 +226,30 @@ of truth for configuration — copy `.env.example` to `.env` and edit there. The
 local-session values (26B-friendly structured-token budget, `RAG_DEFAULT_TOP_K=10`, one provider
 retry, a 300s timeout for slow dense models) are already set in `.env.example`.
 
-Cloud behavior:
+Provider is a **session-bound** choice: `local` or `cloud` is picked once, at session
+creation (`POST /sessions` or `rolerag start-session --provider ...`), and every task type
+for that session — actor generation, repair, critic evaluation, and memory extraction —
+runs on that bound provider for the session's entire lifetime. There is no per-turn
+escalation, no automatic cloud fallback, and no mid-turn provider switching; the router
+(`app/llm/router.py`) only ever routes to the session's own provider.
 
-- `CLOUD_MODE=off`: cloud is never used. If cloud would otherwise be chosen, the runtime stays local and records a warning.
-- `CLOUD_MODE=ask`: cloud is never called silently. The runtime does not open an interactive confirmation prompt; it keeps actor turns local when possible and returns a controlled failure if cloud repair would require confirmation after local attempts are exhausted.
-- `CLOUD_MODE=auto`: cloud may be used for explicit `--request-cloud`, low retrieval confidence, high scene complexity, failed local repair, or local-provider failure.
+`CLOUD_MODE` gates **cloud session creation**, not per-turn behavior:
 
-Critic evaluation and memory extraction stay local in all modes.
+- `CLOUD_MODE=off`: creating a `cloud` session is rejected (`400 cloud_unavailable`).
+  Existing sessions are unaffected — a session's provider never changes after creation.
+- `CLOUD_MODE=ask`: creating a `cloud` session requires interactive confirmation at
+  creation time — a `typer.confirm` prompt in the CLI, a `window.confirm` prompt in the
+  SPA. Once confirmed, the session runs entirely on cloud with no further prompts.
+- `CLOUD_MODE=auto`: cloud sessions are created without an interactive prompt.
+
+Privacy invariant: hidden authored content — persona `secrets`/`forbidden_knowledge`
+fields and scene `gm_private_summary` — never leaves the machine on **any** provider,
+local or cloud. This is enforced by an `include_hidden` gate (`app/orchestration/stages/
+critique.py`: `include_hidden=route.provider == ModelProviderName.LOCAL`) that only ever
+allows hidden fields into a prompt when the route is local, plus a provider-binding eval
+test. Critic evaluation and memory extraction follow the session's bound provider like
+every other task, but hidden fields are stripped from what reaches the model whenever
+that provider is cloud.
 
 ## Runtime Components
 
@@ -328,8 +349,8 @@ Inspect routing decisions:
 
 ```bash
 python -m app.cli route --task actor_response
-python -m app.cli route --task actor_response --request-cloud
-python -m app.cli route --task repair --failed-local-attempts 2
+python -m app.cli route --task actor_response --provider cloud
+python -m app.cli route --task repair --provider local
 ```
 
 Session lifecycle:
@@ -338,7 +359,6 @@ Session lifecycle:
 python -m app.cli start-session --world-id demo_world --scene-id rose-gallery --active-persona-id archivist --player-name Avery
 python -m app.cli resume --session-id <session-id>
 python -m app.cli turn --session-id <session-id> --message "Tell me what changed here."
-python -m app.cli turn --session-id <session-id> --message "Give me the highest quality answer." --request-cloud
 ```
 
 RAG ingestion:
@@ -579,7 +599,8 @@ The `canon` endpoints are an author surface for pinning durable "Standing facts"
 into the actor prompt by hand, alongside the auto-derived canon. Pinned facts
 lead the Standing-facts block.
 
-Create a session:
+Create a session (`provider` defaults to `local`; pass `"provider":"cloud"` to bind the
+session to cloud for its whole lifetime, subject to the `CLOUD_MODE` creation gate above):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/sessions \
@@ -587,12 +608,13 @@ curl -X POST http://127.0.0.1:8000/sessions \
   -d '{"world_id":"demo_world","scene_id":"rose-gallery","player_name":"Player","active_persona_id":"archivist"}'
 ```
 
-Run a turn:
+Run a turn (the turn body carries no provider/routing flags — the session's bound
+provider from creation applies automatically):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/sessions/<session-id>/turns \
   -H "Content-Type: application/json" \
-  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist","request_cloud":false}'
+  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist"}'
 ```
 
 Run a buffered SSE turn:
@@ -600,7 +622,7 @@ Run a buffered SSE turn:
 ```bash
 curl -N -X POST http://127.0.0.1:8000/sessions/<session-id>/turns/stream \
   -H "Content-Type: application/json" \
-  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist","request_cloud":false}'
+  -d '{"message":"I ask what the locked door hides.","active_persona_id":"archivist"}'
 ```
 
 The SSE route emits validated text only after the existing orchestration pipeline completes. It
@@ -622,7 +644,9 @@ architecture). The browser surface is a thin client over the same-origin API, wi
   retrieval drill-down (query, selected/rejected chunks, scores, boosts) per turn
 - **Analytics** — turn latency and stage-timing statistics for a session
 - **Eval** — eval-run trends from `GET /diagnostics/eval-runs` with per-run drill-down
-- `CLOUD_MODE=ask` cloud-confirmation prompts render inline and resubmit on approval
+- `CLOUD_MODE=ask` shows a one-time `window.confirm` prompt when starting a cloud session
+  (a session's provider choice happens once, at creation, in the setup picker); there is
+  no per-turn confirmation once a session is running
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
   the desired `CONTENT_ROOT` to use a different scenario pack
 

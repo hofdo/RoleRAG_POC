@@ -93,18 +93,30 @@ invalid_content_catalog` using the standard error envelope.
   "world_id": "demo_world",
   "scene_id": "rose-gallery",
   "player_name": "Avery",
-  "active_persona_id": "archivist"
+  "active_persona_id": "archivist",
+  "provider": "local"
 }
 ```
 
-The response contains safe session identifiers:
+`provider` is `"local"` (default) or `"cloud"`. It is chosen once, at creation, and is
+immutable for the session's entire lifetime — every task type (actor, repair, critic,
+memory extraction) for that session runs on this provider; there is no per-turn override
+and no mid-session switch.
+
+Creating a `cloud` session is gated by `CLOUD_MODE`: `off` rejects the request with `400
+cloud_unavailable`; `auto` allows it silently; `ask` is enforced by the CLI/SPA callers
+(interactive confirmation before the request is sent), not by this endpoint itself. A
+`cloud` request also requires a configured cloud API key regardless of `CLOUD_MODE`.
+
+The response contains safe session identifiers and the bound provider:
 
 ```json
 {
   "session_id": "<id>",
   "world_id": "demo_world",
   "active_scene_id": "rose-gallery",
-  "active_persona_id": "archivist"
+  "active_persona_id": "archivist",
+  "provider": "local"
 }
 ```
 
@@ -218,12 +230,15 @@ All three return `404 session_not_found` for an unknown session.
 ```json
 {
   "message": "What have you heard about the regent?",
-  "active_persona_id": "archivist",
-  "request_cloud": false
+  "active_persona_id": "archivist"
 }
 ```
 
 `active_persona_id` is optional. When provided, it must match the stored session persona.
+The request body carries no provider or routing flags: the turn always runs on the
+session's provider, bound once at `POST /sessions` time and immutable thereafter (see
+[Session Creation](#session-creation)). There is no way to request cloud, force local, or
+override the route on a per-turn basis.
 
 The success response includes generated text, route metadata, the provider finish reason,
 memory-write status, critic validation status, and warnings:
@@ -235,7 +250,7 @@ memory-write status, critic validation status, and warnings:
   "route": {
     "provider": "local",
     "model": "local-model",
-    "reason": "default local route"
+    "reason": "session provider: local"
   },
   "finish_reason": "stop",
   "memory_written": false,
@@ -272,8 +287,9 @@ memory-write status, critic validation status, and warnings:
 }
 ```
 
-`warnings` reports fail-open runtime behavior, such as skipped retrieval or skipped cloud routing.
-A turn can return HTTP `200` with warnings when actor generation still completed.
+`warnings` reports fail-open runtime behavior, such as skipped retrieval, skipped memory
+indexing, or a deferred memory-curation job. A turn can return HTTP `200` with warnings
+when actor generation still completed.
 
 `critic_status` reports how critic validation concluded for the returned text:
 
@@ -284,21 +300,12 @@ A turn can return HTTP `200` with warnings when actor generation still completed
 - `skipped`: the returned text was never successfully validated, either because the critic
   errored (see `warnings`) or because the turn failed before critique ran.
 
-The request body accepts three routing flags: `request_cloud` (ask for cloud quality),
-`cloud_confirmed` (approve a previously announced confirmation-required cloud route), and
-`force_local` (decline cloud and answer locally).
-
-With `CLOUD_MODE=ask`, a turn that the router escalates to cloud returns
-`status: "confirmation_required"` with the proposed route, empty `text`, and no
-generation or persistence side effects. The client resubmits the same message with
-`cloud_confirmed: true` or `force_local: true`. The streaming endpoint emits a single
-`confirmation_required` event for the same case:
-
-```text
-event: confirmation_required
-data: {"status":"confirmation_required","route":{"provider":"cloud","model":"cloud-model","reason":"user requested cloud"},"warnings":[]}
-
-```
+There is no per-turn routing control and no two-phase confirmation flow. The route for
+every turn (`route.provider`, `route.model`) is always the session's bound provider from
+creation (see [Session Creation](#session-creation)); critic and memory-extraction tasks
+follow the same bound provider. `status` is always `"completed"` on success — there is no
+`confirmation_required` status, and no request field (`request_cloud`, `cloud_confirmed`,
+`force_local`) exists to ask for or approve a different provider mid-turn.
 
 `stage_timings` is a report-only diagnostic mapping each executed pipeline stage to its
 wall-clock duration in seconds. `repair` appears only when a repair attempt ran. The same
@@ -361,6 +368,7 @@ Handled `400`, `404`, `422`, `503`, and `504` responses use one envelope:
 Stable error codes:
 
 - `invalid_content_catalog` (`400`)
+- `cloud_unavailable` (`400`)
 - `invalid_session_request` (`400`)
 - `invalid_turn_request` (`400`)
 - `session_not_found` (`404`)

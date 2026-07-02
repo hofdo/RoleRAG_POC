@@ -53,6 +53,23 @@ Order: value + independence, decisions last. Each item gate-verified
   resilience boundaries (memory/retrieval/critique/diagnostics best-effort degrade-to-warning).
   Narrowing them would let an unexpected type crash a turn — harms robustness for no benefit
 
+## Decisions (2026-07-02: session-bound provider)
+
+- **Cloud is a peer session-bound choice, not an escalation target.** `local`/`cloud` is
+  chosen once at session creation and is immutable for that session's lifetime; every task
+  (actor, repair, critic, memory extraction) runs on the session's bound provider. All
+  automatic cloud escalation/fallback/rescue paths (low retrieval confidence, high scene
+  complexity, failed local repair, local-provider failure) were removed — the router
+  (`app/llm/router.py::choose_route`) does nothing but map `session_provider` to a route.
+  The old per-turn `request_cloud` request field and the two-phase `confirmation_required`
+  turn status were dropped entirely; `CLOUD_MODE=off|ask|auto` now only gates cloud
+  **session creation** (reject / confirm-once / silently allow).
+- **Secrets never reach cloud, enforced structurally.** Persona hidden fields
+  (`secrets`, `forbidden_knowledge`) and scene `gm_private_summary` never enter a cloud
+  request, on any provider, via an `include_hidden` gate
+  (`app/orchestration/stages/critique.py`: `include_hidden=route.provider ==
+  ModelProviderName.LOCAL`) plus a provider-binding eval test that pins the invariant.
+
 ## Decisions (2026-07-01 audit)
 
 - **Legacy `/play` UI: deleted.** The Angular SPA at `/app` is the only web UI; `app/web/`,
