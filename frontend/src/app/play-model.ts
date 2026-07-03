@@ -155,10 +155,6 @@ export function buildTurnRequest(
   };
 }
 
-export function isConfirmationRequired(turn: Pick<TurnResult, 'status'> | null): boolean {
-  return turn?.status === 'confirmation_required';
-}
-
 export function describeMemories(memoriesResponse: SessionMemoriesResponse | null): string[] {
   const memories: MemoryEpisode[] = memoriesResponse?.memories ?? [];
   return memories.map((memory) => {

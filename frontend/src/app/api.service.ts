@@ -85,12 +85,6 @@ function applyEvent(
     result.text += payload.text;
     return false;
   }
-  if (eventName === 'confirmation_required') {
-    result.status = 'confirmation_required';
-    result.route = payload.route;
-    result.warnings = payload.warnings;
-    return true;
-  }
   if (eventName === 'final' || eventName === 'failure') {
     if (eventName === 'failure') {
       result.text = payload.text;
