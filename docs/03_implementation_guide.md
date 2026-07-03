@@ -132,9 +132,9 @@ surface covers provider timeouts and retries, critic/curator gating, the full RA
 and boosts, durable-memory caps and consolidation, session canon, routing thresholds, and the
 output-side containment threshold.
 
-The repair escalation is fixed in code (local, then cloud), but provider retries and the
-structured-truncation retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`,
-`CLOUD_LLM_MAX_RETRIES`, `TRUNCATION_RETRY_BUDGET_MULTIPLIER`).
+Repair runs on the session's bound provider; provider retries and the structured-truncation
+retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`, `CLOUD_LLM_MAX_RETRIES`,
+`TRUNCATION_RETRY_BUDGET_MULTIPLIER`).
 
 ## Runtime Safety Rules
 
@@ -146,7 +146,7 @@ structured-truncation retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`,
 - Individual recent-dialogue messages are not character-truncated during actor prompt construction.
 - Older continuity returns through retrieved durable memory when relevant; use
   `reindex-memories` to repair the derived index from authoritative SQLite episodes.
-- Memory extraction stays local.
+- Memory extraction runs on the session's bound provider.
 - API routes stay thin and do not duplicate orchestration logic.
 - Buffered SSE output is emitted only after validation, persistence, and memory handling complete.
 - Tests and evals should continue to avoid live providers.

@@ -20,7 +20,7 @@ CLI / web UI (/app SPA) / FastAPI
       -> ActorAgent.generate
       -> validate draft
       -> CriticAgent.evaluate
-      -> repair if rejected (local, then cloud escalation per CLOUD_MODE)
+      -> repair if rejected (on the session's bound provider)
       -> output-side secret containment
       -> persist turn
       -> MemoryCurator.curate (+ index, dedup, consolidate)
@@ -118,12 +118,12 @@ validation, routing, or memory logic.
 
 - evaluates drafts with structured JSON output
 - can inspect hidden context for leak detection
-- stays local in current routing rules
+- runs on the session's bound provider
 
 ### MemoryCurator
 
 - extracts structured memory candidates from the completed turn
-- stays local in current routing rules
+- runs on the session's bound provider
 - does not persist directly
 
 ## Visibility Model
@@ -138,18 +138,16 @@ Actor prompts include only `player`-visible retrieved chunks. Hidden fields may 
 
 ## Cloud Routing
 
-The router in [app/llm/router.py](../app/llm/router.py) is deterministic.
+The router in [app/llm/router.py](../app/llm/router.py) is deterministic. Provider is a
+session-bound choice made once at session creation; `choose_route` only maps that bound
+provider to a route — there is no escalation, no fallback, and no per-turn override.
 
-- `off`: cloud is never used
-- `ask`: routes may indicate cloud, but the runtime avoids silent cloud calls
-- `auto`: cloud may be used for explicit requests, low retrieval confidence, high scene complexity, failed local repair, or local-provider failure
+- `off`: creating a `cloud` session is rejected (`400 cloud_unavailable`); local sessions unaffected
+- `ask`: creating a `cloud` session requires interactive confirmation once, at creation; once
+  confirmed, the whole session runs on cloud with no further prompts
+- `auto`: cloud sessions are created without an interactive prompt
 
-Important current detail: in `ask` mode the runtime never calls cloud silently. When the router
-would escalate an actor turn to cloud, it returns a two-phase `confirmation_required` result (API
-`status: "confirmation_required"`, a single SSE `confirmation_required` frame, or an interactive
-CLI prompt); the client resubmits the same message with `cloud_confirmed: true` or
-`force_local: true`. A confirmation-required cloud repair that is not approved degrades to a
-controlled local failure with warnings.
+See [docs/06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md) for the full model.
 
 ## Retrieval Architecture
 
