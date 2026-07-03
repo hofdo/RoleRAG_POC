@@ -5,7 +5,6 @@ import {
   createCatalogSelection,
   formatRetrievalDiagnostics,
   formatStageTimings,
-  isConfirmationRequired,
 } from './play-model';
 import type { ContentCatalog, RetrievalDiagnostics } from './models';
 
@@ -94,12 +93,6 @@ describe('play-model', () => {
     const sel = createCatalogSelection(catalog);
     const request = buildCatalogSessionRequest(sel, 'Avery');
     expect(request.provider).toBe('local');
-  });
-
-  it('detects confirmation-required turns', () => {
-    expect(isConfirmationRequired({ status: 'confirmation_required' })).toBe(true);
-    expect(isConfirmationRequired({ status: 'completed' })).toBe(false);
-    expect(isConfirmationRequired(null)).toBe(false);
   });
 
   it('formats stage timings and retrieval boosts', () => {

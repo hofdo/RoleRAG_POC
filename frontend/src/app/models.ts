@@ -125,9 +125,9 @@ export interface RetrievalDiagnostics {
 
 export type StageTimings = Record<string, number>;
 
-// Result of a (buffered/SSE) turn. `status` is "completed" or "confirmation_required".
+// Result of a (buffered/SSE) turn.
 export interface TurnResult {
-  status: 'completed' | 'confirmation_required';
+  status: 'completed';
   text: string;
   route: RouteResponse | null;
   finish_reason: string | null;
