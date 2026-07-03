@@ -154,7 +154,7 @@ graph TD
 ## Safety Map
 
 - actor prompts only receive player-visible retrieved chunks
-- critic and memory extraction stay local
+- critic and memory extraction run on the session's bound provider, like every other task
 - route handlers stay thin
 - streamed player-visible text is emitted only after validation and persistence complete
 - retrieval failure does not block turn completion

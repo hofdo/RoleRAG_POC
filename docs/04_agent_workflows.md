@@ -25,17 +25,16 @@ There is no implemented `IntentClassifier`, `PersonaAssembler`, or standalone `R
 4. Load recent dialogue from SQLite
 5. Build a retrieval query
 6. Retrieve player-visible chunks when retrieval is enabled
-7. Choose actor route
+7. Choose actor route (session's bound provider)
 8. Build actor messages
 9. Generate actor draft
 10. Validate the draft (deterministic checks)
-11. Critique draft locally
-12. If needed, run one local repair
-13. If still needed and policy allows, run one cloud repair
-14. Apply output-side secret containment
-15. Persist final turn
-16. Curate durable memory locally (with a deterministic fallback extractor)
-17. Persist, index, dedup, and optionally consolidate memory episodes
+11. Critique draft on the session's bound provider
+12. If needed, run one repair on the session's bound provider
+13. Apply output-side secret containment
+14. Persist final turn
+15. Curate durable memory on the session's bound provider (with a deterministic fallback extractor)
+16. Persist, index, dedup, and optionally consolidate memory episodes
 ```
 
 This flow is finite. No component recursively calls the orchestrator.
@@ -68,7 +67,7 @@ Responsibilities:
 
 Current routing behavior:
 
-- critic evaluation always stays local
+- critic evaluation runs on the session's bound provider, like every other task
 - invalid critic output is treated as a skipped critic step with warnings
 
 ## MemoryCurator
@@ -83,7 +82,7 @@ Responsibilities:
 
 Current routing behavior:
 
-- memory extraction always stays local
+- memory extraction runs on the session's bound provider, like every other task
 - invalid output is skipped with warnings
 
 ## Orchestrator Ownership
@@ -93,7 +92,6 @@ Current routing behavior:
 - ordering
 - route selection inputs
 - retry bounds
-- cloud fallback behavior
 - persistence
 - warning accumulation
 
@@ -115,10 +113,10 @@ Retrieval is deterministic code, not an agent class.
 - warnings include retrieval failure details
 - actor prompt is built without retrieved chunks
 
-### Local provider failure
+### Provider failure
 
-- the orchestrator may choose cloud when policy permits
-- in `ask` mode, cloud is not called silently
+- there is no cross-provider fallback; a session's provider never changes mid-session
+- an unreachable provider surfaces as a controlled `ProviderUnavailableError`
 
 ### Critic or curator failure
 
@@ -134,7 +132,8 @@ warning and do not discard the completed turn or persisted memory.
 
 - actor prompts only include player-visible retrieved chunks
 - critic may inspect hidden context but produces non-player-facing output
-- memory extraction stays local
+- hidden authored content never enters a prompt when the session's bound provider is cloud
+  (the `include_hidden` gate in [app/orchestration/stages/critique.py](../app/orchestration/stages/critique.py))
 - no agent persists directly
 - no agent can choose arbitrary tools or routes
 
@@ -147,7 +146,6 @@ Key coverage exists in:
 - `tests/unit/test_critic_agent.py`
 - `tests/unit/test_memory_curator.py`
 - `tests/unit/test_retrieval_context_builder.py`
-- `tests/integration/test_cloud_fallback_turn_flow.py`
 - `tests/evals/`
 
 Any future workflow change should extend those tests before changing runtime logic.

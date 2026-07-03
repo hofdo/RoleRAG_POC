@@ -71,21 +71,22 @@ flowchart LR
 Retrieval and memory are fail-open: if Qdrant/embeddings are unavailable the turn still
 completes, with a warning. Repair runs only when validation/critique reject the draft.
 
-### Local/cloud routing
+### Session-bound provider routing
 
-Deterministic, never probabilistic ([app/llm/router.py](../app/llm/router.py)). Critic and
-memory always stay local at temperature `0.0`.
+Deterministic, never probabilistic ([app/llm/router.py](../app/llm/router.py)). Provider
+(`local` or `cloud`) is picked once at session creation and is immutable for the session's
+lifetime; every task type — actor, repair, critic, memory extraction — runs on that bound
+provider. Structured tasks (critic, memory extraction) pin temperature `0.0` on both providers.
 
 ```mermaid
 flowchart TD
-    T{task}
-    T -->|critic / memory_extraction| L0["local, temp 0.0"]
-    T -->|actor / repair| E{"cloud trigger?<br/>user request · low retrieval confidence<br/>· high scene complexity · local repair failed<br/>· local provider unavailable"}
-    E -->|no| L1["local"]
-    E -->|yes| CM{CLOUD_MODE}
-    CM -->|off| L2["local (reason logged)"]
-    CM -->|ask| CFM["confirmation_required<br/>(client resubmits)"]
-    CM -->|auto| CL["cloud"]
+    SC[session creation] --> CM{CLOUD_MODE}
+    CM -->|off, provider=cloud| REJ["400 cloud_unavailable"]
+    CM -->|ask, provider=cloud| CONF["interactive confirm<br/>(once, at creation)"]
+    CM -->|auto, provider=cloud| BOUND
+    CM -->|any, provider=local| BOUND
+    CONF --> BOUND["session bound to provider"]
+    BOUND --> T["every task this session:<br/>actor / repair / critic / memory_extraction"]
 ```
 
 ---
@@ -142,7 +143,7 @@ rather than restate it.
 | Fact | Owner |
 |------|-------|
 | Config values, defaults, retry/truncation budgets | [`.env.example`](../.env.example) + [app/config.py](../app/config.py) |
-| HTTP endpoints, payloads, error codes, `stage_timings` keys, `confirmation_required` flow | [12_api_contract.md](12_api_contract.md) |
+| HTTP endpoints, payloads, error codes, `stage_timings` keys | [12_api_contract.md](12_api_contract.md) |
 | CLI command inventory | root [README](../README.md) + `python -m app.cli --help` |
 | Qdrant collections, retrieval, durable-memory design | [05_rag_memory_design.md](05_rag_memory_design.md) |
 | Visibility values & safety boundaries | [02_architecture.md](02_architecture.md) |

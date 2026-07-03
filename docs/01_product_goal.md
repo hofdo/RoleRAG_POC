@@ -4,7 +4,7 @@
 
 This document describes the current MVP goal for `RoleRAG_POC` as it exists in the repository today.
 
-The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, local-first LLM execution, optional cloud fallback, SQLite persistence, retrieval over ingested lore, and a local Angular web UI.
+The project is a personal-use roleplaying engine for one technical user. It combines structured scene and persona data, a bounded turn pipeline, a session-bound local-or-cloud LLM provider, SQLite persistence, retrieval over ingested lore, and a local Angular web UI.
 
 The product goal is not to build a general autonomous-agent framework. The goal is to keep a small, inspectable engine that can run locally and be extended safely.
 
@@ -17,13 +17,12 @@ user message
   -> load session, scene, persona
   -> retrieve player-visible lore context when available
   -> build bounded actor prompt
-  -> route to local or cloud provider deterministically
+  -> route to the session's bound provider (local or cloud, fixed at session creation)
   -> generate draft
   -> critique draft
-  -> retry once locally if needed
-  -> optionally repair with cloud when policy allows
+  -> retry once with repair if needed
   -> persist turn
-  -> curate durable memory locally
+  -> curate durable memory
 ```
 
 This is the MVP. It remains backend-owned, personal-use, and intentionally narrow.
@@ -45,8 +44,8 @@ The project does not target hosted end users, teams, or production tenants.
 ### Local-first roleplay
 
 - The default actor path uses a local OpenAI-compatible endpoint.
-- The cloud model is optional.
-- The engine should remain usable when cloud is disabled.
+- Cloud is a peer provider choice, bound once at session creation, not a rescue mechanism.
+- The engine should remain usable when cloud is disabled (`CLOUD_MODE=off`).
 
 ### Structured state
 
@@ -64,13 +63,13 @@ The project does not target hosted end users, teams, or production tenants.
 
 - Sessions and turns survive restart through SQLite persistence.
 - Important memories can be extracted and stored as durable memory episodes.
-- Memory extraction stays local.
+- Memory extraction runs on the session's bound provider.
 
 ### Bounded orchestration
 
 - The turn pipeline is finite and explicit.
 - The runtime does not contain autonomous loops or free-form tool use.
-- Cloud fallback is deterministic and policy-bound.
+- Provider is session-bound: chosen once at session creation, immutable for the session's lifetime.
 
 ## What the MVP Includes
 
@@ -79,8 +78,8 @@ The project does not target hosted end users, teams, or production tenants.
 - FastAPI API for the content catalog, session CRUD, turns (JSON + buffered SSE), durable
   memories, and session canon
 - Angular SPA (play, RAG inspector, analytics, eval) over the same-origin API
-- deterministic local/cloud router
-- actor generation, critic validation, and local memory curation
+- deterministic, session-bound local/cloud router
+- actor generation, critic validation, and memory curation
 - Qdrant-backed runtime retrieval
 - deterministic eval harness using fake providers
 
