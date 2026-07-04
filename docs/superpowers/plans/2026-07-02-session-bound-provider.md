@@ -1,5 +1,7 @@
 # Session-Bound Provider Choice Implementation Plan
 
+> **Status: EXECUTED** — all 7 tasks merged to main 2026-07-02/03 (commits 28bdd92..0557eb8; docs sweep 25b4dde).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cloud becomes a peer choice of primary model, bound to a session at creation — and stops being an automatic rescue/escalation mechanism.

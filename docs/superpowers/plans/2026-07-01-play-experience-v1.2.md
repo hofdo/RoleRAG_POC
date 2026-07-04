@@ -1,5 +1,7 @@
 # Play Experience v1.2 Implementation Plan
 
+> **Status: EXECUTED** — all 8 tasks merged to main 2026-07-01/02. Checkboxes tracked out-of-band. Parts of Tasks 5/7 (requestCloud/confirmCloud plumbing, buildTurnRequest cloud flags) superseded by the 2026-07-02 session-bound-provider plan; code snippets no longer match current source.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the eight highest-leverage gaps from the 2026-07-01 in-depth analysis: data durability, contradiction memory loss, per-turn latency waste, dead-air turns, session continuity, reroll, campaign stasis, and cross-session NPC memory.

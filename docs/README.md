@@ -133,6 +133,21 @@ flowchart TD
 | [deep-research-report](deep-research-report.md) | Design-time RAG/roleplay research |
 | [personal_python_roleplaying_rag_implementation_guide](personal_python_roleplaying_rag_implementation_guide.md) | Earlier implementation guide |
 
+## Implementation plans (executed)
+
+Task-by-task plans that shipped batches of work. They record *how* the work landed, not
+current state — see the living docs above for that. See
+[superpowers/plans/README.md](superpowers/plans/README.md) for the executed-status and
+mandatory-docs-sweep conventions.
+
+| Plan | Delta |
+|------|-------|
+| [play-experience-v1.2](superpowers/plans/2026-07-01-play-experience-v1.2.md) | Durability, reroll, scene/persona switching, stage SSE, cross-session persona memory (merged 2026-07-01/02) |
+| [session-bound-provider](superpowers/plans/2026-07-02-session-bound-provider.md) | Provider bound once at session creation; automatic cloud paths removed (merged 2026-07-02/03) |
+
+`docs/artifacts/` holds supporting assets (e.g. the local-model-comparison run) referenced
+by [14_local_model_comparison_2026-06-08](14_local_model_comparison_2026-06-08.md).
+
 ---
 
 ## Single sources of truth
@@ -151,6 +166,33 @@ rather than restate it.
 
 A 13-doc / 402-claim cross-doc duplication audit found the remaining restatement is consistent and
 mostly intentional (safety invariants worth repeating), so it is kept rather than deduped.
+
+---
+
+## Doc maintenance & freshness
+
+Living docs carry a freshness header directly under their H1:
+
+```
+> Reviewed: YYYY-MM-DD @ <short-sha>
+```
+
+The date is when the doc was last checked against the code; the short SHA is the commit
+the doc was reviewed against (usually `HEAD` at review time). A header whose SHA is far
+behind `main` is a signal the doc may have drifted and is due for another pass.
+
+**Sweep rule.** Every implementation plan ends with a mandatory "Sweep living docs" task
+so shipped behavior and its documentation move together; that task refreshes the `Reviewed:`
+headers it touches. See [superpowers/plans/README.md](superpowers/plans/README.md).
+
+**Living docs** (the set the sweep covers, each carrying a `Reviewed:` header):
+
+- root `README.md` and `frontend/README.md`
+- this hub (`docs/README.md`) and the numbered docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`20`
+- `docs/GLOSSARY.md`, `docs/BACKLOG.md`, `docs/SIDE_PROJECTS.md`
+
+Historical reports (`07`, `11`, `13`–`16`) and background design-time docs are *not* living:
+their point-in-time banners are their freshness marker instead.
 
 ---
 
