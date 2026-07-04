@@ -20,6 +20,9 @@ This report supplements, and does not replace, the historical
 [MVP acceptance report](11_mvp_acceptance_report.md). The broader roadmap remains unchanged until
 implementation begins.
 
+Companion study: [docs/14_local_model_comparison_2026-06-08.md](14_local_model_comparison_2026-06-08.md)
+runs the same failures across the small and 26B profiles on the same-day snapshot.
+
 ## Confidence Legend
 
 - `95–100% confirmed`: directly measured or directly established by the cited code.
@@ -238,6 +241,14 @@ stored, so retrieval could rank only unrelated memories.
   stages in [turn orchestrator](../app/orchestration/turn_orchestrator.py#L180-L254).
 
 ## Prioritized Implementation Roadmap
+
+> Roadmap items 1–5 were implemented for 1.0 — see
+> [docs/15_v1_acceptance_report.md](15_v1_acceptance_report.md), whose Scope explicitly closes this
+> roadmap. The mapping is not numeric 1:1: item 1 → doc 15's "Structured-output reliability fixes"
+> section, item 2 → the deterministic promise extractor, item 3 → `finish_reason` truncation retry,
+> item 4 → the draft validator (delivered item 2), item 5 → critic/curator gating (delivered
+> item 3). The `#L`-anchored code links below were pinned to the June 8 snapshot and have since
+> drifted against current source.
 
 ### 1. Task-specific schema-constrained output with thinking disabled
 

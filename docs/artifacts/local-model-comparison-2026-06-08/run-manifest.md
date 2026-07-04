@@ -1,5 +1,7 @@
 # Local Model Comparison Run Manifest
 
+Reproducibility manifest for [docs/14_local_model_comparison_2026-06-08.md](../../14_local_model_comparison_2026-06-08.md).
+
 - captured_at_utc: `2026-06-08T11:41:58Z`
 - git_head: `22f23ffdb30e9da0bc13921a9042b157a45c9493`
 - tracked_diff_sha256: `be8ab452972d5772419d240b4af97de834319432fd4183cd896f1482d1dd82b8`

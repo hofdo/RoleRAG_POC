@@ -1,8 +1,13 @@
 # MTP speculative-decoding speed test — 2026-06-29
 
-Point-in-time finding (not current-state docs). Compares the `26b-mtp` local-model profile
-(Gemma4-26B-A4B Balanced QAT + an MTP draft model, speculative decoding on) against the **same
-local weights with the draft off** — so the only variable is MTP speculative decoding.
+> **Historical record** — a dated speed test (2026-06-29). Point-in-time; not kept in sync with
+> the code. For current state see [docs/README.md](README.md).
+
+Compares the `26b-mtp` local-model profile (Gemma4-26B-A4B Balanced QAT + an MTP draft model,
+speculative decoding on) against the **same local weights with the draft off** — so the only
+variable is MTP speculative decoding. The 26B base profile was established in
+[docs/14](14_local_model_comparison_2026-06-08.md); `26b-mtp` setup is documented in the root
+[README](../README.md)'s Runtime Verification section (`LOCAL_MODEL_PROFILE`).
 
 ## Setup
 
@@ -51,6 +56,8 @@ Advantage grows with conversation length:
 - No recall metrics at 100 turns: the live checkpoint's recent-conversation assertion aborts past
   ~8 turns (timings are still captured). Recall was identical (zero misses) at 8 and 30 turns; MTP
   is lossless, so recall is not expected to change.
+  *Since fixed (2026-07-02): the checkpoint now reports recall of all five seeded events at 100
+  turns (report-only metric), and the hard recent-conversation assertion is fixed.*
 
 ## Recommendation
 

@@ -1,7 +1,15 @@
 # Local Model Comparison - June 8, 2026
 
 > **Historical record** — a dated model benchmark (2026-06-08). Point-in-time; not kept in sync
-> with the code. For current state see [docs/README.md](README.md).
+> with the code. Several "recommended application actions" in the Issue Ledger and the 50-Turn
+> Extension section have since shipped, so the live `#L` code links now contradict the text:
+> explicit provider timeouts and bounded retries, `finish_reason` propagation with truncation
+> retry, schema-constrained structured generation, and per-turn atomic checkpoint persistence all
+> exist now (see [docs/15_v1_acceptance_report.md](15_v1_acceptance_report.md)). Read the ledger as
+> the state on 2026-06-08, not as open work. For current state see [docs/README.md](README.md).
+>
+> Companion study: [docs/13_live_model_quality_assessment.md](13_live_model_quality_assessment.md)
+> is the same-day 12-turn quality assessment these profile runs quantify.
 
 ## Scope
 

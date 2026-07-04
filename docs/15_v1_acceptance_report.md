@@ -32,6 +32,10 @@ model quality assessment (`docs/13_live_model_quality_assessment.md`).
    SSE frame) before any generation or persistence. Approve with `cloud_confirmed`,
    decline with `force_local` (route reason `user declined cloud`). Play UI prompts via
    dialog; CLI prompts interactively or accepts `--confirm-cloud` / `--force-local`.
+   *Removed 2026-07-02: the provider is now bound at session creation and per-turn
+   confirmation no longer exists; `CLOUD_MODE=ask` confirms once when a cloud session
+   is created. See [docs/README.md](README.md) "Session-bound provider routing" and
+   [docs/06](06_local_cloud_model_strategy.md).*
 5. **Session management CLI** — `list-sessions`, `delete-session` (SQLite cascade +
    Qdrant session points), `export-session` / `import-session` (format_version 1
    envelope, `--new-id` remap), `inspect-memories`, `reset-db`.
@@ -77,7 +81,10 @@ Consequences:
 
 - gating defaults ship as `always` (current behavior); flip `CRITIC_GATING` /
   `CURATOR_GATING` to `auto` after a clean 12-turn strict run shows the latency win
-  with no lost durable events
+  with no lost durable events.
+  *Resolved later: auto-gating regressed 50-turn recall in live acceptance; the
+  `always` defaults are intentional (see [docs/05_rag_memory_design.md](05_rag_memory_design.md))
+  and the addendum below.*
 - rerun on a host with free RAM:
   `CRITIC_GATING=auto CURATOR_GATING=auto LIVE_TURN_COUNT=12 bash scripts/live-smoke.sh`
 - expected from the 8-turn stage means: gating `auto` skips ~4.7 s critique + ~16.2 s
@@ -103,3 +110,27 @@ Consequences:
 ## Version
 
 `pyproject.toml` and `app.__version__` set to `1.0.0`.
+
+## Addendum (2026-07-04): post-1.0 live acceptance outcomes
+
+The 12-turn acceptance deferred above was rerun as a live acceptance campaign on
+2026-06-12/13, closing the loop this report left open. Outcomes from that campaign
+and the follow-up live runs, all shipped as defaults since:
+
+- **26B profile required** — the small profile's curator paraphrased memories lossily
+  (it dropped the seeded before-dawn commitment at 50-turn scope); the 26B profile
+  (`LOCAL_MODEL_PROFILE=26b`) is the supported model for long sessions.
+- **`LOCAL_LLM_MAX_RETRIES=1`** — with the old default of 0, a single transient
+  client-to-server stall became a session-killing 504; one bounded retry is now the
+  default.
+- **`LOCAL_STRUCTURED_MAX_TOKENS` raised 350 → 640** — verbose models' critic JSON
+  truncated mid-string at the 350-token cap; 640 eliminated the parse failures.
+- **`LOCAL_LLM_TIMEOUT_SECONDS=300`** — late-session 26B calls legitimately run long;
+  tighter caps cancelled real work.
+- **Dual-query recall verified** — retrieval was rebuilt as a dual-query pass (context
+  blob plus bare user message) after query-blob dilution buried indirect callbacks; a
+  50-turn run then validated all five seeded story-event gates (turns 13/31/38/45/50).
+  See [docs/05_rag_memory_design.md](05_rag_memory_design.md).
+- **Auto-gating rejected** — `CURATOR_GATING=auto` missed a rule-phrased durable event
+  at turn 38 (its heuristic matches commitment verbs only), regressing 50-turn recall;
+  `CRITIC_GATING` / `CURATOR_GATING` stay `always` deliberately.
