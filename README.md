@@ -178,6 +178,11 @@ python -m app.cli ingest data/documents/demo_lore.md \
   --tag palace
 ```
 
+This manual step is optional when you start sessions through the CLI: `start-session`
+auto-ingests manifest-declared lore (idempotent, fail-open; opt out with
+`--skip-lore-ingest`). Sessions created through the API or SPA do not auto-ingest, so
+run it once if you only play through the web UI.
+
 ### Run the API
 
 ```bash
@@ -242,6 +247,8 @@ escalation, no automatic cloud fallback, and no mid-turn provider switching; the
 - `CLOUD_MODE=ask`: creating a `cloud` session requires interactive confirmation at
   creation time — a `typer.confirm` prompt in the CLI, a `window.confirm` prompt in the
   SPA. Once confirmed, the session runs entirely on cloud with no further prompts.
+  The confirmation is enforced by the CLI and SPA clients; a raw `POST /sessions` call
+  under `CLOUD_MODE=ask` behaves like `auto`.
 - `CLOUD_MODE=auto`: cloud sessions are created without an interactive prompt.
 
 Privacy invariant: hidden authored content — persona `secrets`/`forbidden_knowledge`
@@ -250,12 +257,13 @@ local or cloud. This is enforced by an `include_hidden` gate (`app/orchestration
 critique.py`: `include_hidden=route.provider == ModelProviderName.LOCAL`) that only ever
 allows hidden fields into a prompt when the route is local, plus a provider-binding eval
 test. Critic evaluation and memory extraction follow the session's bound provider like
-every other task, but hidden fields are stripped from what reaches the model whenever
-that provider is cloud.
+every other task. Critic prompts include hidden fields only when that provider is local
+(the `include_hidden` gate); memory-extraction prompts never contain hidden fields on any
+provider — they carry only ids, titles, names, and the completed turn's dialogue.
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `reindex-memories`, `retrieve-debug`, `turn`, and `turn-history`.
+- `CLI`: [app/cli.py](app/cli.py) exposes 24 commands — `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`, `embedding-ab`, `turn`, `turn-history`, `list-sessions`, `backup`, `delete-session`, `export-session`, `import-session`, `inspect-memories`, `reset-db`, and `reset-index`. Run `rolerag --help` for the authoritative list with descriptions.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.
@@ -379,6 +387,28 @@ Backfill or repair the vector index for existing SQLite memories:
 python -m app.cli reindex-memories --session-id <session-id>
 ```
 
+Write a timestamped online-consistent copy of the SQLite database (vectors are excluded
+on purpose — Qdrant collections rebuild from SQLite via `reindex-memories`/`ingest`):
+
+```bash
+python -m app.cli backup
+python -m app.cli backup --output-dir /path/to/backups
+```
+
+Drop derived vector collections (all, or one of `canon_lore`/`session_memory`/`persona_memory`),
+then rebuild with `reindex-memories` or re-ingest lore:
+
+```bash
+python -m app.cli reset-index --collection session_memory
+```
+
+Rank the seeded durable-memory events with alternative FastEmbed embedding models (LLM-free
+offline A/B; models download on first use):
+
+```bash
+python -m app.cli embedding-ab --model BAAI/bge-small-en-v1.5
+```
+
 Inspect ranked retrieval for a query without calling an LLM:
 
 ```bash
@@ -406,7 +436,9 @@ python -m app.cli smoke-run --real-runtime
 ```
 
 Run the isolated live stack checkpoint. It first reuses a local OpenAI-compatible model server if
-`/v1/models` already exposes `chatgpt-onnechan`; otherwise it starts this managed server:
+`/v1/models` already exposes `chatgpt-onnechan`; otherwise it starts a managed server with a
+command equivalent to the one below (the exact per-profile flags live in
+[scripts/lib/local-model-profile.sh](scripts/lib/local-model-profile.sh), the source of truth):
 
 ```bash
 llama-server \
@@ -475,7 +507,7 @@ q8_0 K cache, q4_0 V cache, and seed `424242` (8192-token context for `small`/`2
 startup from `-hf` to a local `-m` GGUF path. It also accepts `LLAMA_CPP_HOST` and
 `LLAMA_CPP_PORT`, optional `LLAMA_CPP_CTX_SIZE` for `-c`, optional
 `LLAMA_CPP_N_GPU_LAYERS`, and whitespace-separated `LLAMA_CPP_SERVER_ARGS`.
-`LIVE_TURN_COUNT` accepts `5` through `50` and defaults to `8`; the former
+`LIVE_TURN_COUNT` accepts `5` through `100` and defaults to `8`; the former
 `LIVE_LONG_TURN_COUNT` remains a fallback when `LIVE_TURN_COUNT` is unset.
 `LIVE_FAIL_ON_STRUCTURED_WARNINGS=1` is the default and fails the checkpoint on critic,
 memory-curation, memory-indexing, or retrieval warnings. Set it explicitly to `0` for report-only
@@ -587,8 +619,10 @@ Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) fo
 - `GET /content/catalog`
 - `GET /sessions`
 - `POST /sessions`
+- `POST /sessions/{session_id}/scene`
 - `POST /sessions/{session_id}/turns`
 - `POST /sessions/{session_id}/turns/stream`
+- `DELETE /sessions/{session_id}/turns/last`
 - `GET /sessions/{session_id}`
 - `GET /sessions/{session_id}/turns/{turn_index}`
 - `GET /sessions/{session_id}/turn-details`
@@ -602,6 +636,11 @@ Implemented endpoints (see [docs/12_api_contract.md](docs/12_api_contract.md) fo
 The `canon` endpoints are an author surface for pinning durable "Standing facts"
 into the actor prompt by hand, alongside the auto-derived canon. Pinned facts
 lead the Standing-facts block.
+
+`POST /sessions/{session_id}/scene` switches the active scene mid-session (the
+`scene_id` is validated against the world's scene list). `DELETE
+/sessions/{session_id}/turns/last` deletes the most recent turn together with its
+derived memories — the reroll/undo primitive.
 
 Create a session (`provider` defaults to `local`; pass `"provider":"cloud"` to bind the
 session to cloud for its whole lifetime, subject to the `CLOUD_MODE` creation gate above):
@@ -648,14 +687,17 @@ architecture). The browser surface is a thin client over the same-origin API, wi
   retrieval drill-down (query, selected/rejected chunks, scores, boosts) per turn
 - **Analytics** — turn latency and stage-timing statistics for a session
 - **Eval** — eval-run trends from `GET /diagnostics/eval-runs` with per-run drill-down
+- the setup screen offers a resume picker over recent sessions (`GET /sessions`); resuming
+  reloads the full transcript through `GET /sessions/{id}/turn-details`
+- during a session, the Play page can reroll the last turn (`DELETE /sessions/{id}/turns/last`,
+  which removes the turn and its derived memories), switch the active scene mid-session
+  (`POST /sessions/{id}/scene`), and set a persona override that is sent as
+  `active_persona_id` with each subsequent turn
 - `CLOUD_MODE=ask` shows a one-time `window.confirm` prompt when starting a cloud session
   (a session's provider choice happens once, at creation, in the setup picker); there is
   no per-turn confirmation once a session is running
 - scenario packs remain a process-level backend choice through `CONTENT_ROOT`; start FastAPI with
   the desired `CONTENT_ROOT` to use a different scenario pack
-
-Session resume by `session_id` currently exists in the CLI and API only; the SPA starts fresh
-sessions (resume UI is a tracked follow-up in [docs/BACKLOG.md](docs/BACKLOG.md)).
 
 The browser does not own orchestration, retrieval, validation, routing, persistence, memory,
 scenario-pack selection, hidden context, or browser-local authoritative state. It provides no
@@ -691,7 +733,10 @@ Important current behavior:
 
 - document ingestion currently supports `.md` and `.txt`
 - world, scene, and persona demo data are loaded from JSON files
-- Qdrant is a derived runtime index; scenario startup does not automatically ingest lore
+- Qdrant is a derived runtime index. CLI `start-session` best-effort auto-ingests
+  manifest-declared scenario lore (idempotent and fail-open — an unreachable vector store
+  only warns; opt out with `--skip-lore-ingest`). API and SPA session creation does not
+  auto-ingest; use `ingest` / `ingest-scenario-lore` manually there or for re-indexing
 - retrieval is fail-open; if Qdrant or embeddings are unavailable during a turn, generation continues without retrieved context
 - actor retrieval gathers candidates from `session_memory`, `persona_memory`, and `canon_lore`, then applies a deterministic reranking pass
 - actor retrieval filters to player-visible chunks and scopes lore, session memory, and persona memory by stored session metadata
@@ -701,7 +746,10 @@ Important current behavior:
 - `retrieve-debug` prints metadata-only diagnostics for selected chunks and does not expose hidden text
 - actor prompts include only the configured bounded recent-dialogue window; older continuity comes
   back through retrieved durable memory when relevant
-- individual recent-dialogue messages are not character-truncated when inserted into actor prompts
+- prior recent-dialogue messages are clipped to `RECENT_DIALOGUE_MAX_MESSAGE_CHARS`
+  characters (default `900`) with an explicit omitted-characters marker before insertion
+  into the actor prompt, and any clipping is surfaced as a turn warning; the current
+  incoming player message is not clipped
 
 ## Tests, Lint, and Evals
 
@@ -767,7 +815,7 @@ visibility, and other application-invariant failures produce a nonzero exit. The
 manual and is not part of normal CI.
 
 The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation
-behavior, long-session durable-memory continuity, and cloud-routing policy. The 16-turn
+behavior, long-session durable-memory continuity, and provider-binding policy. The 16-turn
 `memory_continuity` regression verifies that actor history remains window-bounded, hidden memories
 stay out of actor prompts, and SQLite-backed memory survives a fresh derived-index rebuild with
 scope isolation. It uses fake providers, deterministic keyword embeddings, SQLite, and
