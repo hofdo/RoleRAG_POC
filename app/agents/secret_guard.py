@@ -1,11 +1,15 @@
-"""Deterministic guard against the critic echoing hidden facts.
+"""Deterministic guards against hidden facts leaking through generated text.
 
-The critic is shown persona secrets / forbidden_knowledge / gm_private_summary
-so it can detect leakage in a draft, and is instructed (prompt-only) not to
-repeat them in its issues / repair_instruction. Those fields feed the next actor
-generation, so an instruction-following lapse would propagate a secret. This
-redacts any verbatim echo (whole fact or one of its sentences) before the
-critic's output is used. It catches copied text, not paraphrase.
+Two collaborators wrap the LLM around hidden persona/scene fields (secrets,
+forbidden_knowledge, gm_private_summary). ``redact_hidden_facts`` runs in the
+critique stage: the critic is shown those fields to detect leakage in a draft
+but must not repeat them in its issues/repair_instruction (which feed the next
+actor generation), so any verbatim echo is stripped before its output is reused.
+``scan_reply`` runs in the orchestrator as an output-side backstop on the actor
+reply itself: it redacts verbatim/per-sentence echoes and additionally flags
+likely paraphrases via content-word overlap, since models can confabulate
+secrets the prompt never contained. ``collect_hidden_facts`` gathers the fields
+both guards operate over.
 """
 
 from __future__ import annotations

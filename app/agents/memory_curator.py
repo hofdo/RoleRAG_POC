@@ -1,3 +1,13 @@
+"""Memory curator agent: turns dialogue into structured session memories.
+
+``MemoryCurator.curate`` prompts the session's bound provider (via the
+memory-extraction prompt) to distil a completed turn into candidate memory
+episodes, parsing the structured JSON with truncation-retry handling;
+``consolidate`` rolls accumulated old, low-importance memories into a summary.
+On the API turn path this runs as a deferred background job. Curator failures
+degrade to turn warnings rather than failing the turn.
+"""
+
 from __future__ import annotations
 
 from pydantic import ValidationError

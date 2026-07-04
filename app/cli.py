@@ -1,3 +1,14 @@
+"""Typer command-line entry point (the ``rolerag`` / ``python -m app.cli`` app).
+
+Wraps the composition root (``app.composition``) and the ``TurnOrchestrator`` to
+offer the full offline workflow: content validation and scaffolding, lore
+ingestion, session start/list/export/import, running and inspecting turns,
+memory inspection, index/db resets, and the embedding A/B harness. Unlike the
+API/SPA path, ``start-session`` best-effort auto-ingests the scenario's manifest
+lore (idempotent, fail-open, ``--skip-lore-ingest`` to opt out). Reads
+configuration via ``app.config.get_settings``.
+"""
+
 from __future__ import annotations
 
 import asyncio

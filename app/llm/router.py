@@ -1,3 +1,15 @@
+"""Model routing: which provider and parameters serve each turn task.
+
+Defines the routing vocabulary (``CloudMode``, ``ModelProviderName``,
+``ModelTask``, ``ModelRoute``) and ``choose_route``, which maps a task onto the
+session's bound provider. Since the 2026-07-02 session-bound-provider decision
+there is deliberately no escalation, fallback, or per-turn override: every task
+runs on the provider chosen at session creation, with structured tasks (critic,
+memory extraction) pinned to greedy decoding. ``LOW_RETRIEVAL_CONFIDENCE`` /
+``HIGH_SCENE_COMPLEXITY`` remain here only as default critic/curator auto-gating
+thresholds; routing itself no longer reads them.
+"""
+
 from __future__ import annotations
 
 from enum import Enum

@@ -1,3 +1,13 @@
+"""Assembles the actor prompt from persona, scene, canon, and retrieved context.
+
+``build_actor_messages`` renders the ordered ``LlmMessage`` list the actor
+provider sees: the active persona's public fields, the player-visible scene
+summary, session-canon "Standing facts", recent dialogue (clipped per message to
+``recent_dialogue_max_message_chars``, default 900), and retrieved chunks
+selected under a ``ContextBudget``. Only player-visible content is included here;
+hidden persona/scene fields never enter the actor prompt.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

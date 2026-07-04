@@ -1,3 +1,13 @@
+"""Composition root: wires ``Settings`` into concrete collaborators.
+
+Central place where the app's dependency graph is assembled. The ``build_*``
+factories construct the SQLite repositories, OpenAI-compatible local/cloud
+providers, embedding provider and Qdrant vector store, retriever, critic, and
+memory curator, then hand them to a ``TurnOrchestrator`` bundled as
+``AppServices``. Both the API layer (``app.api``) and the CLI (``app.cli``)
+depend on these builders rather than constructing collaborators themselves.
+"""
+
 from __future__ import annotations
 
 import sqlite3

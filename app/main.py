@@ -1,3 +1,12 @@
+"""ASGI application entry point (``uvicorn app.main:app --reload``).
+
+Builds the FastAPI app: registers the API router from ``app.api`` and its error
+handlers (``ApiError``, request-validation), redirects ``/`` to the SPA, and —
+when a frontend build is present — mounts the Angular bundle at ``/app`` with a
+deep-link fallback so client-side routes survive a hard refresh. When the SPA is
+not built, ``/`` returns a 503 with build instructions instead.
+"""
+
 from pathlib import Path
 
 from fastapi import FastAPI

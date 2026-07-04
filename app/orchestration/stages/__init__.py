@@ -1,3 +1,11 @@
+"""Turn-pipeline stages, re-exported for ``TurnOrchestrator``.
+
+Aggregates the discrete stages a turn passes through — session loading,
+retrieval, routing, generation, critique, repair, memory curation/indexing,
+persistence, and structured-failure logging — so ``turn_orchestrator`` imports
+them from one place. Each submodule owns one stage and its result dataclass.
+"""
+
 from app.orchestration.stages.critique import (
     CriticEvaluatingAgent,
     CritiqueStageResult,

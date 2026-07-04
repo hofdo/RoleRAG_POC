@@ -1,3 +1,14 @@
+"""Pydantic request/response models for the HTTP API boundary.
+
+Defines the wire shapes ``app.api.routes`` validates and serializes: session
+create/get, scene update, turn create/detail, last-turn deletion, session
+memories, eval-run summaries, and the error envelope. Request models pin
+``extra="forbid"`` and field bounds so malformed input fails with a 422 before
+reaching the orchestrator; response models are deliberately narrower than the
+domain objects, omitting hidden persona/scene content. These types are the
+source of the generated OpenAPI schema.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime

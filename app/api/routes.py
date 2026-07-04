@@ -1,3 +1,17 @@
+"""HTTP API surface: FastAPI routes over the turn orchestrator and stores.
+
+Defines the ``APIRouter`` mounted by ``app.main``: runtime status and eval-run
+diagnostics, content catalog, session create/list/get, scene switch and
+per-turn persona override, turn execution (buffered non-streaming and SSE with
+live ``stage`` frames), last-turn deletion (reroll), and read endpoints for
+turns, turn-details, and session memories. Turn requests run through the
+``AppServices`` built by ``app.composition``; memory curation is deferred to
+background tasks, and warnings are surfaced as classified ``errors`` via
+``classify_warnings``. FastAPI's ``/docs`` and ``/openapi.json`` are the
+ground-truth inventory; see ``docs/12_api_contract.md`` for SSE and error
+semantics.
+"""
+
 from __future__ import annotations
 
 import asyncio

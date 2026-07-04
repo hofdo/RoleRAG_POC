@@ -1,3 +1,16 @@
+"""Coordinates a single turn through the actor-critic pipeline.
+
+``TurnOrchestrator`` runs the ordered stages defined in
+``app.orchestration.stages`` — load session/scene/persona, retrieve context,
+route to the session's bound provider, generate the actor draft, critique it
+(with one bounded same-provider repair pass), curate and index memory, and
+persist — returning a ``TurnResult``. It applies output-side secret containment
+via ``app.agents.secret_guard`` before persisting, degrades curator failures to
+warnings, and fails closed to a controlled failure when the critic rejects or
+errors. ``TurnOrchestratorConfig`` carries the scalar tunables so the
+constructor takes dependencies plus one config object.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator

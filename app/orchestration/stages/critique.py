@@ -1,3 +1,16 @@
+"""Critic stage: evaluates the actor draft and gates when it runs.
+
+``TurnCritiqueStage`` invokes the critic on the session's bound provider and
+redacts any hidden-fact echo from its output via ``app.agents.secret_guard``
+before it is reused. It is fail-closed: a structured-output error or any other
+exception yields a failed critique so the orchestrator can escalate to a
+controlled failure rather than emit an unreviewed draft. Under ``auto`` gating,
+``_is_risky_turn`` decides whether to critique at all — flagged by the draft
+validator, low/absent retrieval confidence (``LOW_RETRIEVAL_CONFIDENCE``), high
+scene complexity (``HIGH_SCENE_COMPLEXITY``), or a cloud route; ``always`` gating
+critiques every turn.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -1,3 +1,15 @@
+"""Central runtime configuration for the whole app.
+
+``Settings`` is a pydantic-settings model loaded from environment variables and
+``.env``; every non-comment key here mirrors one field, a contract enforced by
+``tests/integration/test_documentation.py``. Values tune the LLM providers
+(local/cloud base URLs, tokens, timeouts, retries), retrieval and ranking, the
+session-canon block, and the critic/curator auto-gating risk thresholds; routing
+does not read the threshold values because the session provider is fixed at
+creation. ``get_settings()`` is the single construction point used by
+``app.composition`` and the CLI.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
