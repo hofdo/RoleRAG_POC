@@ -1,5 +1,7 @@
 # 06 — Current Local and Cloud Model Strategy
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document records the local/cloud strategy that is implemented today.

@@ -1,5 +1,7 @@
 # 03 — MVP Implementation and Operation Guide
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document explains how to run, test, and safely extend the implemented MVP.

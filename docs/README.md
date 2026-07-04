@@ -1,5 +1,7 @@
 # RoleRAG Documentation
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 Navigation hub for the RoleRAG docs. New here? Start with the root
 [README](../README.md) (setup, Docker, CLI/API usage), then use the diagrams and
 index below.

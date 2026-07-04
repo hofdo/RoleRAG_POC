@@ -1,5 +1,7 @@
 # RoleRAG POC — Side Projects
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 Ideas that build *on top of* the engine without changing its core. Source: the 10-agent deep
 analysis. Four original entries shipped in 1.1.0 and are marked **BUILT** below; the remaining
 ideas are unbuilt. Engine backlog lives in [BACKLOG.md](BACKLOG.md); this file is the durable

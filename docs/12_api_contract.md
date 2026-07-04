@@ -1,5 +1,7 @@
 # 12 - API Contract
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Scope
 
 The FastAPI surface is a local-use API covering five concern areas: session lifecycle (creation,

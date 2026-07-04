@@ -1,5 +1,7 @@
 # 02 — Current MVP Architecture
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document explains the architecture that is implemented in the repository now. It is a current-state reference, not a speculative skeleton.

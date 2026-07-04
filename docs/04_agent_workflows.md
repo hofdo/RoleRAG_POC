@@ -1,5 +1,7 @@
 # 04 — Current Agent Workflows
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document describes the bounded agent workflow that is implemented today.

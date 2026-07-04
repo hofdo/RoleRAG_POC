@@ -1,5 +1,7 @@
 # 05 — Current RAG and Memory Design
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document describes the retrieval and memory design that is implemented today, including the important gaps that still exist after the MVP.

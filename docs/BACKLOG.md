@@ -1,5 +1,7 @@
 # RoleRAG POC — Working Backlog
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
 

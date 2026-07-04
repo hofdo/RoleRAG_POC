@@ -1,5 +1,7 @@
 # 08 — Agent Handoff Guide
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This guide is the fastest safe onboarding path for a future coding agent or developer.

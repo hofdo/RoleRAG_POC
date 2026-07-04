@@ -1,5 +1,7 @@
 # RoleRAG Web UI (Angular 19 SPA)
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 The browser surface for RoleRAG, served by FastAPI at `/app` (the API root `/` redirects
 there). It is a **thin client** over the same-origin API: the browser owns no orchestration,
 retrieval, validation, routing, persistence, memory, or hidden context — see the exposure

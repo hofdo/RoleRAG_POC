@@ -1,5 +1,7 @@
 # 01 — Product Goal: Personal RoleRAG MVP
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Purpose
 
 This document describes the current MVP goal for `RoleRAG_POC` as it exists in the repository today.

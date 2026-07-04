@@ -1,5 +1,7 @@
 # RoleRAG_POC
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
 Qdrant-backed retrieval, and deterministic local/cloud routing.

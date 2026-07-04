@@ -1,5 +1,7 @@
 # 09 — Current Architecture Map
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 ## Overview
 
 `RoleRAG_POC` is a backend-owned roleplaying engine with thin entry points, an Angular SPA web UI, a single orchestrator, narrow LLM agents, SQLite persistence, and Qdrant-backed retrieval.

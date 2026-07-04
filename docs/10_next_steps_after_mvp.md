@@ -1,5 +1,7 @@
 # 10 — Next Steps After 1.0
 
+> Reviewed: 2026-07-04 @ 571acc8
+
 > **Updated 2026-07-04** — two efforts shipped after this list was written:
 > play-experience v1.2 (2026-07-01/02,
 > [plan](superpowers/plans/2026-07-01-play-experience-v1.2.md)) and the session-bound
