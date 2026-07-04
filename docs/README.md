@@ -106,6 +106,7 @@ flowchart TD
 | [10_next_steps_after_mvp](10_next_steps_after_mvp.md) | Safe post-1.0 candidate work |
 | [12_api_contract](12_api_contract.md) | HTTP surface: endpoints, shapes, errors, exposure boundaries |
 | [17_content_authoring_reference](17_content_authoring_reference.md) | World/scene/persona field schema, player-visible vs. hidden fields, containment |
+| [18_security_privacy_and_backups](18_security_privacy_and_backups.md) | Deployment posture (no auth, don't expose the port), cloud egress, data locations, backup/restore runbook |
 
 ## Planning & roadmap
 
