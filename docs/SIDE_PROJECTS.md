@@ -1,8 +1,9 @@
 # RoleRAG POC — Side Projects
 
 Ideas that build *on top of* the engine without changing its core. Source: the 10-agent deep
-analysis. None are built yet. Engine backlog lives in [BACKLOG.md](BACKLOG.md); this file is the
-durable record of the "what could we build next" list.
+analysis. Four original entries shipped in 1.1.0 and are marked **BUILT** below; the remaining
+ideas are unbuilt. Engine backlog lives in [BACKLOG.md](BACKLOG.md); this file is the durable
+record of the "what could we build next" list.
 
 ## Scope guardrail
 
@@ -14,11 +15,14 @@ always-on hosting is out of scope unless that decision is deliberately revisited
 
 - **HTTP API** (`app/api/routes.py`): `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`,
   `POST /sessions/{id}/turns`, `POST /sessions/{id}/turns/stream` (SSE), `GET /sessions/{id}/turns/{i}`
-  (turn detail + retrieval diagnostics + `errors`, #8/#19), `GET /sessions/{id}/memories`, canon
-  endpoints, `GET /runtime/status`, `GET /content/catalog`.
+  (turn detail + retrieval diagnostics + `errors`, #8/#19), `GET /sessions/{id}/turn-details` (bulk
+  transcript + per-turn diagnostics), `DELETE /sessions/{id}/turns/last` (reroll),
+  `POST /sessions/{id}/scene` (scene switch), `GET /sessions/{id}/memories`, canon endpoints,
+  `GET /diagnostics/eval-runs` (+ `/{run_id}`), `GET /runtime/status`, `GET /content/catalog`.
 - **Web UI** (`/app`): Angular SPA — play loop, RAG inspector, analytics, and eval pages.
 - **CLI** (`app/cli.py`): `start-session`, `turn`, `resume`, `turn-history`, `inspect-memories`,
-  `export-session` / `import-session` (JSON), `ingest-scenario-lore`, `retrieve-debug`, `smoke-run`.
+  `export-session` / `import-session` (JSON), `ingest-scenario-lore`, `retrieve-debug`, `smoke-run`,
+  `list-sessions` / `delete-session`, `backup`, `reindex-memories`, `reset-index`, `embedding-ab`.
 - **Data**: SQLite (authoritative sessions/turns/memories/canon, turns carry `diagnostics_json`);
   Qdrant (derived `canon_lore` / `session_memory` / `persona_memory` collections).
 
@@ -29,7 +33,8 @@ always-on hosting is out of scope unless that decision is deliberately revisited
 ### ★ Transcript Exporter  *(recommended first)*
 Render a session's turns into shareable **markdown / HTML** (optionally PDF).
 - **Builds on**: `export-session` (already emits session JSON) or `GET /sessions/{id}` + turn detail.
-  Pure read + template; **zero new backend**.
+  For a richer export, `GET /sessions/{id}/turn-details` returns the full transcript with per-turn
+  retrieval diagnostics in one call. Pure read + template; **zero new backend**.
 - **Scope**: a CLI subcommand or a tiny script; no schema or engine change.
 - **Why first**: immediately useful (archive/share RP sessions), no auth/multi-user creep.
 

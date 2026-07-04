@@ -1,7 +1,10 @@
 # RoleRAG POC — Next Steps Implementation Plan
 
 > **Historical record** — an earlier planning roadmap, superseded by the implemented phases. Not
-> kept in sync with the code. For current state see [docs/README.md](README.md).
+> kept in sync with the code. Milestones 1–3 and 5–7 were implemented (Milestone 5's per-turn
+> confirmation flow was later removed by the 2026-07-02 session-bound-provider decision); Milestone 4
+> (shared world state) was deliberately deferred — see [docs/BACKLOG.md](BACKLOG.md). For current
+> state see [docs/README.md](README.md).
 
 **Repository:** `hofdo/RoleRAG_POC`  
 **Basis:** Deep research repository review and critical second-pass architecture assessment  

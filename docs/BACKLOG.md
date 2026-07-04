@@ -3,18 +3,24 @@
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
 
+Numbers not listed here (#3–5, #23, #31–47) landed in the "Not doing" categories or the
+side-project list rather than the engine backlog; only the items acted on carry a row below.
+
 ## Done
 
 #1 #2 (early) · #7 redaction-ordering assertion · #8 persist+read turn diagnostics ·
-#10 embedding-ab harness → **declined** (models tie, no swap) · #11 retrieval-miss eval ·
+#10 embedding-ab harness **ships** (`rolerag embedding-ab`, offline model A/B over the retrieval
+fixtures); only the model **swap** was declined (candidates tied, so the default model stays) ·
+#11 retrieval-miss eval ·
 #12 TurnOrchestratorConfig · #13 redact raw_text in failure logging · #14 embedding-provider
 failure tests · #20 repair decision → TurnRepairStage · #21 split TurnMemoryStage ·
 #25 containment_overlap_threshold doc+tests · #30 skip semantic-dedup embed when threshold==1.0 ·
 QE follow-ups (503 OpenAPI, C2/C3 named cap tests).
 
-## In progress — B tier (loop: feat/b-tier)
+## Done — B tier (was loop: feat/b-tier)
 
-Order: value + independence, decisions last. Each item gate-verified
+All items below are resolved ([x] shipped, [~] dropped/deferred); the `feat/b-tier` loop branch
+no longer exists. Order was value + independence, decisions last; each item was gate-verified
 (`ruff && mypy && pytest && regression_runner && smoke-run`) and committed before the next.
 
 - [x] **#17** critic error → fail closed (CONTROLLED_FAILURE) instead of serving unvalidated text
@@ -70,6 +76,21 @@ Order: value + independence, decisions last. Each item gate-verified
   (`app/orchestration/stages/critique.py`: `include_hidden=route.provider ==
   ModelProviderName.LOCAL`) plus a provider-binding eval test that pins the invariant.
 
+## Shipped 2026-07-01/02 (play-experience v1.2)
+
+The play-experience batch that landed on main alongside the decisions above. The SPA resume
+picker (see "Follow-ups (SPA)") and the session-bound provider change (see the 2026-07-02
+decision) are recorded elsewhere in this file and are not repeated here.
+
+- SQLite WAL mode + `rolerag backup` command + automatic pre-write snapshots (`502f80c`).
+- Reversal/dedup fix so a rerolled turn's memories are cleaned up correctly (`4e907c9`).
+- Cached embedding-provider singletons — reuse instead of rebuilding per request (`698407a`).
+- Live stage-progress SSE frames (`event: stage`) during the turn pipeline (`dc3803a`, `cd10719`).
+- Reroll: `DELETE /sessions/{id}/turns/last` plus the SPA reroll control (`c69d741`, `2c03f6b`).
+- Scene switching (`POST /sessions/{id}/scene`) and per-turn persona override (`3e93e4b`).
+- Cross-session persona memory — persona episodes carried across a persona's sessions (`8f517e2`).
+- Deferred memory curation — memory writes moved to a background job on API turns (`4a5c928`).
+
 ## Decisions (2026-07-01 audit)
 
 - **Legacy `/play` UI: deleted.** The Angular SPA at `/app` is the only web UI; `app/web/`,
@@ -80,16 +101,26 @@ Order: value + independence, decisions last. Each item gate-verified
   `pyproject.toml`.
 - **Milestone 4 (shared world state): deferred with rationale.** The
   `world_facts`/`WorldFact` layer from the original plan remains unbuilt — deliberately. Durable
-  memory + retrieval proved sufficient at 100-turn live scale (recall verified in the extended
-  checkpoint, docs/16); first-class mutable world state gets built when live evidence shows
-  recall/consistency degrading because facts live only in memory episodes, not before.
+  memory + retrieval proved sufficient at live scale: recall was verified at 8/30 turns, and the
+  100-turn run demonstrated stability and speed with recall assumed lossless (per the docs/16
+  caveat — the extended checkpoint reports rather than hard-asserts recall). First-class mutable
+  world state gets built when live evidence shows recall/consistency degrading because facts live
+  only in memory episodes, not before.
 
 ## Follow-ups (SPA)
 
 - [x] SPA session resume: wired into the setup picker (resume select + Resume button, backed by
   `GET /sessions`). `resume()` now loads the full transcript via `GET /sessions/{id}/turn-details`
   instead of only the 8 recent turns, and the composer keeps the draft when a turn fails
-  (`sendMessage`/`confirmCloud`/`forceLocal` return `Promise<boolean>`).
+  (`sendMessage` returns `Promise<boolean>`; the per-turn cloud-confirm methods `confirmCloud`/`forceLocal`
+  were later removed with the 2026-07-02 session-bound-provider change).
+
+## Open follow-ups (workflow)
+
+- [ ] Raise the `live-smoke.yml` `turn_count` validation cap (currently 5–50) — or add a separate
+  `long_turn_count` input — so CI can drive the 100-turn runs that `scripts/live-smoke.sh` already
+  supports. Deferred here because changing the range is a workflow behavior change, out of scope
+  for the docs sweep.
 
 ## Not doing (personal-use scope)
 
