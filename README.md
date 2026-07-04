@@ -4,63 +4,111 @@ Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular S
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
 Qdrant-backed retrieval, and deterministic local/cloud routing.
 
+## Contents
+
+- [Current State](#current-state)
+- [Quickstart](#quickstart) — [Prerequisites](#prerequisites) · [Fresh Clone Setup](#fresh-clone-setup) · [Daily Use](#daily-use-one-command-host-python) · [Run in Docker](#run-in-docker-no-local-python-needed)
+- [Local Model Setup](#local-model-setup)
+- [Environment and Routing](#environment-and-routing)
+- [Runtime Components](#runtime-components)
+- [Safety Boundaries](#safety-boundaries)
+- [CLI Usage](#cli-usage)
+- [Runtime Verification](#runtime-verification)
+- [Scenario Authoring](#scenario-authoring)
+- [API Usage](#api-usage) · [Web UI](#web-ui-angular-spa)
+- [Qdrant and Retrieval](#qdrant-and-retrieval)
+- [Tests, Lint, and Evals](#tests-lint-and-evals)
+- [Current Limitations](#current-limitations)
+- [Safe Next Steps](#safe-next-steps)
+- [Additional Documentation](#additional-documentation)
+
 ## Current State
 
-Implemented in this repository:
+A working personal-use engine. Highlights (see [docs/09](docs/09_current_architecture_map.md)
+and [CHANGELOG.md](CHANGELOG.md) for the full inventory):
 
-- typed settings with `pydantic-settings`
-- local/cloud OpenAI-compatible provider abstraction
-- session-bound provider: `local` or `cloud` is chosen once at session creation and every
-  task (actor, repair, critic, memory) for that session runs on it for the session's whole
-  lifetime — no per-turn escalation, fallback, or mid-turn switching
-- `CLOUD_MODE=off|ask|auto` gates cloud **session creation** only (see [Environment and
-  Routing](#environment-and-routing))
-- structured JSON world, scene, and persona loading
-- Typer CLI for session lifecycle, routing inspection, lore ingestion, and turns
-- FastAPI endpoints for public content catalog lookup, session creation, turn execution, buffered SSE turn streaming, session lookup, bulk turn details, and eval-run summaries
-- Angular 19 SPA served by FastAPI at `/app` (the root `/` redirects to it): play loop, RAG inspector with per-turn retrieval drill-down, turn analytics, and eval-run trends
-- SQLite persistence for sessions, turns, and durable memory episodes
-- automatic indexing of curated durable memories into session-scoped retrieval
-- Qdrant-backed vector storage for ingested lore and retrieval
-- retrieval-aware actor prompt construction with visibility filtering
-- deterministic retrieval reranking across `session_memory`, `persona_memory`, and `canon_lore`
-- retrieval diagnostics for selected chunks through a CLI debug command
-- runtime diagnostics through `doctor`
-- deterministic end-to-end runtime smoke verification through `smoke-run`
-- deterministic content validation through `validate-content`
-- standalone scenario pack scaffolding through `create-scenario-template`
-- bounded critic and repair flow with a first-class `critic_status` in turn responses
-- truncation-aware generation that retries `finish_reason=length` once with a larger budget
-- conservative deterministic fallback extraction for explicit player promises and handovers
-- deterministic draft validation that flags unsupported entities and unaddressed player
-  actions and routes flagged drafts through the repair loop
-- per-stage wall-clock timings (`stage_timings`) on every turn response, in the dev panel,
-  and in live checkpoint reports
-- conditional critic/curator gating (`CRITIC_GATING` / `CURATOR_GATING` = `always|auto`);
-  the deterministic promise extractor always runs
-- interactive `CLOUD_MODE=ask` confirmation once, at cloud session creation, in the web UI
-  and the CLI (there is no per-turn confirmation and no `confirmation_required` turn status)
-- session management CLI: `list-sessions`, `delete-session`, `export-session`,
-  `import-session`, `inspect-memories`, `reset-db`
-- read-only memory viewer in the web UI and `GET /sessions/{id}/memories`
-- one-command startup and teardown via `scripts/dev-up.sh` and `scripts/dev-down.sh`
-- hidden authored content (persona `secrets`/`forbidden_knowledge`, scene
-  `gm_private_summary`) never leaves the machine on any provider; memory extraction runs
-  on the session's bound provider like every other task
-- deterministic eval harness using fake providers and in-memory retrieval fixtures
+- **Session-bound provider** — `local` or `cloud` is chosen once at session creation and
+  every task (actor, repair, critic, memory) for that session runs on it for its whole
+  lifetime; `CLOUD_MODE=off|ask|auto` gates cloud **creation** only (see
+  [Environment and Routing](#environment-and-routing)). No per-turn escalation, fallback,
+  or mid-turn switching.
+- **Surfaces** — a 24-command Typer CLI, a small FastAPI API, and an Angular 19 SPA served
+  at `/app` (play, RAG inspector, analytics, eval trends; the root `/` redirects to it).
+- **Turn pipeline** — retrieval-aware actor prompt with visibility filtering, deterministic
+  reranking across `session_memory`/`persona_memory`/`canon_lore`, a bounded critic + repair
+  flow with a first-class `critic_status`, deterministic draft validation, and per-stage
+  `stage_timings` on every turn.
+- **Play features** — session resume, turn reroll (delete-last-turn), mid-session scene
+  switching, per-turn persona override, and author-pinned plus auto-derived canon facts.
+- **Persistence & retrieval** — SQLite for sessions/turns/memory/canon (with WAL and a
+  `backup` command), curated durable memories indexed into Qdrant, fail-open retrieval.
+- **Privacy** — hidden authored content (persona `secrets`/`forbidden_knowledge`, scene
+  `gm_private_summary`) never leaves the machine on any provider; memory extraction runs on
+  the session's bound provider like every other task.
+- **Verification** — `doctor`, `smoke-run`, `validate-content`, a deterministic eval harness,
+  and a live-stack checkpoint (see [Runtime Verification](#runtime-verification)).
 
-Not implemented:
-
-- authentication
-- multi-user support
-- provider token streaming
-- production deployment hardening
+Not implemented: authentication, multi-user support, provider token streaming, and
+production deployment hardening.
 
 ## Quickstart
 
 Run `make` (or `make help`) to list the common tasks — `make up` (Docker),
 `make dev` (host stack), `make install`, `make check`, `make smoke`. Each is just a
-thin wrapper over the commands documented below.
+thin wrapper over the commands documented below. New to the repo? Read
+[Prerequisites](#prerequisites), then [Fresh Clone Setup](#fresh-clone-setup), then
+[Local Model Setup](#local-model-setup) before your first turn.
+
+### Prerequisites
+
+- Python `3.12+`
+- Node `20+` (builds the Angular SPA; the API runs without it, but serves no UI)
+- Docker
+- a local OpenAI-compatible model server such as `llama.cpp` or Ollama's compatibility layer
+  (see [Local Model Setup](#local-model-setup))
+
+### Fresh Clone Setup
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+(cd frontend && npm ci && npx ng build)  # SPA (baseHref /app/ is pinned in angular.json); `make dev` does this for you
+docker compose up -d qdrant
+python -m app.cli config
+python -m app.cli health
+python -m app.cli doctor
+python -m app.cli smoke-run
+```
+
+`python -m app.cli health` is the dependency-free local configuration check for a fresh clone. It
+does not probe SQLite, Qdrant, or model providers.
+
+`python -m app.cli doctor` performs operational checks for settings, temporary SQLite
+initialization, demo data loading, and optional Qdrant or local-provider reachability.
+
+`python -m app.cli smoke-run` executes a deterministic end-to-end MVP verification using a
+temporary SQLite database, in-memory retrieval, and fake provider responses.
+
+`python -m app.cli validate-content` validates authored worlds, scenes, personas, and optional
+lore metadata without calling an LLM or touching runtime state.
+
+`python -m app.cli create-scenario-template --output <path>` generates a minimal standalone
+scenario pack root with valid starter files and an optional lore manifest.
+
+### Daily Use (one command, host Python)
+
+With Docker running and a `.venv` installed:
+
+```bash
+bash scripts/dev-up.sh
+# opens Qdrant + llama-server + API, builds the SPA, then play at http://127.0.0.1:8000/app/
+bash scripts/dev-down.sh   # stop everything dev-up started
+```
+
+`dev-up.sh` needs `llama-server` on `PATH` (or a matching provider already running); on the
+first run it downloads the profile model (see [Local Model Setup](#local-model-setup)).
 
 ### Run in Docker (no local Python needed)
 
@@ -94,53 +142,6 @@ Run CLI commands inside the container:
 docker compose exec app rolerag start-session --world-id demo_world \
   --scene-id rose-gallery --active-persona-id archivist --player-name Avery
 ```
-
-### Daily Use (one command, host Python)
-
-With Docker running and a `.venv` installed:
-
-```bash
-bash scripts/dev-up.sh
-# opens Qdrant + llama-server + API, builds the SPA, then play at http://127.0.0.1:8000/app/
-bash scripts/dev-down.sh   # stop everything dev-up started
-```
-
-### Prerequisites
-
-- Python `3.12+`
-- Node `20+` (builds the Angular SPA; the API runs without it, but serves no UI)
-- Docker
-- a local OpenAI-compatible model server such as `llama.cpp` or Ollama's compatibility layer
-
-### Fresh Clone Setup
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-cp .env.example .env
-(cd frontend && npm ci && npx ng build)  # SPA (baseHref /app/ is pinned in angular.json); `make dev` does this for you
-docker compose up -d qdrant
-python -m app.cli config
-python -m app.cli health
-python -m app.cli doctor
-python -m app.cli smoke-run
-```
-
-`python -m app.cli health` is the dependency-free local configuration check for a fresh clone. It
-does not probe SQLite, Qdrant, or model providers.
-
-`python -m app.cli doctor` performs operational checks for settings, temporary SQLite
-initialization, demo data loading, and optional Qdrant or local-provider reachability.
-
-`python -m app.cli smoke-run` executes a deterministic end-to-end MVP verification using a
-temporary SQLite database, in-memory retrieval, and fake provider responses.
-
-`python -m app.cli validate-content` validates authored worlds, scenes, personas, and optional
-lore metadata without calling an LLM or touching runtime state.
-
-`python -m app.cli create-scenario-template --output <path>` generates a minimal standalone
-scenario pack root with valid starter files and an optional lore manifest.
 
 ### Start a Session
 
@@ -205,10 +206,24 @@ LOCAL_LLM_API_KEY=local
 LOCAL_LLM_MODEL=chatgpt-onnechan
 ```
 
-Example `llama.cpp` server flow:
+**Install a server.** The reference runtime is `llama.cpp` (`brew install llama.cpp` on
+macOS, or a prebuilt binary from the [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases)).
+`llama-server` must be on your `PATH` for `dev-up.sh` and the live checkpoint to launch it.
+
+**Get a model.** `llama-server -hf <repo>:<quant>` downloads the GGUF from Hugging Face on
+first run and caches it, so you do not need a local file. A small starter model to smoke the
+stack is `DavidAU/gemma-4-E4B-it-…-Thinking-GGUF:Q8_0` (~4 GB); the recommended acceptance
+model is the 26B-A4B `LOCAL_MODEL_PROFILE=26b`
+(`HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:Q4_K_M`, ~15 GB on disk and roughly
+16 GB of RAM/VRAM to run comfortably). The exact per-profile flags — and the faster
+`26b-mtp` variant — live in
+[scripts/lib/local-model-profile.sh](scripts/lib/local-model-profile.sh) and are described in
+[docs/19_verification_and_eval_tooling.md](docs/19_verification_and_eval_tooling.md).
+
+Example `llama.cpp` server flow (serve the starter model, aliased so the app finds it):
 
 ```bash
-llama-server -m /path/to/model.gguf \
+llama-server -hf DavidAU/gemma-4-E4B-it-The-DECKARD-Expresso-Universe-HERETIC-UNCENSORED-Thinking-GGUF:Q8_0 \
   --host 127.0.0.1 \
   --port 8080 \
   --alias chatgpt-onnechan \
@@ -435,29 +450,7 @@ python -m app.cli doctor --check-qdrant --check-local-provider
 python -m app.cli smoke-run --real-runtime
 ```
 
-Run the isolated live stack checkpoint. It first reuses a local OpenAI-compatible model server if
-`/v1/models` already exposes `chatgpt-onnechan`; otherwise it starts a managed server with a
-command equivalent to the one below (the exact per-profile flags live in
-[scripts/lib/local-model-profile.sh](scripts/lib/local-model-profile.sh), the source of truth):
-
-```bash
-llama-server \
-  -hf DavidAU/gemma-4-E4B-it-The-DECKARD-Expresso-Universe-HERETIC-UNCENSORED-Thinking-GGUF:Q8_0 \
-  --host 127.0.0.1 \
-  --port 8080 \
-  --alias chatgpt-onnechan \
-  --jinja \
-  --reasoning off \
-  -ngl all \
-  -c 8192 \
-  -fa on \
-  --cache-type-k q8_0 \
-  --cache-type-v q4_0 \
-  --chat-template-kwargs '{"enable_thinking":false}' \
-  --seed 424242
-```
-
-The primary checkpoint command is:
+Run the isolated live stack checkpoint against a real local model:
 
 ```bash
 npm install
@@ -468,50 +461,15 @@ PYTHON=.venv/bin/python \
 bash scripts/live-smoke.sh
 ```
 
-That script starts disposable Qdrant on `127.0.0.1:6334`, uses a temporary SQLite database under
-`/tmp/rolerag-live-test`, starts FastAPI on `127.0.0.1:18080`, runs live doctor/smoke/API checks,
-runs an eight-turn Rose Gallery conversation checkpoint and a Playwright UI smoke, writes detailed
-turn, persistence, Qdrant, and retrieval diagnostics to `/tmp/rolerag-live-test/report.md`, and
-removes its Qdrant container on exit. If it starts managed llama.cpp, it writes
-`/tmp/rolerag-live-test/raw/llama-server.log` and kills only that managed process on exit. It leaves
-existing `data/qdrant` and user runtime data untouched.
-
-Managed shutdown sends `SIGTERM`, waits up to `LLAMA_CPP_STOP_TIMEOUT` seconds (default `15`), then
-sends `SIGKILL` only if the process it started did not exit. An already-running matching provider
-is reused and never stopped by the checkpoint.
-
-The equivalent manual FastAPI context for the live stack is:
-
-```bash
-DATABASE_PATH=/tmp/rolerag-live-test/work/rolerag-live.db \
-QDRANT_URL=http://127.0.0.1:6334 \
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1 \
-LOCAL_LLM_API_KEY=local \
-LOCAL_LLM_MODEL=chatgpt-onnechan \
-CLOUD_MODE=off \
-.venv/bin/uvicorn app.main:app --reload
-```
-
-Managed llama.cpp startup uses `llama-server` from `PATH` and `LOCAL_MODEL_PROFILE=small` by
-default. `LOCAL_MODEL_PROFILE=26b` selects
-`HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:Q4_K_M`.
-`LOCAL_MODEL_PROFILE=26b-mtp` serves the same 26B base from local GGUF files with an MTP
-speculative-draft model for faster decode (`-md … --spec-type draft-mtp --spec-draft-n-max 3`,
-16384-token context); point `MODEL_26B_MTP_DIR` at the directory holding
-`Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf` and `mtp-gemma-4-26B-A4B-it.gguf`
-(default `~/models/gemma4-26b-qat-balanced-mtp`). Sampling stays app-controlled (the router sets
-temperature per request), so the profile carries no `--temp`/`--top-k`/etc.
-All named profiles use `--jinja`, disabled reasoning/thinking, full GPU offload, flash attention,
-q8_0 K cache, q4_0 V cache, and seed `424242` (8192-token context for `small`/`26b`).
-`LLAMA_CPP_SERVER_PATH` can select another binary. `LLAMA_CPP_MODEL_PATH` switches
-startup from `-hf` to a local `-m` GGUF path. It also accepts `LLAMA_CPP_HOST` and
-`LLAMA_CPP_PORT`, optional `LLAMA_CPP_CTX_SIZE` for `-c`, optional
-`LLAMA_CPP_N_GPU_LAYERS`, and whitespace-separated `LLAMA_CPP_SERVER_ARGS`.
-`LIVE_TURN_COUNT` accepts `5` through `100` and defaults to `8`; the former
-`LIVE_LONG_TURN_COUNT` remains a fallback when `LIVE_TURN_COUNT` is unset.
-`LIVE_FAIL_ON_STRUCTURED_WARNINGS=1` is the default and fails the checkpoint on critic,
-memory-curation, memory-indexing, or retrieval warnings. Set it explicitly to `0` for report-only
-warning handling. Playwright remains enabled unless `LIVE_SKIP_BROWSER=1`.
+`scripts/live-smoke.sh` stands up a disposable Qdrant + FastAPI stack against a real local
+model, runs live doctor/smoke/API checks, an N-turn Rose Gallery conversation checkpoint, and
+a Playwright UI smoke, then writes diagnostics under `/tmp/rolerag-live-test` and tears down
+only what it started. It reuses an already-running provider or launches a managed
+`llama-server` from the selected `LOCAL_MODEL_PROFILE`. The full checkpoint internals — the
+managed-server command and shutdown behavior, the `LOCAL_MODEL_PROFILE` matrix
+(`small`/`26b`/`26b-mtp`), the `LLAMA_CPP_*` overrides, `LIVE_TURN_COUNT` (`5`–`100`),
+`LIVE_FAIL_ON_STRUCTURED_WARNINGS`, and the model bake-off / secret-probe / RAG A/B harnesses —
+live in [docs/19_verification_and_eval_tooling.md](docs/19_verification_and_eval_tooling.md).
 
 Operational rules:
 
@@ -519,7 +477,7 @@ Operational rules:
 - `doctor` never mutates the configured runtime database. It verifies SQLite using a temporary file.
 - `smoke-run` uses a temporary SQLite database, deterministic embeddings, in-memory retrieval, and fake provider responses by default.
 - `--real-runtime` adds shallow Qdrant and local-provider reachability checks only. It does not call cloud APIs, real completions, or write to Qdrant.
-- `scripts/live-smoke.sh` is the live local-stack checkpoint. It requires Docker, npm, Playwright, and `llama-server` on `PATH` when no matching provider is already running. It reuses an existing provider or starts and safely stops the managed Hugging Face model above. Structured-output and retrieval warnings fail by default and can be made report-only with `LIVE_FAIL_ON_STRUCTURED_WARNINGS=0`.
+- `scripts/live-smoke.sh` is the live local-stack checkpoint. It requires Docker, npm, Playwright, and `llama-server` on `PATH` when no matching provider is already running. It reuses an existing provider or starts and safely stops a managed model from the selected profile (see [docs/19](docs/19_verification_and_eval_tooling.md)). Structured-output and retrieval warnings fail by default and can be made report-only with `LIVE_FAIL_ON_STRUCTURED_WARNINGS=0`.
 - cloud placeholder keys such as `replace_me` are treated as unusable and reported clearly.
 
 Failure interpretation:
@@ -681,8 +639,9 @@ architecture). The browser surface is a thin client over the same-origin API, wi
 
 - **Play** — catalog selectors load public worlds, scenes, and personas from
   `GET /content/catalog`; `Start session` uses the selected catalog world, scene, persona, and
-  player name; turns run over buffered SSE; a debug strip shows safe route, memory,
-  critic-status, and warning data; side panels show read-only memories and editable canon facts
+  player name; turns run over buffered SSE with a live stage-progress indicator; side panels
+  show read-only memories and editable canon facts (per-turn route, retrieval, critic-status,
+  and warning diagnostics live in the RAG Inspector and Analytics pages, not on this page)
 - **RAG Inspector** — per-session turn timeline from `GET /sessions/{id}/turn-details` with
   retrieval drill-down (query, selected/rejected chunks, scores, boosts) per turn
 - **Analytics** — turn latency and stage-timing statistics for a session
@@ -780,39 +739,11 @@ Run the standalone deterministic regression summary:
 python -m app.evals.regression_runner
 ```
 
-CI runs those deterministic checks on push and pull request. The separate `Live Smoke` workflow
-targets self-hosted runners because GitHub-hosted runners do not provide the required local GGUF
-model or llama.cpp binary. It runs on manual `workflow_dispatch` and on a weekly `schedule`; the
-scheduled run is a no-op unless the repository variable `ENABLE_SCHEDULED_LIVE_SMOKE` is set to
-`true` (set it once a self-hosted runner with the model server is online) and falls back to the
-input defaults. The workflow defaults to the managed Hugging Face model and
-supports `llama_server_path`, `llama_hf_model`, `llama_model_path`, `llama_ctx_size`, and
-`llama_n_gpu_layers` overrides. The live
-workflow validates `turn_count` from `5` through `50`, defaults to eight turns and strict warning
-handling, and uploads `/tmp/rolerag-live-test` unconditionally. Artifacts include `report.md`, the
-conversation checkpoint JSON, raw command outputs, API flow JSON, llama-server logs when managed
-startup is used, and Playwright traces on failure.
-
-Run the paired local-model comparison manually:
-
-```bash
-PYTHON=.venv/bin/python bash scripts/test-local-model-matrix.sh
-```
-
-It runs deterministic checks once, then the complete live stack sequentially for the small and 26B
-profiles with the same seed and 20-turn story. Outputs are isolated under
-`/tmp/rolerag-model-comparison/{small,26b}` with `comparison.json`, `comparison.md`, and a
-turn-aligned transcript. The 50-turn extension is explicit:
-
-```bash
-MODEL_COMPARE_TURN_COUNT=50 \
-PYTHON=.venv/bin/python \
-bash scripts/test-local-model-matrix.sh
-```
-
-Quality findings are report-only. Deterministic, infrastructure, persistence, indexing, retrieval
-visibility, and other application-invariant failures produce a nonzero exit. The paired run is
-manual and is not part of normal CI.
+CI runs those deterministic checks on push and pull request. A separate self-hosted `Live Smoke`
+workflow runs the live checkpoint on manual dispatch and a gated weekly schedule; its inputs,
+the paired `scripts/test-local-model-matrix.sh` comparison, and the bake-off / secret-probe / RAG
+A/B harnesses are documented in
+[docs/19_verification_and_eval_tooling.md](docs/19_verification_and_eval_tooling.md).
 
 The eval harness covers retrieval quality, visibility boundaries, role consistency, memory curation
 behavior, long-session durable-memory continuity, and provider-binding policy. The 16-turn
@@ -845,17 +776,12 @@ Post-1.0 candidates are tracked in [docs/10_next_steps_after_mvp.md](docs/10_nex
 
 ## Additional Documentation
 
-See [docs/README.md](docs/README.md) for the documentation hub — architecture diagrams
-(components, turn pipeline, routing) and a living-vs-historical index of every doc.
+Start at the hub: [docs/README.md](docs/README.md) is the documentation index — architecture
+diagrams (components, turn pipeline, routing) and a living-vs-historical listing of every doc.
 
-- [docs/01_product_goal.md](docs/01_product_goal.md)
-- [docs/02_architecture.md](docs/02_architecture.md)
-- [docs/03_implementation_guide.md](docs/03_implementation_guide.md)
-- [docs/04_agent_workflows.md](docs/04_agent_workflows.md)
-- [docs/05_rag_memory_design.md](docs/05_rag_memory_design.md)
-- [docs/06_local_cloud_model_strategy.md](docs/06_local_cloud_model_strategy.md)
-- [docs/07_mvp_phases.md](docs/07_mvp_phases.md)
-- [docs/12_api_contract.md](docs/12_api_contract.md)
-- [docs/13_live_model_quality_assessment.md](docs/13_live_model_quality_assessment.md)
-- [docs/15_v1_acceptance_report.md](docs/15_v1_acceptance_report.md)
-- [docs/14_local_model_comparison_2026-06-08.md](docs/14_local_model_comparison_2026-06-08.md)
+Most-used direct links:
+
+- [docs/09_current_architecture_map.md](docs/09_current_architecture_map.md) — where each piece lives
+- [docs/12_api_contract.md](docs/12_api_contract.md) — the HTTP API contract
+- [docs/20_playing_rolerag.md](docs/20_playing_rolerag.md) — player guide and troubleshooting FAQ
+- [docs/GLOSSARY.md](docs/GLOSSARY.md) — project terms
