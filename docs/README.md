@@ -108,6 +108,7 @@ flowchart TD
 | [17_content_authoring_reference](17_content_authoring_reference.md) | World/scene/persona field schema, player-visible vs. hidden fields, containment |
 | [18_security_privacy_and_backups](18_security_privacy_and_backups.md) | Deployment posture (no auth, don't expose the port), cloud egress, data locations, backup/restore runbook |
 | [19_verification_and_eval_tooling](19_verification_and_eval_tooling.md) | Live-smoke checkpoint, llama.cpp model profiles + `LLAMA_CPP_*` matrix, model bake-off / secret-containment / RAG-knob harnesses, diagnostics modules |
+| [20_playing_rolerag](20_playing_rolerag.md) | Player guide: the `/app/play` surface, session setup + provider choice, reroll, scene/persona switch, memory/canon panels, controlled failures in play, troubleshooting FAQ |
 
 ## Planning & roadmap
 
