@@ -12,9 +12,9 @@ from app import __version__
 from app.api import router as api_router
 from app.api.errors import ApiError, api_error_handler, request_validation_error_handler
 
-# Angular SPA build output, mounted at /app when present (built via
-# `ng build --base-href=/app/`). Guarded by isdir so a checkout without a
-# frontend build still boots.
+# Angular SPA build output, mounted at /app when present (built via a plain
+# `ng build`; the /app/ baseHref is pinned in frontend/angular.json). Guarded
+# by isdir so a checkout without a frontend build still boots.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SPA_DIRECTORY = _REPO_ROOT / "frontend" / "dist" / "frontend" / "browser"
 
@@ -48,7 +48,7 @@ def root_redirect() -> Response:
         return RedirectResponse("/app/")
     return PlainTextResponse(
         "RoleRAG API is running, but the SPA is not built.\n"
-        "Build it with: cd frontend && npm ci && npx ng build --base-href=/app/\n"
+        "Build it with: cd frontend && npm ci && npx ng build\n"
         "(or just run `make dev` / `docker compose up --build`).\n",
         status_code=503,
     )

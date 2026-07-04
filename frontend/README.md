@@ -9,7 +9,7 @@ boundaries in [docs/12_api_contract.md](../docs/12_api_contract.md).
 
 | Route | What it does |
 |-------|--------------|
-| `/app/play` | Session setup from the public content catalog, turn loop over buffered SSE, `CLOUD_MODE=ask` confirmation, debug strip (route/critic/warnings/stage timings), memory + canon side panels |
+| `/app/play` | Session setup from the public content catalog with a Local/Cloud provider choice (`CLOUD_MODE=ask` confirms once at creation), resume picker for existing sessions, turn loop over buffered SSE with live stage progress, last-turn reroll, mid-session scene switch + per-turn persona override, memory + canon side panels |
 | `/app/inspector` | Per-session turn timeline with retrieval drill-down (query, selected/rejected candidates, scores, boosts) via the bulk `GET /sessions/{id}/turn-details` endpoint |
 | `/app/analytics` | Turn latency and per-stage timing statistics for a session |
 | `/app/eval` | Eval-run trends from `GET /diagnostics/eval-runs`, with per-run drill-down |
@@ -38,9 +38,10 @@ npm test           # Karma unit tests (CI runs: npm test -- --watch=false --brow
 ```
 
 `npm start` expects the backend stack up (`make dev` from the repo root). The production build
-is `npx ng build --base-href=/app/`; `make dev`, the Dockerfile, and CI all run it — output lands
-in `dist/frontend/browser`, which `app/main.py` mounts at `/app` with a deep-link fallback so
-client-side routes survive a hard refresh.
+is a plain `npx ng build` (the `/app/` baseHref is pinned in [angular.json](angular.json));
+`make dev` and the Dockerfile run it — output lands in `dist/frontend/browser`, which
+`app/main.py` mounts at `/app` with a deep-link fallback so client-side routes survive a hard
+refresh. CI runs the Karma tests but does not build the bundle.
 
 The end-to-end test lives at the repo root ([tests/e2e/spa-play.spec.mjs](../tests/e2e/spa-play.spec.mjs)):
 `PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 npm run test:e2e-spa` (needs the full stack + model).

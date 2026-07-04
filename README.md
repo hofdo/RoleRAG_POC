@@ -119,7 +119,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 cp .env.example .env
-(cd frontend && npm ci && npx ng build --base-href=/app/)  # SPA; `make dev` does this for you
+(cd frontend && npm ci && npx ng build)  # SPA (baseHref /app/ is pinned in angular.json); `make dev` does this for you
 docker compose up -d qdrant
 python -m app.cli config
 python -m app.cli health
