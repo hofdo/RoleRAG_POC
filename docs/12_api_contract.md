@@ -421,7 +421,7 @@ event: text
 data: {"text":"<validated final text>"}
 
 event: final
-data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "critic_status":"accepted", "warnings":[], "errors":[], "stage_timings":{"generation":12.318,"critique":8.077}}
+data: {"route":{"provider":"local","model":"local-model","reason":"..."}, "finish_reason":"stop", "memory_written":false, "critic_status":"accepted", "warnings":["memory curation deferred: runs after this response"], "errors":[{"category":"warning","stage":"general","message":"memory curation deferred: runs after this response","suggestion":null}], "stage_timings":{"generation":12.318,"critique":8.077}}
 
 ```
 

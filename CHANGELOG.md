@@ -36,12 +36,6 @@ records; this file is the quick delta between versions.
 - **SPA resume picker**: the setup screen lists prior sessions and restores the full transcript;
   an in-progress draft survives a failed turn (5b24926).
 
-### Fixed
-
-- The critic now fails closed on **any** exception, not just structured-output errors: an
-  exhausted repair or a raised critic serves a controlled failure (`critic_status=rejected`)
-  instead of unvalidated text.
-
 ### Docs
 
 - Documentation overhaul: new content-authoring, security/backup, verification/eval-tooling, and

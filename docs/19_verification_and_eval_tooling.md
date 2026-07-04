@@ -25,7 +25,7 @@ carries the deep operational detail those keep a summary of.
 | [`scripts/bakeoff.sh`](../scripts/bakeoff.sh) | Aggregates recall + containment + latency across model run dirs into one comparison table | `BAKEOFF_DIR`, run-dir args |
 | [`scripts/secret-probe.sh`](../scripts/secret-probe.sh) | Adversarial secret-containment probe against the "A Bride for Sarnhold" pack | `RUN_DIR`, `LOCAL_LLM_MODEL` |
 | [`scripts/ab-sweep.sh`](../scripts/ab-sweep.sh) | One-factor-at-a-time (OFAT) sweep over RAG memory/retrieval knobs, wrapping `live-smoke.sh` | `MODEL_PROFILE`, `TURNS`, `TOP_K`, `OUT` |
-| [`scripts/test-local-model-matrix.sh`](../scripts/test-local-model-matrix.sh) | Runs the deterministic two-model comparison (`app.diagnostics.model_comparison`); see [14](14_local_model_comparison_2026-06-08.md) | — |
+| [`scripts/test-local-model-matrix.sh`](../scripts/test-local-model-matrix.sh) | Deterministic checks once, then the full **live** stack sequentially for the `small` and `26b` profiles (hours of real generation), aggregated by `app.diagnostics.model_comparison`; see [14](14_local_model_comparison_2026-06-08.md) and the section below | `PYTHON`, `MODEL_COMPARE_ARTIFACT_DIR`, `MODEL_COMPARE_TURN_COUNT` |
 | [`scripts/dev-up.sh`](../scripts/dev-up.sh) / [`scripts/dev-down.sh`](../scripts/dev-down.sh) | Bring the full dev stack up/down (used by `make dev`) | `DEV_API_PORT` |
 
 The scripts source shared helpers from `scripts/lib/`: process lifecycle
@@ -66,6 +66,32 @@ managed llama.cpp from the selected profile (see below) and stops it on exit wit
 
 `LIVE_ARTIFACT_DIR` is the supported way to redirect the hardcoded `/tmp/rolerag-live-test`
 path (it also names where the workflow uploads artifacts from).
+
+## CI: the Live Smoke workflow
+
+[`.github/workflows/live-smoke.yml`](../.github/workflows/live-smoke.yml) runs the live
+checkpoint on a self-hosted runner. Triggers and knobs:
+
+- **Manual `workflow_dispatch`** with inputs `turn_count` (validated `5`–`50` at the
+  workflow level; the script itself accepts `LIVE_TURN_COUNT` up to `100`),
+  `llama_server_path`, `llama_hf_model`, `llama_model_path`, `llama_ctx_size`, and
+  `llama_n_gpu_layers` — the `llama_*` inputs map onto the `LLAMA_CPP_*` env vars below.
+- **Weekly `schedule`** that is a silent no-op unless the repository variable
+  `ENABLE_SCHEDULED_LIVE_SMOKE` is set to `true`.
+- **Artifacts** are uploaded unconditionally from the live artifact dir: `report.md`, the
+  conversation-checkpoint JSON, the API flow JSON, llama-server logs, and Playwright traces
+  on failure.
+
+## The two-model comparison (`test-local-model-matrix.sh`)
+
+`PYTHON=.venv/bin/python bash scripts/test-local-model-matrix.sh` runs the deterministic
+checks once (ruff, mypy, pytest, frontend tests, regression runner), then the complete live
+stack sequentially for the `small` and `26b` profiles — real model runs, hours of wall
+clock. Outputs land isolated under `/tmp/rolerag-model-comparison/{small,26b}` (override
+with `MODEL_COMPARE_ARTIFACT_DIR`) with `comparison.json`, `comparison.md`, and a
+turn-aligned transcript. `MODEL_COMPARE_TURN_COUNT` must be `20` (default) or `50`; other
+values are rejected. Quality findings are report-only; deterministic, infrastructure,
+persistence, indexing, and retrieval-visibility failures exit nonzero.
 
 ## Model profiles & the `LLAMA_CPP_*` matrix
 

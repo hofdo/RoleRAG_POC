@@ -6,8 +6,9 @@
 Compares the `26b-mtp` local-model profile (Gemma4-26B-A4B Balanced QAT + an MTP draft model,
 speculative decoding on) against the **same local weights with the draft off** — so the only
 variable is MTP speculative decoding. The 26B base profile was established in
-[docs/14](14_local_model_comparison_2026-06-08.md); `26b-mtp` setup is documented in the root
-[README](../README.md)'s Runtime Verification section (`LOCAL_MODEL_PROFILE`).
+[docs/14](14_local_model_comparison_2026-06-08.md); `26b-mtp` setup (`MODEL_26B_MTP_DIR`, the
+speculative-decoding flags) is documented in [docs/19](19_verification_and_eval_tooling.md)'s
+"Model profiles & the `LLAMA_CPP_*` matrix" section.
 
 ## Setup
 

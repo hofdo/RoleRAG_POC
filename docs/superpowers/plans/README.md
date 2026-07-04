@@ -27,12 +27,11 @@ re-execute completed work.
 
 Every new plan MUST end with a **"Sweep living docs"** task so shipped behavior and its
 documentation move together. That task updates the living docs and refreshes each touched
-doc's `> Reviewed: YYYY-MM-DD @ <short-sha>` header (see the doc-freshness convention in
-the [docs hub](../../README.md)). The living-docs set to sweep:
-
-- root `README.md` and `frontend/README.md`
-- `docs/README.md` (the hub) and the numbered living docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`20`
-- `docs/GLOSSARY.md`, `docs/BACKLOG.md`, the root `CHANGELOG.md`, and `.env.example` comments
+doc's `> Reviewed: YYYY-MM-DD @ <short-sha>` header. The living-docs set is enumerated
+once, in the [docs hub](../../README.md)'s "Doc maintenance & freshness" section — sweep
+that list rather than a copy of it here. When behavior or config changed, also update the
+root `CHANGELOG.md` entry and `.env.example` comments (neither carries a `Reviewed:`
+header).
 
 The 2026-07-03 documentation overhaul added this rule after two plans shipped without a
 docs sweep and left the living docs drifting.
