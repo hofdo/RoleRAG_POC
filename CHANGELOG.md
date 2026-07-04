@@ -3,6 +3,51 @@
 Notable changes per release. The dated acceptance/report docs under `docs/` remain the deep
 records; this file is the quick delta between versions.
 
+## 1.2.0 — 2026-07-04
+
+### Changed (breaking)
+
+- **Session-bound provider.** A session's provider is chosen once at `POST /sessions` and is
+  immutable for the session's life; every task (actor, critic, repair, memory) runs on that bound
+  provider. All automatic cloud paths are gone — no cross-provider fallback, no local-then-cloud
+  repair ladder, no escalation, and no per-turn `request_cloud`/confirmation flow. `CLOUD_MODE`
+  now gates cloud-session **creation** only (`off` = 400 `cloud_unavailable`, `ask` = one
+  interactive confirm at creation enforced by the CLI/SPA clients, `auto` = silent) (a514f9c,
+  87064f8). This supersedes 1.1.0's Play description of a `CLOUD_MODE=ask` confirmation inside the
+  per-turn loop — that confirmation now happens once, at session creation.
+
+### Added
+
+- **Reroll**: `DELETE /sessions/{id}/turns/last` drops the last turn with its indexed memories,
+  and the SPA exposes it as a one-click reroll (c69d741, 2c03f6b).
+- **Scene switching and per-turn persona override**: `POST /sessions/{id}/scene` re-anchors the
+  active scene mid-session, and a turn may name a different `active_persona_id` for a single
+  exchange (3e93e4b).
+- **Cross-session persona memory**: persona memories dual-write to a shared `persona_memory`
+  store so a persona carries learned context across sessions (8f517e2).
+- **Durable persistence**: SQLite WAL mode with a busy timeout, a `rolerag backup` command, and
+  automatic snapshots before destructive operations (502f80c).
+- **SSE stage frames**: `event: stage` frames report live pipeline progress during a streaming
+  turn, and `SSE_TEXT_CHUNK_CHARS` (default `0` = single text frame) tunes text-frame
+  chunking (dc3803a).
+- **Failed-turn persistence**: controlled-failure turns are now persisted with an `outcome` flag
+  (`"success"` / `"controlled_failure"`), so a failed turn is a recorded, inspectable turn rather
+  than a dropped one (41db80d).
+- **SPA resume picker**: the setup screen lists prior sessions and restores the full transcript;
+  an in-progress draft survives a failed turn (5b24926).
+
+### Fixed
+
+- The critic now fails closed on **any** exception, not just structured-output errors: an
+  exhausted repair or a raised critic serves a controlled failure (`critic_status=rejected`)
+  instead of unvalidated text.
+
+### Docs
+
+- Documentation overhaul: new content-authoring, security/backup, verification/eval-tooling, and
+  player-guide references (docs 17–20) plus a project glossary, and `> Reviewed:` freshness
+  headers across the living docs.
+
 ## 1.1.0 — 2026-07-01
 
 ### Added
