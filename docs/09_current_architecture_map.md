@@ -59,13 +59,13 @@ graph TD
 | `frontend/` | Angular 19 SPA (play, inspector, analytics, eval) served at `/app`; see [frontend/README.md](../frontend/README.md) |
 | `app/composition.py` | central wiring for providers, repositories, retriever, and orchestrator |
 | `app/domain/` | typed data models and visibility values |
-| `app/orchestration/` | turn lifecycle, prompt assembly, and context budgeting |
-| `app/agents/` | actor generation, critic evaluation, and memory extraction |
+| `app/orchestration/` | turn lifecycle as an injectable stage pipeline (`stages/`, 13 stage modules) plus `canon_builder.py`, `draft_validator.py`, `turn_errors.py`, prompt assembly, and context budgeting |
+| `app/agents/` | actor generation, critic evaluation, memory extraction, and deterministic secret-guard containment |
 | `app/llm/` | provider abstraction, OpenAI-compatible adapter, deterministic routing |
 | `app/persistence/` | JSON loading plus SQLite schema and repositories |
 | `app/memory/` | recent-dialogue window, durable-memory store, vector indexing, semantic write-dedup, and consolidation |
 | `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
-| `app/diagnostics/` | runtime environment checks and deterministic end-to-end smoke verification |
+| `app/diagnostics/` | runtime environment checks, deterministic end-to-end smoke verification, eval-run serving, and the live-checkpoint/bake-off/containment-probe harnesses (10 modules) |
 | `app/content/` | standalone scenario-pack validation and template generation |
 | `app/evals/` | deterministic regression fixtures and report runner |
 
@@ -80,12 +80,14 @@ graph TD
 
 ### FastAPI API
 
-- exposes runtime status, content catalog, session CRUD, turns (JSON + buffered SSE), per-turn
-  and bulk turn diagnostics, durable memories, session canon, and eval-run summaries — see
+- exposes runtime status, content catalog, session CRUD, mid-session scene switching, turns
+  (JSON + buffered SSE), last-turn deletion (reroll), per-turn and bulk turn diagnostics,
+  durable memories, session canon, and eval-run summaries — see
   [docs/12_api_contract.md](12_api_contract.md) for the full surface
 - serves the built SPA as static files at `/app` (root `/` redirects there)
 - does not duplicate orchestration logic
-- buffers SSE frames until the shared turn pipeline completes
+- buffers player-visible SSE text until validation and persistence complete; metadata-only
+  stage-progress frames stream live during the pipeline
 
 ### Web UI (Angular SPA)
 
@@ -111,9 +113,18 @@ graph TD
 - performs structured draft validation
 - may inspect hidden context for leak detection
 
+### SecretGuard
+
+- deterministic, non-LLM containment layer in `app/agents/secret_guard.py`
+- redacts verbatim hidden-fact echoes from critic output before it feeds repair
+  (`redact_hidden_facts` in `app/orchestration/stages/critique.py`)
+- scans the final reply for hidden-fact echoes as the output-side containment layer
+  (`scan_reply` in `app/orchestration/turn_orchestrator.py`)
+
 ### MemoryCurator
 
-- performs local structured memory extraction after the final response
+- performs structured memory extraction on the session's bound provider after the final
+  response (deferred to a post-response background job on API turns)
 
 ### MemoryIndexer
 
@@ -132,7 +143,9 @@ graph TD
 
 - deterministic reranking happens in `app/rag` after vector-store search results are returned
 - source weighting distinguishes `session_memory`, `persona_memory`, and `canon_lore`
-- metadata-only diagnostics stay in the CLI path and are not part of player-facing API responses
+- metadata-only retrieval ranking diagnostics are exposed via both the CLI and API turn
+  responses (turn execution JSON + SSE final frame, `GET /turns/{i}`, `GET /turn-details`);
+  chunk text and prompts remain excluded everywhere
 
 ### Local/cloud abstraction
 
@@ -154,6 +167,9 @@ graph TD
 ## Safety Map
 
 - actor prompts only receive player-visible retrieved chunks
+- a deterministic secret guard redacts hidden-fact echoes from critic output
+  (`redact_hidden_facts` in `app/orchestration/stages/critique.py`) and scans the final reply
+  (`scan_reply` in `app/orchestration/turn_orchestrator.py`) as the output-side containment layer
 - critic and memory extraction run on the session's bound provider, like every other task
 - route handlers stay thin
 - streamed player-visible text is emitted only after validation and persistence complete
