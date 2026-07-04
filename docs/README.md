@@ -105,6 +105,7 @@ flowchart TD
 | [09_current_architecture_map](09_current_architecture_map.md) | Module-by-module map for code navigation |
 | [10_next_steps_after_mvp](10_next_steps_after_mvp.md) | Safe post-1.0 candidate work |
 | [12_api_contract](12_api_contract.md) | HTTP surface: endpoints, shapes, errors, exposure boundaries |
+| [17_content_authoring_reference](17_content_authoring_reference.md) | World/scene/persona field schema, player-visible vs. hidden fields, containment |
 
 ## Planning & roadmap
 
