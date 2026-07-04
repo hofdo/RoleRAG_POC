@@ -31,55 +31,44 @@ See [docs/README.md](README.md) for the rendered component, turn-pipeline, and r
 
 ## Module Layout
 
-### Entry points
+Top-level packages only. The maintained file-level map — including the orchestration stage
+modules — lives in [docs/09_current_architecture_map.md](09_current_architecture_map.md).
 
-- [app/cli.py](../app/cli.py): Typer commands for configuration, sessions, routing, ingestion, and turns.
-- [app/main.py](../app/main.py): FastAPI application bootstrap.
-- [app/api/routes.py](../app/api/routes.py): thin HTTP adapters over shared services.
+- [app/cli.py](../app/cli.py), [app/main.py](../app/main.py), [app/api/](../app/api): Typer CLI,
+  FastAPI bootstrap, and thin HTTP adapters over shared services.
 - [frontend/](../frontend): Angular 19 SPA (play, RAG inspector, analytics, eval), built to
   `frontend/dist/frontend/browser` and mounted at `/app` by `app/main.py`.
-
-### Wiring and settings
-
-- [app/config.py](../app/config.py): `Settings` model loaded from `.env`.
-- [app/composition.py](../app/composition.py): provider, repository, retriever, and orchestrator construction.
-
-### Domain and orchestration
-
-- [app/domain/models.py](../app/domain/models.py): typed state, turn, memory, and retrieval models.
-- [app/domain/visibility.py](../app/domain/visibility.py): `player`, `gm`, and `character_private`.
-- [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py): the core application service.
-- [app/orchestration/context_builder.py](../app/orchestration/context_builder.py): actor prompt assembly.
-- [app/orchestration/context_budget.py](../app/orchestration/context_budget.py): retrieved-context budget enforcement.
-
-### Agents and provider layer
-
-- [app/agents/actor_agent.py](../app/agents/actor_agent.py): generation dispatch only.
-- [app/agents/critic_agent.py](../app/agents/critic_agent.py): structured critique and repair-message construction.
-- [app/agents/memory_curator.py](../app/agents/memory_curator.py): structured memory extraction.
-- [app/llm/provider.py](../app/llm/provider.py): common request/response models and provider protocol.
-- [app/llm/openai_compatible.py](../app/llm/openai_compatible.py): OpenAI-compatible provider implementation.
-- [app/llm/router.py](../app/llm/router.py): deterministic route selection.
-
-### Persistence and retrieval
-
-- [app/persistence/file_loader.py](../app/persistence/file_loader.py): JSON world, scene, and persona loading.
-- [app/persistence/sqlite.py](../app/persistence/sqlite.py): SQLite connection and schema initialization.
-- [app/persistence/repositories.py](../app/persistence/repositories.py): session, turn, and memory repositories.
-- [app/memory/store.py](../app/memory/store.py): recent-dialogue and memory-episode store adapters.
-- [app/rag/](../app/rag): chunking, embeddings, ingestion, retriever, and vector-store abstractions.
-
-### Evals
-
-- [app/evals/](../app/evals): deterministic fixture-based regression checks.
+- [app/config.py](../app/config.py), [app/composition.py](../app/composition.py): `Settings`
+  loaded from `.env`; provider, repository, retriever, and orchestrator construction.
+- [app/domain/](../app/domain): typed state, turn, memory, and retrieval models plus the
+  visibility values.
+- [app/orchestration/](../app/orchestration): the turn pipeline as an injectable stage package
+  (`stages/`), plus prompt assembly, context budgeting, session-canon building, draft
+  validation, and turn-error classification.
+- [app/agents/](../app/agents): actor, critic, memory curator, and the deterministic secret
+  guard.
+- [app/llm/](../app/llm): provider protocol, OpenAI-compatible implementation, deterministic
+  router, and structured-output handling.
+- [app/persistence/](../app/persistence), [app/memory/](../app/memory): JSON content loading,
+  SQLite schema and repositories, memory store adapters, dedup, and consolidation.
+- [app/rag/](../app/rag): chunking, embeddings, ingestion, retriever, ranking, and vector-store
+  abstractions.
+- [app/evals/](../app/evals), [app/diagnostics/](../app/diagnostics): deterministic
+  fixture-based regression checks and runtime verification tooling.
 
 ## Ownership Boundaries
 
 ### Authoritative data
 
 - JSON files under `data/` own demo world, scene, and persona definitions.
-- SQLite owns sessions, turns, and durable memory episodes.
+- SQLite owns sessions, turns, durable memory episodes, and pinned canon facts.
 - Qdrant stores retrievable chunk vectors and payloads.
+
+The SQLite data model is four tables (`sessions`, `turns`, `memory_episodes`, `canon_facts`),
+created on startup with additive-only auto-migration: missing columns are added via
+`ALTER TABLE` in [app/persistence/sqlite.py](../app/persistence/sqlite.py), never dropped or
+rewritten. The Qdrant collections (`canon_lore`, `session_memory`, `persona_memory`) are
+derived indexes that can be rebuilt from SQLite and re-ingested lore.
 
 ### Non-authoritative data
 
@@ -165,12 +154,13 @@ Current limitations:
 
 ## Testing Architecture
 
-The repository relies on three test layers:
+The repository relies on five test layers:
 
 - unit tests for models, router, persistence, prompt assembly, and retrieval helpers
 - integration tests for CLI, API, persistence, repair flow, and memory curation
 - Node tests for browser request shaping, buffered SSE parsing, transcript state, and thin-client boundaries
-- eval tests and a standalone regression runner for retrieval, visibility, memory, role consistency, and cloud-routing regressions
+- eval tests and a standalone regression runner for retrieval, visibility, memory, role consistency, and provider-binding regressions
+- a Playwright e2e spec (`tests/e2e/spa-play.spec.mjs`, run via `npm run test:e2e-spa`) that drives the built SPA through a live play-through; it needs the full stack and a model server, so it runs on demand rather than in the default `pytest` gate
 
 ## Extension Rule
 

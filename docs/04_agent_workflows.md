@@ -68,7 +68,22 @@ Responsibilities:
 Current routing behavior:
 
 - critic evaluation runs on the session's bound provider, like every other task
-- invalid critic output is treated as a skipped critic step with warnings
+- any critic exception — invalid structured output or otherwise — fails the turn closed: the
+  draft is withheld and the turn resolves to a controlled failure with `critic_status=rejected`
+  ([app/orchestration/stages/critique.py](../app/orchestration/stages/critique.py))
+
+Gating behavior:
+
+- `CRITIC_GATING` defaults to `always`; the `auto` mode skips critique on low-risk turns
+- in `auto` mode a turn counts as risky — and the critic still runs — when the deterministic
+  draft validator flagged the draft, retrieval confidence is below `LOW_RETRIEVAL_CONFIDENCE`
+  or missing entirely, scene complexity is at or above `HIGH_SCENE_COMPLEXITY`, or the session's
+  bound provider is cloud
+  ([app/orchestration/stages/critique.py](../app/orchestration/stages/critique.py))
+- a gated skip is deliberate, not a failure: the draft is served with a warning and
+  `critic_status=skipped`
+- the `always` default is intentional: live acceptance found auto-gating regressed 50-turn
+  recall (see [docs/05_rag_memory_design.md](05_rag_memory_design.md))
 
 ## MemoryCurator
 
@@ -84,6 +99,9 @@ Current routing behavior:
 
 - memory extraction runs on the session's bound provider, like every other task
 - invalid output is skipped with warnings
+- `CURATOR_GATING` defaults to `always`; in `auto` mode LLM extraction is skipped when the turn
+  shows no durable-event signals (no deterministic-extractor hits and no durable-event terms in
+  either message)
 
 ## Orchestrator Ownership
 
@@ -118,15 +136,26 @@ Retrieval is deterministic code, not an agent class.
 - there is no cross-provider fallback; a session's provider never changes mid-session
 - an unreachable provider surfaces as a controlled `ProviderUnavailableError`
 
-### Critic or curator failure
+### Critic failure
 
-- response generation does not retroactively fail
-- warnings are recorded
+- any critic exception — invalid structured output or any other error — fails the turn closed:
+  the draft is withheld and the turn is persisted as a controlled failure with
+  `critic_status=rejected`
+- this fail-closed rule also applies to the re-critique after a repair pass
+- a deliberate auto-gating skip is not a failure: the draft is served with a warning and
+  `critic_status=skipped`
+
+### Curator failure
+
+- response generation does not retroactively fail; the turn has already been persisted
+- invalid structured output is treated as a skipped curation step with warnings (the
+  deterministic fallback extractor still contributes its candidates)
+
+### Memory indexing failure
 
 After successful memory persistence, the orchestrator asks `MemoryIndexer` to embed and upsert the
 persisted episodes into `session_memory`. SQLite remains authoritative. Indexing failures append a
 warning and do not discard the completed turn or persisted memory.
-- invalid structured output is treated as a skipped downstream step
 
 ## Safety Boundaries
 

@@ -21,6 +21,7 @@ user message
   -> generate draft
   -> critique draft
   -> retry once with repair if needed
+  -> apply output-side secret containment
   -> persist turn
   -> curate durable memory
 ```

@@ -57,11 +57,11 @@ Without Qdrant or embeddings, turn execution continues without retrieved context
 Commands exposed by [app/cli.py](../app/cli.py) — run `python -m app.cli --help` for the full,
 authoritative list. Grouped:
 
-- diagnostics: `config`, `health`, `doctor`, `smoke-run`, `validate-content`
-- sessions: `start-session`, `resume`, `turn`, `list-sessions`, `inspect-memories`,
-  `turn-history`, `export-session`, `import-session`, `delete-session`, `reset-db`
-- retrieval / content: `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`,
-  `create-scenario-template`, `route`
+- diagnostics: `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `embedding-ab`
+- sessions / maintenance: `start-session`, `resume`, `turn`, `list-sessions`, `inspect-memories`,
+  `turn-history`, `export-session`, `import-session`, `delete-session`, `backup`, `reset-db`
+- retrieval / content: `ingest`, `ingest-scenario-lore`, `reindex-memories`, `reset-index`,
+  `retrieve-debug`, `create-scenario-template`, `route`
 
 Recommended local flow:
 
@@ -103,12 +103,14 @@ uvicorn app.main:app --reload
 
 The full HTTP surface — endpoints, request/response shapes, and error codes — is documented in
 [docs/12_api_contract.md](12_api_contract.md). In brief: `GET /runtime/status`,
-`GET /content/catalog`, session CRUD (`POST`/`GET /sessions`, `GET /sessions/{id}`), turns
-(`POST /sessions/{id}/turns` and `/turns/stream`), per-turn and bulk diagnostics
+`GET /content/catalog`, session CRUD (`POST`/`GET /sessions`, `GET /sessions/{id}`),
+mid-session scene switching (`POST /sessions/{id}/scene`), turns
+(`POST /sessions/{id}/turns` and `/turns/stream`), last-turn deletion / reroll support
+(`DELETE /sessions/{id}/turns/last`), per-turn and bulk diagnostics
 (`GET /sessions/{id}/turns/{i}`, `GET /sessions/{id}/turn-details`), durable memories
 (`GET /sessions/{id}/memories`), session canon
-(`GET`/`POST`/`DELETE /sessions/{id}/canon`), and eval-run summaries
-(`GET /diagnostics/eval-runs`).
+(`GET`/`POST`/`DELETE /sessions/{id}/canon`), and eval-run summaries and details
+(`GET /diagnostics/eval-runs`, `GET /diagnostics/eval-runs/{run_id}`).
 
 The API and CLI both call the same service wiring in [app/composition.py](../app/composition.py).
 The public HTTP contract and exposure boundaries are documented in
@@ -143,7 +145,9 @@ retry budget are configurable (`LOCAL_LLM_MAX_RETRIES`, `CLOUD_LLM_MAX_RETRIES`,
 - Retrieval is visibility-filtered before actor prompt construction.
 - SQLite remains authoritative for durable memories; Qdrant indexing is fail-open during turns.
 - Actor prompts include at most `RECENT_DIALOGUE_TURNS` prior persisted turns.
-- Individual recent-dialogue messages are not character-truncated during actor prompt construction.
+- Prior recent-dialogue messages are clipped to `RECENT_DIALOGUE_MAX_MESSAGE_CHARS` characters
+  (default `900`) with an explicit omission marker during actor prompt construction; clipping is
+  surfaced as a turn warning. The current incoming player message is not clipped.
 - Older continuity returns through retrieved durable memory when relevant; use
   `reindex-memories` to repair the derived index from authoritative SQLite episodes.
 - Memory extraction runs on the session's bound provider.
@@ -161,6 +165,16 @@ mypy .
 pytest
 (cd frontend && npm test -- --watch=false --browsers=ChromeHeadless)
 ```
+
+Test layout under `tests/`:
+
+- `tests/unit/` — models, router, persistence, prompt assembly, and retrieval helpers
+- `tests/integration/` — CLI, API, persistence, repair flow, memory curation, and documentation gates
+- `tests/evals/` — deterministic fixture-based regression categories (also run standalone by
+  `python -m app.evals.regression_runner`)
+- `tests/e2e/` — Playwright browser spec (`spa-play.spec.mjs`) that plays through the built SPA
+  against a live stack; config lives at the repo-root `playwright.config.mjs`, run with
+  `npm run test:e2e-spa`
 
 Eval-specific commands:
 

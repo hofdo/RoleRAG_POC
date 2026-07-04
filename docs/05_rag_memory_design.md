@@ -25,6 +25,7 @@ SQLite stores:
 - sessions
 - turns
 - memory episodes
+- canon facts (author-pinned session canon; see "Session Canon" below)
 
 SQLite does not currently store RAG document metadata tables, scene snapshots, or configuration overrides.
 
@@ -135,10 +136,12 @@ The budget layer:
 - de-duplicates by chunk id
 - truncates oversized chunk text
 
-Recent dialogue is bounded separately by `RECENT_DIALOGUE_TURNS`. The orchestrator loads only that
-many prior persisted turns into each actor prompt. Individual dialogue messages are not
-character-truncated during prompt construction. Once an older exchange leaves the recent window,
-continuity depends on relevant durable memory being retrieved.
+Recent dialogue is bounded separately, in two ways: by turn count (`RECENT_DIALOGUE_TURNS`,
+default `8` — the orchestrator loads only that many prior persisted turns into each actor
+prompt) and by per-message clipping (`RECENT_DIALOGUE_MAX_MESSAGE_CHARS`, default `900` — prior
+messages over the cap are clipped with an explicit omission marker, and any clipping is surfaced
+as a `TurnResult` warning). The current turn's incoming message is not clipped. Once an older
+exchange leaves the recent window, continuity depends on relevant durable memory being retrieved.
 
 ## Durable Memory
 
@@ -173,7 +176,7 @@ SQLite is authoritative for durable memory episodes. The vector store is derived
 reindexing a session reads the persisted SQLite episodes and repairs retrieval state after an index
 loss or outage.
 
-Write-time dedup and consolidation:
+Write-time dedup, consolidation, and index bounds:
 
 - before persistence, a candidate is dropped if an existing session memory already covers it
   lexically; an optional semantic pass (cosine, `RAG_WRITE_DEDUP_COSINE_THRESHOLD`, off at `1.0`)
@@ -183,14 +186,40 @@ Write-time dedup and consolidation:
   `MEMORY_CONSOLIDATION_MAX_IMPORTANCE` bounds eligibility), implemented in
   [app/memory/consolidation.py](../app/memory/consolidation.py) and
   [app/orchestration/stages/memory.py](../app/orchestration/stages/memory.py)
-- both ship OFF by default: live acceptance found caps/auto-gating regressed 50-turn recall, so the
-  always-on defaults are intentional
+- a session-memory index cap (`SESSION_MEMORY_MAX_EPISODES`, off at `0`) can evict the lowest
+  importance-then-recency episodes from the retrievable index; SQLite keeps every memory
+- an index importance floor (`RAG_INDEX_IMPORTANCE_FLOOR`, off at `1`) keeps memories below the
+  floor in SQLite without indexing them for retrieval
+- all of these ship OFF by default: live acceptance found the index cap and auto-gating regressed
+  50-turn recall, so the always-on, index-everything defaults are intentional
+
+## Session Canon (Standing Facts)
+
+Implemented in [app/orchestration/canon_builder.py](../app/orchestration/canon_builder.py),
+backed by the SQLite `canon_facts` table.
+
+Whenever canon exists, the actor prompt carries a pinned "Standing facts" block that is built
+independently of vector retrieval:
+
+- author-pinned canon facts (managed through the `/sessions/{id}/canon` API endpoints; see
+  [docs/12_api_contract.md](12_api_contract.md)) come first, verbatim
+- derived facts follow: a session memory qualifies only if it is `player`-visible, its importance
+  is at or above `CANON_IMPORTANCE_FLOOR` (default `4`), **and** it carries at least one durable
+  `CANON_TAGS` tag (promise, rule, agreement, oath, ...)
+- eligible memories are ordered by importance then recency, the combined list is deduplicated by
+  text, and the block is bounded by `CANON_MAX_ITEMS` (default `8`) and `CANON_MAX_CHARS`
+  (default `900`)
+
+Because the block is deterministic and pinned, the most load-bearing durable facts stay in the
+prompt even when vector retrieval would miss them.
 
 ## Failure Handling
 
 - If Qdrant or embeddings are unavailable during a turn, retrieval is skipped and the turn continues.
 - If ingestion cannot embed or write chunks, the CLI command fails immediately.
-- If memory curation returns invalid structured output, memory persistence is skipped and the turn still completes.
+- If memory curation returns invalid structured output, LLM-curated persistence is skipped (the
+  deterministic fallback extractor may still persist explicit durable events) and the turn still
+  completes.
 - If memory indexing fails after SQLite persistence, a warning is recorded and the turn still completes.
 
 ## Retrieval Checks
