@@ -32,9 +32,12 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
 - Do not put orchestration logic in API routes.
 - Do not bypass visibility filtering for player-facing actor prompts.
 - Do not make tests depend on real providers or live Qdrant.
-- `CLOUD_MODE=ask` is two-phase: a cloud-eligible turn returns `confirmation_required` and the
-  client resubmits with `cloud_confirmed`/`force_local` (the CLI prompts interactively). It never
-  calls cloud silently.
+- The provider is session-bound: it is chosen once at session creation (`POST /sessions`) and is
+  immutable for the session's lifetime; every task runs on the bound provider and no per-turn cloud
+  flags exist. `CLOUD_MODE` gates cloud session creation only: `off` rejects cloud sessions with
+  400 `cloud_unavailable`, `ask` requires one interactive confirmation at creation (`typer.confirm`
+  in the CLI, `window.confirm` in the SPA), `auto` creates them silently. See
+  [docs/06_local_cloud_model_strategy.md](06_local_cloud_model_strategy.md).
 
 ## Where To Change Things
 
@@ -78,8 +81,10 @@ The repository is a bounded backend engine, not an autonomous-agent framework.
   the turn remains valid and `reindex-memories` can repair the derived Qdrant index.
 - Retrieval ranking is intentionally deterministic and transparent. Keep boost policy in `app/rag`,
   preserve the original vector score, and avoid player-facing hidden-text diagnostics.
-- The repair escalation is fixed in code (local, then cloud); provider retries and the
-  structured-truncation budget are configurable (`LOCAL_LLM_MAX_RETRIES`, `CLOUD_LLM_MAX_RETRIES`,
+- Repair runs one bounded same-provider pass on the session's bound provider (same route family as
+  actor/critic); a rejected repair goes straight to controlled failure — there is no
+  local-then-cloud escalation and no cross-provider fallback. Provider retries and the
+  structured-truncation budget remain configurable (`LOCAL_LLM_MAX_RETRIES`, `CLOUD_LLM_MAX_RETRIES`,
   `TRUNCATION_RETRY_BUDGET_MULTIPLIER`).
 
 ## Verification Before Claiming Success
