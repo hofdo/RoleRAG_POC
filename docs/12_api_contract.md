@@ -229,6 +229,10 @@ one run (the SPA Eval page's drill-down). Unknown run ids return `404 eval_run_n
 artifacts are local diagnostic files produced by the live checkpoint harness; the endpoint serves
 them verbatim and is local-use only, like the rest of the surface.
 
+The tooling that produces these run artifacts — the live-smoke checkpoint, the model bake-off,
+and the RAG-knob sweep — is documented in
+[19_verification_and_eval_tooling.md](19_verification_and_eval_tooling.md).
+
 ## Session Memories
 
 `GET /sessions/{session_id}/memories` returns the persisted durable-memory episodes for a

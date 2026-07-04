@@ -65,7 +65,7 @@ graph TD
 | `app/persistence/` | JSON loading plus SQLite schema and repositories |
 | `app/memory/` | recent-dialogue window, durable-memory store, vector indexing, semantic write-dedup, and consolidation |
 | `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
-| `app/diagnostics/` | runtime environment checks, deterministic end-to-end smoke verification, eval-run serving, and the live-checkpoint/bake-off/containment-probe harnesses (10 modules) |
+| `app/diagnostics/` | runtime environment checks, deterministic end-to-end smoke verification, eval-run serving, and the live-checkpoint/bake-off/containment-probe harnesses (10 modules) — see [docs/19_verification_and_eval_tooling.md](19_verification_and_eval_tooling.md) |
 | `app/content/` | standalone scenario-pack validation and template generation |
 | `app/evals/` | deterministic regression fixtures and report runner |
 
