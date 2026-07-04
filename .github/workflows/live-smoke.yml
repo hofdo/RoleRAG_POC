@@ -48,7 +48,7 @@ on:
         required: true
         default: "0"
       turn_count:
-        description: "Rose Gallery conversation turns (5-50)."
+        description: "Rose Gallery conversation turns. This workflow validates 5-50; scripts/live-smoke.sh itself accepts LIVE_TURN_COUNT up to 100."
         required: true
         default: "8"
       fail_on_structured_warnings:
