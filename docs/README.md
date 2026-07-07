@@ -1,6 +1,6 @@
 # RoleRAG Documentation
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-07 @ 7888ee7
 
 Navigation hub for the RoleRAG docs. New here? Start with the root
 [README](../README.md) (setup, Docker, CLI/API usage), then use the diagrams and
@@ -111,6 +111,8 @@ flowchart TD
 | [18_security_privacy_and_backups](18_security_privacy_and_backups.md) | Deployment posture (no auth, don't expose the port), cloud egress, data locations, backup/restore runbook |
 | [19_verification_and_eval_tooling](19_verification_and_eval_tooling.md) | Live-smoke checkpoint, llama.cpp model profiles + `LLAMA_CPP_*` matrix, model bake-off / secret-containment / RAG-knob harnesses, diagnostics modules |
 | [20_playing_rolerag](20_playing_rolerag.md) | Player guide: the `/app/play` surface, session setup + provider choice, reroll, scene/persona switch, memory/canon panels, controlled failures in play, troubleshooting FAQ |
+| [21_fable_handoff_reasoning](21_fable_handoff_reasoning.md) | Predecessor-agent handoff (2026-07-07): reasoning chains behind the architecture, analysis method, decision record, working agreements for successor agents |
+| [22_rag_scaling_roadmap](22_rag_scaling_roadmap.md) | Verified RAG-core roadmap for larger scenarios on ~27B local models: token budget, eval assets, hybrid retrieval, chunking, long-campaign presets |
 
 ## Planning & roadmap
 
@@ -194,8 +196,9 @@ headers it touches. See [superpowers/plans/README.md](superpowers/plans/README.m
 
 **Living docs** (the set the sweep covers, each carrying a `Reviewed:` header):
 
-- root `README.md` and `frontend/README.md`
-- this hub (`docs/README.md`) and the numbered docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`20`
+- root `README.md`, root `CLAUDE.md` (agent entry point), and `frontend/README.md`
+- this hub (`docs/README.md`) and the numbered docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`22`
+  (the reasoning chains in `21` are a point-in-time record; its pointers are living)
 - `docs/GLOSSARY.md`, `docs/BACKLOG.md`, `docs/SIDE_PROJECTS.md`
 
 Historical reports (`07`, `11`, `13`–`16`) and background design-time docs are *not* living:
