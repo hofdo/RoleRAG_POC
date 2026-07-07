@@ -6,6 +6,13 @@
 > improvement sweep with per-finding adversarial verification (method described in
 > [docs/21](21_fable_handoff_reasoning.md)). This is a **living roadmap** — check items off,
 > move corrections in, and re-verify priorities as live evidence lands.
+>
+> **Verification coverage note.** The adversarial verification pass was cut short by a
+> session rate limit after the embeddings/hybrid lens: those findings are fully verified
+> (deltas folded in below, incl. the new P1.4), the P0 facts were verified first-hand by
+> the author, and the remaining sweep findings are listed under
+> [Unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
+> — verify each against code before building on it.
 
 ## Scope and stance
 
@@ -51,6 +58,12 @@ persona header are exactly what gets shifted out first.
    `stage_timings`-style turn diagnostics + a turn `warning` when the estimate exceeds a
    configurable fraction (e.g. 85%) of a new `LOCAL_LLM_CONTEXT_TOKENS` setting.
 3. Surface the number in the RAG Inspector / Analytics pages (additive API field).
+4. **Free exact numbers (verified 2026-07-07):** the provider already returns real
+   `prompt_tokens`/`completion_tokens` per call — `LlmResponse.usage` is populated at
+   [app/llm/openai_compatible.py:113-116](../app/llm/openai_compatible.py) and read
+   **nowhere** (grep `\.usage` finds no consumer). Persist it into turn diagnostics
+   alongside the estimate; the estimator then covers pre-flight warnings, the provider
+   number covers ground truth and calibrates the estimator.
 
 **Non-goals.** No dynamic re-budgeting yet — first make overflow *visible*, then tune.
 
@@ -103,8 +116,13 @@ below is unmeasurable today.
    models (offline, no LLM), not just the seeded events.
 3. Optional pytest tier behind a marker (`-m semantic`, excluded from CI default) running
    the same corpus with real embeddings.
+4. Derive part of the query set from real play transcripts (`export-session`) to counter
+   fixture-author bias; unit-test the new recall@k/nDCG math with the deterministic keyword
+   provider so the metric layer itself stays pinned.
 
-**Validate.** Self-validating — this *is* the validator. Effort M. — [ ]
+**Validate.** Self-validating — this *is* the validator. Effort M–L (hand-grading
+relevance judgments is the long pole; today's `embedding-ab` pool is only 9 items —
+5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). — [ ]
 
 ---
 
@@ -126,6 +144,21 @@ it stays the explainability layer. Config: `RAG_HYBRID_SEARCH=off|rrf`, default 
 **Validate.** P0.4 corpus recall@k before/after; retrieval diagnostics must label which
 leg (dense/sparse) surfaced each candidate (RAG Inspector addition). Effort L. — [ ]
 
+**Verified implementation notes (2026-07-07 adversarial pass).**
+- The sparse/prefetch legs MUST carry the same visibility/scope `query_filter` as the dense
+  leg ([vector_store.py:321-366](../app/rag/vector_store.py)) or the visibility boundary breaks.
+- Named-vector layouts break the existing size check: `ensure_collection` reads
+  `.config.params.vectors.size` ([vector_store.py:191-193](../app/rag/vector_store.py)),
+  which becomes a dict under named vectors — the check needs a per-layout branch.
+- fastembed 0.8.0 (in the venv) ships `Qdrant/bm25` with a `language` parameter incl.
+  `german`; qdrant-client is 1.18.0.
+- The in-memory BM25 parity leg can reuse `content_terms`/`_stem`
+  ([ranking.py:250-272](../app/rag/ranking.py)) as its deterministic tokenizer.
+- The legacy `client.search` branch is pinned by
+  `tests/unit/test_vector_store.py:71-133`; RRF may shuffle
+  `event_key_retrieval` top-rank pins — add a hybrid-variant deterministic eval rather than
+  loosening the existing one.
+
 ### P1.2 Embedding model upgrade path (multilingual)
 
 **Problem.** `all-MiniLM-L6-v2` is English-only and the weakest quality lever; scenarios
@@ -135,12 +168,53 @@ but operationally undocumented — dimension changes break collections
 
 **Change.** (1) Write the migration runbook: `reset-index` (all collections) →
 `reindex-memories` per session → re-`ingest`; (2) benchmark multilingual candidates on the
-P0.4 corpus via extended `embedding-ab` (e.g. `paraphrase-multilingual-MiniLM-L12-v2`,
-`multilingual-e5-small/base`, `bge-m3` if FastEmbed-supported at acceptable latency);
-(3) swap the default only on evidence, per house rules.
+P0.4 corpus via extended `embedding-ab`; (3) swap the default only on evidence, per house
+rules.
+
+**Candidate list (corrected 2026-07-07, verified against fastembed 0.8.0 in the venv):**
+`paraphrase-multilingual-MiniLM-L12-v2` (384-dim, symmetric),
+`jinaai/jina-embeddings-v2-base-de` (768-dim, symmetric),
+`intfloat/multilingual-e5-large` (1024-dim, **query/passage prefixes required**).
+`multilingual-e5-small/base` and `bge-m3` are NOT supported by fastembed 0.8.0 — struck.
+
+**Prefix caveat (verified).** fastembed 0.8.0's `query_embed`/`passage_embed` add **no**
+prefix for the e5 family, and the app's `EmbeddingProvider` protocol is symmetric-only
+([app/rag/embeddings.py:13-19](../app/rag/embeddings.py)). If e5-large is benchmarked,
+Settings-driven prefixes must land first (`EMBEDDING_QUERY_PREFIX`/`EMBEDDING_DOCUMENT_PREFIX`,
+default `''` = byte-identical), applied at the call sites — query:
+[retriever.py:41](../app/rag/retriever.py); documents:
+[ingestion.py:69](../app/rag/ingestion.py),
+[indexer.py:52,132](../app/memory/indexer.py); dedup both sides:
+[memory_dedup.py:79-82](../app/orchestration/stages/memory_dedup.py) — **not** via Protocol
+default methods (the ~9 structural test fakes inherit nothing from a Protocol). Otherwise
+an e5 benchmark run is invalid. The two symmetric candidates need none of this.
 
 **Validate.** P0.4 metrics incl. the German query subset; end-to-end via live-smoke.
-Effort M (runbook S, benchmark M). — [ ]
+Effort M (runbook S, benchmark M; +S if prefixes needed). — [ ]
+
+### P1.4 Embedding-model identity fingerprint (adversarially verified, new)
+
+**Problem (confirmed).** The only guard on the index is vector **size**
+([vector_store.py:188-196](../app/rag/vector_store.py) Qdrant, `:72-76` in-memory); the
+embedding model's identity is stored nowhere. Swapping `EMBEDDING_MODEL` between
+same-dimension models — e.g. the default `all-MiniLM-L6-v2` (384) to P1.2's own candidate
+`paraphrase-multilingual-MiniLM-L12-v2` (384) — silently mixes incompatible vector spaces:
+old chunks stay, new memories upsert beside them
+([indexer.py:41-61](../app/memory/indexer.py)), scores blend meaninglessly in the additive
+rerank, and fail-open search hides it. The trap sits directly on P1.2's upgrade path.
+
+**Change.** Store a model fingerprint **inside the vector store** so fingerprint and
+collection lifecycles are atomic (sentinel meta point per Qdrant collection; dict in
+`InMemoryVectorStore` — parity): `ensure_collection` gains a model-identity check and a new
+`VectorStoreModelMismatch`. CLI paths (`ingest`, `reindex-memories`) fail loud with the
+P1.2 runbook as the remedy; during a live turn the memory stage already wraps indexing in
+`except Exception` ([stages/memory.py:262-264](../app/orchestration/stages/memory.py)), so
+in-play protection is write-blocking + warning — additionally surface the mismatch in
+`doctor` for a loud signal. `drop_collection`/`reset-index` must clear the fingerprint or
+the runbook bricks on a stale one. Effort S–M. — [ ]
+
+**Validate.** Unit tests both stores (mismatch raise, drop-then-recreate clears);
+`doctor --check-qdrant` surfaces it; P1.2 runbook exercised end-to-end once.
 
 ### P1.3 Structure-aware chunking + contextual chunk headers
 
@@ -172,9 +246,11 @@ on `visibility` + a scope id without payload indexes — fine at POC scale, a fu
 filter cost at 10k–1M points.
 
 **Change.** Create keyword payload indexes for `visibility`, `world_id`, `session_id`,
-`persona_id`, `scene_id`, `tags` in `ensure_collection` (idempotent). Expose optional
-scalar quantization behind config, default off. `InMemoryVectorStore` needs no change
-(indexes are an implementation detail of filtering, semantics identical — parity holds).
+`persona_id`, `scene_id`, `tags` in `ensure_collection` (idempotent — and it must also run
+on the **already-exists early-return path**, [vector_store.py:190-196](../app/rag/vector_store.py),
+or existing collections never get indexed). Expose optional scalar quantization behind
+config, default off. `InMemoryVectorStore` needs no change (indexes are an implementation
+detail of filtering, semantics identical — parity holds).
 
 **Validate.** Existing tests (semantics unchanged); latency numbers on the P0.4 corpus.
 Effort S. — [ ]
@@ -231,11 +307,57 @@ standard next quality step but costs latency and explainability.
 
 **Change.** Opt-in FastEmbed reranker over the top ~30 fused candidates, off by default,
 scores exposed in diagnostics as another labeled component (preserving the "original score
-survives" rule). Only worth doing after P1.1/P1.2 land and P0.4 shows remaining headroom.
+survives" rule — the CE score must NOT replace `chunk.score`, or `original_score`
+diagnostics silently change meaning and the additive boost constants lose their cosine
+calibration). A CE model-load/inference failure must follow the retrieval fail-open
+contract: degrade to the un-reranked order with a turn warning. Only worth doing after
+P1.1/P1.2 land and P0.4 shows remaining headroom. fastembed 0.8.0 verified candidates:
+`jinaai/jina-reranker-v2-base-multilingual`, `Xenova/ms-marco-MiniLM-L-6-v2`.
 
 **Validate.** P0.4 nDCG + live latency budget. Effort M. — [ ]
 
 ---
+
+## Verified small fixes (do anytime)
+
+- **Tags-filter parity divergence (verified first-hand).** `InMemoryVectorStore` requires a
+  chunk to carry **all** filter tags (`issubset`,
+  [vector_store.py:386-387](../app/rag/vector_store.py)) while Qdrant matches **any**
+  (`MatchAny`, [vector_store.py:359-365](../app/rag/vector_store.py)). Actor retrieval
+  never sets `tags`, so gameplay is unaffected — but any future tag-scoped feature would
+  pass deterministic tests and behave differently live. Pick one semantic (AND is the safer
+  read of the in-memory intent), implement it in both stores, and pin it with a
+  paired-store test. Effort S. — [ ]
+
+## Unverified candidates from the 2026-07-07 sweep (verify before building)
+
+The adversarial-verification pass was rate-limited before reaching these analyst findings.
+Anchors were reported by the analysts but **not independently confirmed** — treat each as a
+hypothesis: verify the anchors first, then promote it into the numbered roadmap or strike
+it with a note.
+
+- *Chunking/ingestion:* stale-chunk orphans — source identity is the raw path string;
+  nothing sweeps chunks of removed/renamed manifest documents (re-ingest only replaces
+  matching paths). / CLI `start-session` re-embeds the whole manifest corpus every start
+  (no content fingerprint to skip unchanged docs) — cost grows linearly with corpus size.
+- *Context budget:* the recent-dialogue window is the largest prompt consumer (~up to 3.6K
+  tokens) with uniform 900-char clipping — importance-uneven turns get equal budget.
+- *Memory lifecycle:* consolidation summaries may leak into durable cross-session
+  `persona_memory`; the curator prompt has no importance rubric although importance=4
+  gates persona memory, canon, and eviction order; consolidation has no age guard (can
+  swallow memories written moments ago); pinned-canon + retrieved-chunk duplication can
+  double-spend context in an 8K window.
+- *Qdrant/vector store:* deleting a session with Qdrant unreachable can orphan
+  still-retrievable `persona_memory` vectors (fail-open delete, nothing re-sweeps);
+  `replace_source` is delete-then-upsert — a brief retrieval outage window per re-ingest.
+- *Eval methodology:* the live checkpoint's recall probes all land before turn ~50 — a
+  100-turn run asserts nothing about late recall (add late second-callback StoryEvents);
+  retrieval-miss floors measure absolute score rather than margin-over-best-distractor.
+- *Query construction:* `build_retrieval_query` puts the user message **last** after up to
+  ~1.3K chars of framing ([retriever.py:145-168](../app/rag/retriever.py)) — near MiniLM's
+  ~256-token input truncation the message can fall off the embedded text entirely (the
+  dual-query bare-message pass currently masks this; reordering message-first would make
+  the framed query robust on its own).
 
 ## Explicitly not proposed (decision record honored)
 

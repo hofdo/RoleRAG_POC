@@ -50,7 +50,12 @@ Chain of thought, so you can re-run or extend it:
 4. **Adversarial verification of every finding.** Each proposed improvement was independently
    re-checked against the code and the decision record by a skeptical verifier: evidence
    accurate? already implemented behind a flag? already rejected with evidence? breaks an
-   invariant? Only survivors made it into docs/22, with corrections applied.
+   invariant? *Honesty note:* a session rate limit stopped this pass after the
+   embeddings/hybrid lens — those five verdicts (incl. one genuinely new confirmed finding,
+   docs/22 P1.4, and a corrected candidate list for P1.2) are folded into docs/22; the
+   remaining findings are listed there under "Unverified candidates" and must be verified
+   against code before anyone builds on them. The P0 facts were verified first-hand by the
+   author before any delegation.
 5. **Synthesis by the same agent that did step 1**, so the final documents are anchored in
    first-hand reading, not agent hearsay.
 
