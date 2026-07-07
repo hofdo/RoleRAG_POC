@@ -1,6 +1,6 @@
 # 08 — Agent Handoff Guide
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-07 @ 7888ee7
 
 ## Purpose
 
@@ -8,13 +8,18 @@ This guide is the fastest safe onboarding path for a future coding agent or deve
 
 ## Read This First
 
+Coding agents: [CLAUDE.md](../CLAUDE.md) at the repo root is the condensed entry point
+(commands, conventions, invariants) and is auto-loaded by Claude Code sessions.
+
 Read in this order:
 
 1. [README.md](../README.md)
 2. [docs/09_current_architecture_map.md](09_current_architecture_map.md)
-3. [app/composition.py](../app/composition.py)
-4. [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py)
-5. [tests/](../tests)
+3. [docs/21_fable_handoff_reasoning.md](21_fable_handoff_reasoning.md) — predecessor-agent
+   reasoning chains: why the architecture is shaped this way, and how to think about changes
+4. [app/composition.py](../app/composition.py)
+5. [app/orchestration/turn_orchestrator.py](../app/orchestration/turn_orchestrator.py)
+6. [tests/](../tests)
 
 ## Mental Model
 
@@ -139,7 +144,10 @@ Authoring rules:
 
 ## Safe Next Work
 
-The next reasonable implementation areas are documented in [docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md).
+The next reasonable implementation areas are documented in
+[docs/10_next_steps_after_mvp.md](10_next_steps_after_mvp.md). For the RAG core
+specifically (larger scenarios, ~27B local models), the verified roadmap is
+[docs/22_rag_scaling_roadmap.md](22_rag_scaling_roadmap.md).
 
 Stay conservative:
 
