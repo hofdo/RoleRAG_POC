@@ -238,13 +238,11 @@ Ordered by value. Effort S/M/L.
 
 ### Ops / DX / packaging
 
-- [ ] **#53** **`.dockerignore` keeps the live DB out of the image but not backups or WAL
-  sidecars.** It excludes `data/rolerag.db` and `data/qdrant` (clear intent: no personal data in
-  image layers) but not `data/backups/` (each snapshot is a *full* DB copy) nor
-  `data/rolerag.db-wal` / `-shm` (committed-but-uncheckpointed content). A `docker build` on a
-  machine that has run the app or `rolerag backup` bakes full roleplay history into a layer. Fix:
-  add `data/backups` + `data/*.db-wal` `data/*.db-shm` (or `data/*.db*`). Effort S; one line,
-  same privacy intent the existing exclusion already encodes.
+- [x] **#53** **`.dockerignore` kept the live DB out of the image but not backups or WAL
+  sidecars.** It excluded `data/rolerag.db` and `data/qdrant` but not `data/backups/` (each
+  snapshot is a *full* DB copy) nor `data/rolerag.db-wal` / `-shm`. **Shipped:** added
+  `data/rolerag.db-wal`, `data/rolerag.db-shm`, and `data/backups` so a `docker build` on a
+  machine that has run the app or `rolerag backup` no longer bakes roleplay history into a layer.
 
 - [ ] **#52** **Frontend is unit-tested in CI but never type-checked or built there.** `ci.yml`
   runs `ng test` only; strict template type-checking and the 1 MB bundle budget fire only at
@@ -253,13 +251,16 @@ Ordered by value. Effort S/M/L.
   `tsc -p tsconfig.app.json --noEmit`) to CI — already known-green via Docker/dev-up, ~30–60 s.
   Not a matrix expansion, so not in tension with the docs/10 CI-scope guardrail. Effort S.
 
-- [ ] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
-  `app` has a healthcheck but `qdrant` has none and `app.depends_on: [qdrant]` waits only for
-  *start*, not *ready* — so the app can take first turns before Qdrant accepts connections and
-  (retrieval being fail-open) degrade silently to no-retrieval on first-boot ingest. Neither
-  service sets `restart:`. `dev-up.sh` already polls `/readyz` (`:57`), so Compose is the weaker
-  entry point. Fix: Qdrant `/readyz` healthcheck + `depends_on: {qdrant: {condition:
-  service_healthy}}` + `restart: unless-stopped`. Effort S.
+- [~] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
+  `app` had a healthcheck but `qdrant` had none and `app.depends_on: [qdrant]` waits only for
+  *start*, not *ready*; neither service set `restart:`. **Partially shipped:** added
+  `restart: unless-stopped` to both services (survives host reboots) and validated with
+  `docker compose config`. **Deferred:** the Qdrant `/readyz` healthcheck + `depends_on:
+  {qdrant: {condition: service_healthy}}` readiness gate — the `qdrant/qdrant` image ships no
+  `curl`/`wget`/`bash`, so the probe command must be chosen against a running image, and a wrong
+  probe with `condition: service_healthy` deadlocks stack startup. Needs a live Docker daemon to
+  validate (unavailable in this environment); `dev-up.sh` already polls `/readyz` so the primary
+  dev path is covered meanwhile.
 
 - [ ] **#59** **High-risk Python deps are unbounded `>=` with no lockfile** (inconsistent with the
   deliberately-capped `qdrant-client>=1.18,<2` and pinned `qdrant/qdrant:v1.18.1`). `openai>=1.40`

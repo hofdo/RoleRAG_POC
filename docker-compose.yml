@@ -1,6 +1,8 @@
 services:
   qdrant:
     image: qdrant/qdrant:v1.18.1
+    # Survive host reboots so the personal daily-driver stack comes back up.
+    restart: unless-stopped
     ports:
       - "6333:6333"
     volumes:
@@ -8,6 +10,7 @@ services:
 
   app:
     build: .
+    restart: unless-stopped
     depends_on:
       - qdrant
     ports:
