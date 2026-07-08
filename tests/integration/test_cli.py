@@ -1208,7 +1208,7 @@ def test_cli_delete_session_purges_persona_memory_vectors(tmp_path: Path) -> Non
 
     with (
         patch("app.cli._build_vector_store", return_value=vector_store),
-        patch("app.cli._backup_database", return_value=backup_dir / "backup.db"),
+        patch("app.cli._backup_database", return_value=backup_dir / "backup.db") as mock_backup,
     ):
         result = runner.invoke(
             app,
@@ -1217,6 +1217,8 @@ def test_cli_delete_session_purges_persona_memory_vectors(tmp_path: Path) -> Non
         )
 
     assert result.exit_code == 0
+    # The pre-write safety snapshot (v1.2) must fire before the irreversible delete (#49).
+    mock_backup.assert_called_once()
     assert vector_store.delete_session_calls == [
         (RagCollection.SESSION_MEMORY, "demo-session"),
         (RagCollection.PERSONA_MEMORY, "demo-session"),
@@ -1234,7 +1236,7 @@ def test_cli_reset_db_purges_persona_memory_vectors_for_every_session(
 
     with (
         patch("app.cli._build_vector_store", return_value=vector_store),
-        patch("app.cli._backup_database", return_value=backup_dir / "backup.db"),
+        patch("app.cli._backup_database", return_value=backup_dir / "backup.db") as mock_backup,
     ):
         result = runner.invoke(
             app,
@@ -1243,6 +1245,8 @@ def test_cli_reset_db_purges_persona_memory_vectors_for_every_session(
         )
 
     assert result.exit_code == 0
+    # The pre-write safety snapshot (v1.2) must fire before the irreversible wipe (#49).
+    mock_backup.assert_called_once()
     calls_by_collection: dict[RagCollection, set[str]] = {}
     for collection, session_id in vector_store.delete_session_calls:
         calls_by_collection.setdefault(collection, set()).add(session_id)

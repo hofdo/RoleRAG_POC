@@ -155,12 +155,12 @@ Ordered by value. Effort S/M/L.
   `tests/unit/test_composition_config_parity.py` pins that both roots produce the same config.
   Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget).
 
-- [ ] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
-  `tests/integration/test_cli.py:1211,1237` patch `app.cli._backup_database` for
-  `delete-session` / `reset-db` but no `assert_called_once()` anywhere. The v1.2 pre-write
-  snapshot (`502f80c`) — the only guard against an irreversible wipe of authoritative SQLite
-  state — could be refactored away and CI stays green. Fix: assert the call in both tests (+
-  `import_session` at `cli.py:867` if it snapshots). Effort S; tightens existing tests, no risk.
+- [x] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
+  `tests/integration/test_cli.py` patched `app.cli._backup_database` for `delete-session` /
+  `reset-db` with no `assert_called_once()`, so the v1.2 pre-write snapshot (`502f80c`) — the only
+  guard against an irreversible wipe of authoritative SQLite state — could be refactored away with
+  CI green. **Shipped:** both tests now capture the mock and `assert_called_once()`. (`import-session`
+  has no snapshot — only 4 `_backup_database` call sites, none in import — so nothing to add there.)
 
 ### Testing & verification
 
