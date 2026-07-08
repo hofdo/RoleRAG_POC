@@ -82,14 +82,6 @@ class StubCritic:
     ) -> list[LlmMessage]:
         raise AssertionError("local repair should not be used in this test")
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        raise AssertionError("cloud repair should not be used in this test")
-
 
 class StubActorContextRetriever:
     def __init__(self, *, chunks: list[Any] | None = None, error: Exception | None = None) -> None:

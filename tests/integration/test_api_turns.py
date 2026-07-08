@@ -116,14 +116,6 @@ class FakeCritic:
     ) -> list[LlmMessage]:
         raise AssertionError("repair should not be used in this test")
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        raise AssertionError("repair should not be used in this test")
-
 
 class FakeRetriever:
     def __init__(self) -> None:
@@ -181,14 +173,6 @@ class RejectingCritic:
         rejected_draft: str,
         issues: list[str],
         repair_instruction: str | None,
-    ) -> list[LlmMessage]:
-        return actor_messages
-
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
     ) -> list[LlmMessage]:
         return actor_messages
 

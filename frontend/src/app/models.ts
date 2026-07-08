@@ -226,12 +226,12 @@ export interface EvalRunDetail {
     retrieval_selection_misses?: number;
     latency?: { total_seconds?: number; p50_seconds?: number; p95_seconds?: number };
   };
-  turns?: Array<{
+  turns?: {
     turn_index?: number;
     duration_seconds?: number;
     stage_timings?: Record<string, number>;
     finish_reason?: string | null;
     warnings?: string[];
-  }>;
+  }[];
   [key: string]: unknown;
 }

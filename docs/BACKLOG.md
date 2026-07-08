@@ -1,12 +1,14 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-08 @ 5293417
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
 
 Numbers not listed here (#3–5, #23, #31–47) landed in the "Not doing" categories or the
 side-project list rather than the engine backlog; only the items acted on carry a row below.
+Items **#48+** come from the [2026-07-08 review](#review-2026-07-08--engine-quality-testing-ops)
+(a fresh four-lens, code-grounded sweep) and continue the numbering without reusing an ID.
 
 ## Done
 
@@ -123,6 +125,190 @@ decision) are recorded elsewhere in this file and are not repeated here.
   `long_turn_count` input — so CI can drive the 100-turn runs that `scripts/live-smoke.sh` already
   supports. Deferred here because changing the range is a workflow behavior change, out of scope
   for the docs sweep.
+
+## Review 2026-07-08 — engine quality, testing, ops
+
+A fresh four-lens, code-grounded sweep (code-quality · testing/verification · RAG core ·
+ops/DX) on top of `5293417`, deterministic gate green (`ruff` / `mypy --strict` /
+`pytest`). Nothing below duplicates a done/dropped/skipped item above or a
+[docs/21 rejected idea](21_fable_handoff_reasoning.md#ideas-already-tried-rejected-or-deliberately-deferred);
+each was checked against the decision record first. **RAG-core recall findings live in
+[docs/22](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings)** (that doc
+owns retrieval/memory) — this section is engine-quality, test, and ops work. House style still
+applies: additive/opt-in, byte-identical defaults for risky knobs, gate + (where the change is
+invisible to the deterministic suite) live-smoke before claiming success, docs move with code.
+
+Ordered by value. Effort S/M/L.
+
+**Status (worked through 2026-07-08).** Shipped and gate-verified: **#48, #49, #50, #51, #52,
+#53, #54, #56, #57, #59, #61, #62, #63, #64** (14). Partial: **#58** (restart policies shipped;
+Qdrant readiness-gate needs a live Docker daemon to validate the probe). Deferred with rationale:
+**#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split),
+**#60** (needs a fake-provider ASGI server for a real e2e). The **RAG-core items** in
+[docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings)
+(C1/N1/C2/N2/N3) are intentionally **not** implemented here: they change retrieval/memory quality,
+which the measure-first invariant says to validate on **live-smoke** or the **P0.4 graded corpus**
+(neither available offline, no model) — shipping them blind would violate the repo's own
+discipline. Each carries its named validation gate in docs/22.
+
+### Correctness — do first
+
+- [x] **#48** *(bug)* **CLI is a second composition root that has drifted from the API.**
+  `app/cli.py::_build_services` hand-rolled `TurnOrchestratorConfig(...)` with 9 of 25 fields
+  instead of calling `composition.build_orchestrator_config`, so CLI turns fell back to dataclass
+  defaults for ~16 `.env`-backed keys (`critic_gating`, `curator_gating`, `canon_*`,
+  `rag_write_dedup_cosine_threshold`, `memory_consolidation_*`, `containment_overlap_threshold`,
+  `recent_dialogue_max_message_chars`, …). **Live divergence:** `local_structured_max_tokens`
+  defaults to **640** in `Settings`/API but **350** in the dataclass the CLI never set, so every
+  CLI turn ran the local critic and memory extractor at a smaller structured budget than the API.
+  **Shipped:** the CLI now delegates to `build_orchestrator_config` and passes the two
+  `MemoryIndexer` kwargs (`importance_floor`, `session_memory_max_episodes`);
+  `tests/unit/test_composition_config_parity.py` pins that both roots produce the same config.
+  Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget).
+
+- [x] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
+  `tests/integration/test_cli.py` patched `app.cli._backup_database` for `delete-session` /
+  `reset-db` with no `assert_called_once()`, so the v1.2 pre-write snapshot (`502f80c`) — the only
+  guard against an irreversible wipe of authoritative SQLite state — could be refactored away with
+  CI green. **Shipped:** both tests now capture the mock and `assert_called_once()`. (`import-session`
+  has no snapshot — only 4 `_backup_database` call sites, none in import — so nothing to add there.)
+
+### Testing & verification
+
+- [x] **#50** **No paired InMemory↔Qdrant vector-store parity harness** (guards the visibility
+  boundary, invariant #2). The two hand-written filter impls (`_chunk_matches_filters`,
+  `_build_qdrant_filter`) diverged on tags — `issubset`/AND in-memory vs `MatchAny`/OR in Qdrant.
+  **Shipped:** `tests/unit/test_vector_store_parity.py` runs one fixture set through *both*
+  `.search()` paths (Qdrant via an embedded `QdrantClient(":memory:")` local-mode client, so the
+  real matcher runs) across every filter dimension — visibility, world, scene, persona, session,
+  single tag, two-tag AND, absent tag, combined, and match-nothing — asserting identical id sets.
+  The Qdrant tags filter is now AND (one `MatchValue` per tag) to match the in-memory intent.
+  This subsumes the docs/22 "Verified small fixes" tags item. Gate green (+12 tests).
+
+- [x] **#51** **`SessionSummaryCache` invalidate/copy semantics only indirectly covered.**
+  Nothing asserted (a) `load()` returns a copy or (b) consolidation's `invalidate()` forces a
+  reload — either breaking would make write-dedup compare against a stale/mutated summary set and
+  silently drop memories or keep duplicates. **Shipped:**
+  `tests/unit/orchestration/stages/test_session_summary_cache.py` covers load-once-then-cache,
+  copy-on-load (caller mutation can't corrupt the mirror), append growth (incl. the not-cached
+  no-op), and the consolidation→invalidate→reload sequence. Gate green (+5 tests).
+
+- [ ] **#60** **No deterministic frontend↔backend contract test.** *(Deferred — the one item from
+  this review not landed; it needs infrastructure that doesn't exist yet.)* A true e2e requires a
+  **fake-provider ASGI server** the SPA can hit over real HTTP — `app.main:app` composes real
+  providers, and the existing API tests inject fakes via in-process `TestClient.dependency_overrides`,
+  which Playwright can't drive. Building that server + Playwright wiring is real work, and the
+  browser-sandbox friction seen while doing #62 (Chrome needs `--no-sandbox` as root) adds CI risk.
+  The lighter "schema-contract snapshot" alternative substantially overlaps the response-shape
+  assertions already in `test_api_turns.py` / `test_api_sessions.py`. **Recommended build:** a small
+  `app.diagnostics` fake-provider ASGI entrypoint (reuse the `smoke-run` fake stack +
+  `InMemoryVectorStore`), started as a CI background service, with a Playwright spec that loads a
+  session and asserts the rendered turn — no model needed. Left for a dedicated pass.
+
+- [x] **#61** **No coverage measurement.** **Shipped:** added `pytest-cov` (dev extra) +
+  `[tool.coverage.run]` config, a `make coverage` target, and `--cov=app --cov-report=term-missing`
+  on CI's Python test step — **report-only**, no threshold gate. Baseline is 91% line / branch.
+  The config pins `core = "sysmon"` (Python 3.12 sys.monitoring) because coverage's default C
+  tracer collides with numpy's C extension under fastembed ("cannot load module more than once").
+
+- [x] **#64** **WAL cross-process concurrency asserted only by pragma value.** Only the pragma
+  *values* were checked. **Shipped:** two behavioral tests — a fully-deterministic one proving a
+  WAL reader keeps reading the last committed snapshot while another connection holds an
+  uncommitted write, and a coordinated-thread one proving a second writer *waits* on
+  `busy_timeout` (then succeeds) instead of failing with "database is locked". Stable across
+  repeated runs (0.2s held lock vs the 5s timeout gives wide margin). Gate green (+2 tests).
+
+### Code quality — maintainability
+
+- [x] **#54** **`run_turn` built `TurnResult`/`TurnDiagnostics`/controlled-failure three+ ways.**
+  **Shipped:** extracted `_controlled_failure_result(...)` (pairs persist + the
+  `CONTROLLED_FAILURE` `TurnResult` return so the two failure exits can't drift) and a
+  `_turn_diagnostics(...)` factory (the 3 identical `TurnDiagnostics` builds on the deferred,
+  memory, and failure paths). Pure extraction — the persona-switch commit / deferred-memory reload
+  ordering ([docs/21 danger zone](21_fable_handoff_reasoning.md#danger-zones-restated-with-reasoning))
+  was left untouched. Verified with the full gate **plus** `smoke-run` (no warnings); the
+  repair/controlled-failure unit tests pass unchanged.
+
+- [~] **#55** **`AppServices` optional-repo fields force unreachable guards in the API routes.**
+  **Deferred with rationale after investigation.** The `raise RuntimeError(...)` branches are not
+  purely dead — they're the **mypy narrowing** mechanism for the `| None` fields (drop them and
+  `mypy --strict` errors on the Optional access), so the "minimal" fix isn't viable. And the
+  Optional fields aren't only a CLI artifact: the API test doubles deliberately build *partial*
+  bundles (`test_api_sessions.py:99` passes none of the repos; the `test_api_turns.py` doubles pass
+  different subsets), so making the three always-populated repos required would churn 4 test
+  constructions plus need the repos built where they aren't used. The clean fix is a
+  `ReadServices`/`TurnServices` type split (composition + api deps + routes) — real work for a
+  cosmetic leak. Consistent with the repo's "no churn-for-cleanliness without measured benefit"
+  stance (cf. the #18 skip), this is left as-is rather than refactored.
+
+- [x] **#56** **Dead cloud-repair path taxed ~10 test fixtures.**
+  `build_cloud_repair_messages` (Protocol + `CriticAgent` impl, self-labeled "Currently
+  uncalled") was dead since the 2026-07-02 session-bound-provider change removed cloud
+  escalation, yet every critic double had to stub it because it was on the Protocol. **Shipped:**
+  removed from `CriticEvaluatingAgent` Protocol, `CriticAgent`, the eval fixture, and all 9 test
+  stubs. `TurnRepairStage` already uses `build_local_repair_messages` on both providers. Gate green.
+
+- [x] **#57** **Small dead / duplicated code on hot classes.** **Shipped:** removed the never-called
+  `_loader_for_content_root` (a duplicate of the public `loader_for_session`); removed
+  `_build_local_route` from `TurnOrchestrator` and inlined its `ModelRoute` construction into the
+  one test that used it (`test_api_sessions.py`); extracted a `_row_to_session` static method on
+  `SQLiteSessionRepository` (mirroring the existing `_row_to_turn`) so `get_session` and
+  `list_recent_sessions` no longer inline the same row-mapping twice. Gate green.
+
+### Ops / DX / packaging
+
+- [x] **#53** **`.dockerignore` kept the live DB out of the image but not backups or WAL
+  sidecars.** It excluded `data/rolerag.db` and `data/qdrant` but not `data/backups/` (each
+  snapshot is a *full* DB copy) nor `data/rolerag.db-wal` / `-shm`. **Shipped:** added
+  `data/rolerag.db-wal`, `data/rolerag.db-shm`, and `data/backups` so a `docker build` on a
+  machine that has run the app or `rolerag backup` no longer bakes roleplay history into a layer.
+
+- [x] **#52** **Frontend was unit-tested in CI but never type-checked or built there.** `ci.yml`
+  ran `ng test` only; strict template type-checking and the bundle budget fire only at `ng build`.
+  **Shipped:** added a `Build SPA` (`npx ng build`) step to `ci.yml`; verified the build is green
+  locally (Angular 19, ~8 s). Refreshed the stale `frontend/README.md` note that said CI doesn't
+  build.
+
+- [~] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
+  `app` had a healthcheck but `qdrant` had none and `app.depends_on: [qdrant]` waits only for
+  *start*, not *ready*; neither service set `restart:`. **Partially shipped:** added
+  `restart: unless-stopped` to both services (survives host reboots) and validated with
+  `docker compose config`. **Deferred:** the Qdrant `/readyz` healthcheck + `depends_on:
+  {qdrant: {condition: service_healthy}}` readiness gate — the `qdrant/qdrant` image ships no
+  `curl`/`wget`/`bash`, so the probe command must be chosen against a running image, and a wrong
+  probe with `condition: service_healthy` deadlocks stack startup. Needs a live Docker daemon to
+  validate (unavailable in this environment); `dev-up.sh` already polls `/readyz` so the primary
+  dev path is covered meanwhile.
+
+- [x] **#59** **High-risk Python deps were unbounded `>=`** (inconsistent with the deliberately-capped
+  `qdrant-client>=1.18,<2`). **Shipped:** upper-bounded `fastapi<1`, `openai<3`, `pydantic<3`,
+  `pydantic-settings<3`. Note: `openai` already resolves to **2.44** and the gate is green, so `<2`
+  would have wrongly forced a downgrade — `<3` allows the tested 2.x and guards the next major.
+  Verified with `pip install --dry-run` (resolves against installed versions) + full gate. A full
+  lockfile stays YAGNI for a single-user POC.
+
+- [x] **#62** **No frontend `lint` script.** Nothing linted the Angular/TS the way `ruff` guards
+  the Python. **Shipped:** `ng add angular-eslint` (flat `eslint.config.js`, `npm run lint`
+  target) + a `Lint SPA` CI step. Fixed the 9 findings it surfaced — a genuinely unused import and
+  a no-op test expression (both real), an `Array<T>`→`T[]` style nit, and the SSE payload typed
+  `any`→`unknown` with per-branch casts; configured `no-unused-vars` to honor the `^_`
+  intentionally-unused convention. Verified `ng lint` clean, `ng build` clean, and all 70 SPA unit
+  tests green.
+
+- [x] **#63** **No dependency-vulnerability surface.** **Shipped:** a **non-blocking** `audit` CI
+  job (`continue-on-error: true`) running `pip-audit` + `npm audit --omit=dev` — advisory only,
+  never gates a merge. It already earned its keep: `pip-audit` is clean, but `npm audit` surfaced
+  a **high-severity Angular advisory** (`GHSA-rgjc-h3x7-9mwg`, hydration DOM-clobbering /
+  response-cache poisoning, affecting `@angular/core ≤19.2.25` — this SPA is on 19.2). Its fix is
+  the Angular 21 major (breaking); the app's LAN-only, no-auth, client-render-only posture
+  (docs/18) mitigates the realistic exposure. Tracked under the Angular-upgrade note below.
+
+*Minor notes (no ID):* **Angular 19 → 21 upgrade** is now more than cosmetic — the #63 audit
+flagged `GHSA-rgjc-h3x7-9mwg` (high) against `@angular/core ≤19.2.25`, fixed only by the Angular
+21 major. Not urgent (LAN-only, no-auth, client-render-only), but it's the next real dependency
+task; do it as a deliberate major bump (re-run `ng lint`/`ng build`/`ng test` + live-smoke UI).
+`make check` runs Python-only so it's a narrower gate than CI; `data/sessions/` is a git-tracked
+empty legacy dir (sessions live in SQLite now) — harmless.
 
 ## Not doing (personal-use scope)
 

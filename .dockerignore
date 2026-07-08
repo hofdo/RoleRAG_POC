@@ -6,7 +6,12 @@ __pycache__
 .dev-run
 node_modules
 data/qdrant
+# Keep ALL personal roleplay data out of image layers, not just the primary DB file:
+# backups are full DB copies, and the WAL/SHM sidecars hold committed-but-uncheckpointed turns.
 data/rolerag.db
+data/rolerag.db-wal
+data/rolerag.db-shm
+data/backups
 .pytest_cache
 .mypy_cache
 playwright-report

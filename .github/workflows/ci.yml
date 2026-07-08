@@ -41,10 +41,23 @@ jobs:
         run: mypy .
 
       - name: Test Python
-        run: pytest
+        # Coverage is report-only (no threshold gate); it surfaces which branches the
+        # suite exercises. See pyproject [tool.coverage.run] and `make coverage`.
+        run: pytest --cov=app --cov-report=term-missing
 
       - name: Install SPA dependencies
         run: npm ci
+        working-directory: frontend
+
+      - name: Lint SPA
+        run: npx ng lint
+        working-directory: frontend
+
+      - name: Build SPA
+        # ng build runs strict template type-checking and enforces the bundle budget —
+        # neither of which `ng test` (Karma units) can catch. Docker/dev-up build the SPA
+        # too, so this is known-green; it keeps a build-breaking regression out of a merge.
+        run: npx ng build
         working-directory: frontend
 
       - name: Test SPA
@@ -53,3 +66,38 @@ jobs:
 
       - name: Run deterministic eval summary
         run: python -m app.evals.regression_runner
+
+  audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    # Advisory only: surfaces known CVEs in the (LAN-exposed, no-auth) app's dependency
+    # tree. Never blocks a merge — the maintainer triages what's worth acting on.
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: pip-audit (runtime deps)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          python -m pip install .
+          pip-audit --progress-spinner=off || true
+
+      - name: npm audit (runtime deps)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm audit --omit=dev || true

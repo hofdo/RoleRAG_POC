@@ -356,11 +356,15 @@ def _build_qdrant_filter(filters: RetrievalFilter) -> Any:
                 match=models.MatchValue(value=filters.session_id),
             )
         )
-    if filters.tags:
+    # AND semantics: a chunk must carry *every* filter tag, matching
+    # ``InMemoryVectorStore``'s ``issubset`` check (#50). One ``MatchValue`` condition per
+    # tag; multiple ``must`` entries are ANDed. (``MatchAny`` here would be OR and diverge
+    # from the in-memory store — see tests/unit/test_vector_store_parity.py.)
+    for tag in filters.tags:
         must.append(
             models.FieldCondition(
                 key="tags",
-                match=models.MatchAny(any=filters.tags),
+                match=models.MatchValue(value=tag),
             )
         )
     return models.Filter(must=must)

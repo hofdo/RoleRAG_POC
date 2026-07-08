@@ -82,16 +82,6 @@ class FakeCritic:
         )
         return messages
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        messages = list(actor_messages)
-        messages.append(LlmMessage(role="user", content=", ".join(issues) or "repair the response"))
-        return messages
-
 
 class RecordingMemoryCurator:
     def __init__(self) -> None:
