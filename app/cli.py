@@ -31,6 +31,7 @@ from app.composition import (
     build_file_loader,
     build_local_provider,
     build_memory_curator,
+    build_orchestrator_config,
     build_vector_store,
     redact_settings,
 )
@@ -52,7 +53,7 @@ from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
 from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
+from app.orchestration.turn_orchestrator import TurnOrchestrator
 from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
@@ -171,6 +172,8 @@ def _build_services(
                 memory_store=memory_store,
                 embedding_provider=embedding_provider,
                 vector_store=vector_store,
+                importance_floor=settings.rag_index_importance_floor,
+                session_memory_max_episodes=settings.session_memory_max_episodes,
             )
             if embedding_provider is not None and vector_store is not None
             else None
@@ -184,17 +187,7 @@ def _build_services(
             if embedding_provider is not None and vector_store is not None
             else None
         ),
-        config=TurnOrchestratorConfig(
-            content_root=str(resolved_content_root),
-            retrieval_top_k=settings.rag_default_top_k,
-            max_retrieved_chunk_chars=settings.rag_max_retrieved_chunk_chars,
-            local_model=settings.local_llm_model,
-            cloud_model=settings.cloud_llm_model,
-            local_max_tokens=settings.local_llm_max_tokens,
-            cloud_max_tokens=settings.cloud_llm_max_tokens,
-            local_temperature=settings.local_llm_temperature,
-            cloud_temperature=settings.cloud_llm_temperature,
-        ),
+        config=build_orchestrator_config(settings, content_root=str(resolved_content_root)),
     )
     return AppServices(
         connection=connection,

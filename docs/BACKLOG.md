@@ -142,21 +142,18 @@ Ordered by value. Effort S/M/L.
 
 ### Correctness — do first
 
-- [ ] **#48** *(bug)* **CLI is a second composition root that has drifted from the API.**
-  `app/cli.py::_build_services` hand-rolls `TurnOrchestratorConfig(...)` (`cli.py:187-197`) with
-  9 of 25 fields instead of calling `composition.build_orchestrator_config`, so CLI turns fall
-  back to dataclass defaults for ~16 `.env`-backed keys (`critic_gating`, `curator_gating`,
-  `canon_*`, `rag_write_dedup_cosine_threshold`, `memory_consolidation_*`,
-  `containment_overlap_threshold`, `recent_dialogue_max_message_chars`, …). **Live divergence:**
-  `local_structured_max_tokens` defaults to **640** in `Settings`/API (`config.py:46`,
-  `composition.py:160`) but **350** in the dataclass the CLI never sets
-  (`turn_orchestrator.py:126`) — every CLI turn runs the local critic and memory extractor at a
-  smaller structured budget than the API (more truncation retries/failures on the CLI path). The
-  config↔`.env` parity test doesn't catch this — it checks *documentation*, not orchestrator
-  *wiring*. Fix: delegate to `build_orchestrator_config` (+ pass the two `MemoryIndexer` kwargs
-  composition sets). Effort S–M; converges CLI onto the already-tested API config path — live-smoke
-  after (it changes the CLI structured-token budget). *Consider a test that asserts both composition
-  roots produce the same `TurnOrchestratorConfig` from one `Settings`, to stop future drift.*
+- [x] **#48** *(bug)* **CLI is a second composition root that has drifted from the API.**
+  `app/cli.py::_build_services` hand-rolled `TurnOrchestratorConfig(...)` with 9 of 25 fields
+  instead of calling `composition.build_orchestrator_config`, so CLI turns fell back to dataclass
+  defaults for ~16 `.env`-backed keys (`critic_gating`, `curator_gating`, `canon_*`,
+  `rag_write_dedup_cosine_threshold`, `memory_consolidation_*`, `containment_overlap_threshold`,
+  `recent_dialogue_max_message_chars`, …). **Live divergence:** `local_structured_max_tokens`
+  defaults to **640** in `Settings`/API but **350** in the dataclass the CLI never set, so every
+  CLI turn ran the local critic and memory extractor at a smaller structured budget than the API.
+  **Shipped:** the CLI now delegates to `build_orchestrator_config` and passes the two
+  `MemoryIndexer` kwargs (`importance_floor`, `session_memory_max_episodes`);
+  `tests/unit/test_composition_config_parity.py` pins that both roots produce the same config.
+  Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget).
 
 - [ ] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
   `tests/integration/test_cli.py:1211,1237` patch `app.cli._backup_database` for
