@@ -1,6 +1,14 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-07 @ 7888ee7
+> Reviewed: 2026-07-08 @ 5293417
+>
+> **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
+> lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
+> (consolidation age guard; pinned-canon ↔ retrieved-chunk double-spend) and added three new
+> findings — all folded into
+> [§ 2026-07-08 review](#2026-07-08-review-confirmations--new-findings) below. Engine-quality,
+> test, and ops recommendations from the same review live in
+> [docs/BACKLOG.md](BACKLOG.md#review-2026-07-08--engine-quality-testing-ops).
 >
 > Authored 2026-07-07 by Claude Fable 5 from a first-hand code analysis plus a multi-agent
 > improvement sweep with per-finding adversarial verification (method described in
@@ -345,8 +353,9 @@ it with a note.
 - *Memory lifecycle:* consolidation summaries may leak into durable cross-session
   `persona_memory`; the curator prompt has no importance rubric although importance=4
   gates persona memory, canon, and eviction order; consolidation has no age guard (can
-  swallow memories written moments ago); pinned-canon + retrieved-chunk duplication can
-  double-spend context in an 8K window.
+  swallow memories written moments ago — **confirmed 2026-07-08, see § below**);
+  pinned-canon + retrieved-chunk duplication can double-spend context in an 8K window
+  (**confirmed 2026-07-08 + new slot-displacement mechanism, see § below**).
 - *Qdrant/vector store:* deleting a session with Qdrant unreachable can orphan
   still-retrievable `persona_memory` vectors (fail-open delete, nothing re-sweeps);
   `replace_source` is delete-then-upsert — a brief retrieval outage window per re-ingest.
@@ -358,6 +367,99 @@ it with a note.
   ~256-token input truncation the message can fall off the embedded text entirely (the
   dual-query bare-message pass currently masks this; reordering message-first would make
   the framed query robust on its own).
+
+## 2026-07-08 review: confirmations + new findings
+
+A follow-up review read the RAG core, memory lifecycle, and prompt assembly against this
+roadmap. Anchors below were verified first-hand in code. All respect the invariants
+(deterministic transparent ranking, fail-open retrieval, visibility gate) and the house style
+(additive/opt-in, byte-identical defaults). None are catchable by the keyword-embedding
+deterministic suite except the pure prompt-assembly ones (unit-testable byte-for-byte) — the
+rest are gated on the **P0.4 graded corpus** and/or live-smoke, per the measure-first workflow.
+
+### C1 — Standing-facts ↔ retrieved-chunk double-spend now *displaces* distinct facts (confirmed, promote)
+
+Confirms the unverified "pinned-canon + retrieved-chunk duplication" candidate, and adds the
+mechanism that makes it a **recall** regression, not just token waste. A durable,
+high-importance PLAYER memory tagged `promise`/`rule`/`agreement` is pinned verbatim into the
+"Standing facts" block by `build_standing_facts` (`canon_builder.py:26-50`) *and* near-certain
+to win rerank (it collects importance + session + lexical boosts), so it also lands in the
+retrieved set. `select_retrieved_chunks_for_prompt` (`context_budget.py:22-33`) dedups **only by
+`chunk.id`** against other retrieved chunks — never against the standing-facts text. Because
+retrieval returns exactly `top_k` and the prompt budget is the *same* number (default 5,
+`retrieval.py:74` ← `context_budget.retrieved_chunks`), the duplicate consumes one of only five
+slots, evicting a distinct fact. The most load-bearing facts are exactly the ones that
+double-spend. **Fix:** exclude standing-facts text from the retrieved set (normalized-text match;
+derived facts also carry the memory id) **before** truncation, and retrieve `top_k +
+len(standing_facts)` so the freed slot is actually recovered (otherwise 5→4). Post-selection
+prompt step; does not touch ranking determinism or the visibility gate. Effort S–M; measure
+distinct-fact count in the actor prompt on live-smoke.
+
+### C2 — Consolidation folds the whole eligible backlog with no age floor (age-guard confirmed; one-shot compression new)
+
+Confirms the "no age guard" candidate and adds a second coupled issue. (a) **No age floor:**
+`select_consolidatable` (`consolidation.py:49-66`) sorts oldest-first but has no minimum-age
+filter, so a low-importance untagged memory written *this turn* is swallowed the moment the
+backlog crosses threshold — it never gets a chance to be retrieved on its own. (b) **Whole-backlog
+one-shot:** once `len(candidates) >= threshold`, `memory_consolidation.py:60-95` passes **all**
+eligible candidates into a single 2–4 sentence summary (or one large `"Earlier in this session:
+…"` blob in the deterministic fallback) — a heavy one-shot information loss. A partial roll-up
+(fold only the oldest N, keep a rolling recent window, require a minimum age) is gentler and
+matches the "sleep cycle" intent. This matters because consolidation is the sanctioned growth
+control for [P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence);
+if enabling it costs a recall cliff for recent-but-trivial facts, the owner avoids the one tool
+meant for scale. **Fix:** min-age param + batch-size cap on `select_consolidatable`. Off by
+default already; validate on the P2.2 long live-smoke run; byte-identical when `threshold==0`.
+
+### N1 — Write-dedup false-drops distinct durable facts, and the extractor's own framing prefix inflates the ratio (new)
+
+`is_covered_by_summaries` (`deterministic_extractor.py:112-132`, `COVERAGE_THRESHOLD = 0.5`,
+consumed by write-dedup at `memory.py:168` and `memory_dedup.py:50`) drops a new candidate when
+≥50% of its content terms appear in some existing summary (reversal markers the only escape). For
+short durable facts this false-drops *distinct* events: new `"I promise to guard the bridge"` →
+`{player, state, promis, guard, bridg}` vs existing `"…guard the northern gate"` shares
+`{player, promis, guard}` = 3/5 = 0.6 → **dropped**, even though bridge ≠ gate is the whole
+point. Worse, the deterministic extractor **injects the shared vocabulary itself** by prefixing
+every candidate `summary=f'The player stated: "{sentence}"'` (`:101`) — `{player, state}` on every
+fact — systematically pushing the coverage ratio toward the drop threshold. A silently dropped
+promise never reaches SQLite, so it can be neither retrieved nor pinned as canon: a hard,
+warning-only recall loss on the highest-value tag classes. **Fix (cheapest first):** strip the
+constant `The player stated:` framing before computing coverage terms; or weight rarer terms over
+shared framing terms; or raise the threshold. Precision-tuned layer pinned by memory-regression
+tests — gate on the P0.4 distinct-fact / adversarial-distractor subset (same proper noun,
+different fact) to prove fewer false-drops without new false-writes.
+
+### N2 — The deterministic lexical + dedup layer is English-only (new; complements P1.2)
+
+[P1.2](#p12-embedding-model-upgrade-path-multilingual) covers multilingual *embeddings* only. But
+the deterministic lexical layer — the recall-safety net that catches proper nouns a 384-dim
+MiniLM misses (P1.1's own rationale) — is language-blind: `_LEXICAL_STOPWORDS` (`ranking.py:23-34`)
+and `content_terms`/`_stem` (`:250-272`) are English. For German play, German function words
+(`der/die/das/und/nicht/ist/mit`) aren't stopped, so they inflate lexical overlap with unrelated
+chunks (the exact noise the English list suppresses), and German morphology
+(`Vertrag`/`Vertrags`/`Vertrages`) isn't stemmed, so real matches are missed — and the same terms
+feed `is_covered_by_summaries`, shifting write-dedup math for German memories. (Tokenization
+survives: `token.isalpha()` keeps umlauts.) **Distinct from BACKLOG #26** — that SKIP was about
+English *framing-word* tuning; this is a *language* gap. **Fix:** a German stopword set behind a
+language setting (S); optional German stemming (M). Additive/opt-in; gate on P0.4's German subset.
+
+### N3 — Read-time prompt dedup is id-only; near-duplicate memory *text* co-fills slots when write-dedup is off (new; complements P2.2 / #30)
+
+Credit where due: the persona-memory dual-write and consolidation paths are already id-safe (the
+indexer keeps `id=memory.id`; originals are `CONSOLIDATED_TAG`-unindexed), so those are *not* a
+problem. The real gap: with semantic write-dedup shipping OFF by default
+(`RAG_WRITE_DEDUP_COSINE_THRESHOLD=1.0`) and always-on curation writing ~1.7 memories/turn,
+near-identical *distinct-id* memories accumulate and can co-occupy the 5 retrieved slots
+(`context_budget.py` and `ranking._deduplicate_ranked_chunks` both dedup strictly by `chunk.id`).
+Same slot-scarcity logic as C1. **Fix:** a cheap read-time exact/normalized-text dedup in
+`select_retrieved_chunks_for_prompt` — a safety net independent of the write-side toggle. Effort
+S; deterministic; measure on P0.4 for any accidental drop of legitimately-distinct chunks. Lower
+priority than C1/N1 — do alongside P2.2.
+
+### Triage
+
+Do first (small, high value, both recall losses on the highest-value facts): **C1**, **N1**.
+Do when German play lands: **N2**. Do alongside long-campaign P2.2 work: **C2**, then **N3**.
 
 ## Explicitly not proposed (decision record honored)
 

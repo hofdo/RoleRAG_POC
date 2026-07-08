@@ -1,12 +1,14 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-08 @ 5293417
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
 
 Numbers not listed here (#3–5, #23, #31–47) landed in the "Not doing" categories or the
 side-project list rather than the engine backlog; only the items acted on carry a row below.
+Items **#48+** come from the [2026-07-08 review](#review-2026-07-08--engine-quality-testing-ops)
+(a fresh four-lens, code-grounded sweep) and continue the numbering without reusing an ID.
 
 ## Done
 
@@ -123,6 +125,166 @@ decision) are recorded elsewhere in this file and are not repeated here.
   `long_turn_count` input — so CI can drive the 100-turn runs that `scripts/live-smoke.sh` already
   supports. Deferred here because changing the range is a workflow behavior change, out of scope
   for the docs sweep.
+
+## Review 2026-07-08 — engine quality, testing, ops
+
+A fresh four-lens, code-grounded sweep (code-quality · testing/verification · RAG core ·
+ops/DX) on top of `5293417`, deterministic gate green (`ruff` / `mypy --strict` /
+`pytest`). Nothing below duplicates a done/dropped/skipped item above or a
+[docs/21 rejected idea](21_fable_handoff_reasoning.md#ideas-already-tried-rejected-or-deliberately-deferred);
+each was checked against the decision record first. **RAG-core recall findings live in
+[docs/22](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings)** (that doc
+owns retrieval/memory) — this section is engine-quality, test, and ops work. House style still
+applies: additive/opt-in, byte-identical defaults for risky knobs, gate + (where the change is
+invisible to the deterministic suite) live-smoke before claiming success, docs move with code.
+
+Ordered by value. Effort S/M/L.
+
+### Correctness — do first
+
+- [ ] **#48** *(bug)* **CLI is a second composition root that has drifted from the API.**
+  `app/cli.py::_build_services` hand-rolls `TurnOrchestratorConfig(...)` (`cli.py:187-197`) with
+  9 of 25 fields instead of calling `composition.build_orchestrator_config`, so CLI turns fall
+  back to dataclass defaults for ~16 `.env`-backed keys (`critic_gating`, `curator_gating`,
+  `canon_*`, `rag_write_dedup_cosine_threshold`, `memory_consolidation_*`,
+  `containment_overlap_threshold`, `recent_dialogue_max_message_chars`, …). **Live divergence:**
+  `local_structured_max_tokens` defaults to **640** in `Settings`/API (`config.py:46`,
+  `composition.py:160`) but **350** in the dataclass the CLI never sets
+  (`turn_orchestrator.py:126`) — every CLI turn runs the local critic and memory extractor at a
+  smaller structured budget than the API (more truncation retries/failures on the CLI path). The
+  config↔`.env` parity test doesn't catch this — it checks *documentation*, not orchestrator
+  *wiring*. Fix: delegate to `build_orchestrator_config` (+ pass the two `MemoryIndexer` kwargs
+  composition sets). Effort S–M; converges CLI onto the already-tested API config path — live-smoke
+  after (it changes the CLI structured-token budget). *Consider a test that asserts both composition
+  roots produce the same `TurnOrchestratorConfig` from one `Settings`, to stop future drift.*
+
+- [ ] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
+  `tests/integration/test_cli.py:1211,1237` patch `app.cli._backup_database` for
+  `delete-session` / `reset-db` but no `assert_called_once()` anywhere. The v1.2 pre-write
+  snapshot (`502f80c`) — the only guard against an irreversible wipe of authoritative SQLite
+  state — could be refactored away and CI stays green. Fix: assert the call in both tests (+
+  `import_session` at `cli.py:867` if it snapshots). Effort S; tightens existing tests, no risk.
+
+### Testing & verification
+
+- [ ] **#50** **No paired InMemory↔Qdrant vector-store parity harness** (guards the visibility
+  boundary, invariant #2). `app/rag/vector_store.py` maintains two filter implementations by hand
+  — `_chunk_matches_filters` (`:375`, in-memory) and `_build_qdrant_filter` (`:321`, Qdrant) —
+  and `tests/unit/test_vector_store.py` tests each store *separately with different fixtures*.
+  They already diverge (tags: `issubset`/AND in-memory vs `MatchAny`/ANY in Qdrant, `:386` vs
+  `:363`). No test runs one fixture set through both `.search()` paths asserting identical
+  filtering. docs/22 proposes a tags-only paired test; the higher-value move is a **parametrized
+  parity harness** over every filter dimension (visibility, world, scene, persona, session) so a
+  future hybrid/sparse leg that forgets `query_filter` can't silently break scoping. Effort S–M.
+
+- [ ] **#51** **`SessionSummaryCache` invalidate/copy semantics only indirectly covered.**
+  `grep invalidate tests/` is empty. Nothing asserts (a) `load()` returns a copy (a caller
+  mutating the dedup list can't corrupt the cached mirror) or (b) consolidation's
+  `invalidate()` (`memory_consolidation.py:121`) forces a reload. If either broke, write-dedup
+  would compare against a stale summary set and silently drop legitimate memories or keep
+  duplicates — a recall-affecting path. Fix: a focused unit test on the three methods incl. the
+  consolidation→invalidate→reload sequence. Effort S.
+
+- [ ] **#60** **No deterministic frontend↔backend contract test.** The only browser test
+  (`tests/e2e/spa-play.spec.mjs`) needs a real model + full stack and runs *only* in
+  `live-smoke.yml` (self-hosted). `ci.yml` runs `ng test` with mocked HTTP. A backend schema
+  rename (turn-detail payload, `DeleteLastTurnResponse`, SSE frame shape) that breaks the Angular
+  client compiles clean, passes `ng test`, and only surfaces in a manual/weekly GPU run. Fix: a
+  Playwright (or lighter schema-contract) run against FastAPI wired with fake providers +
+  `InMemoryVectorStore` (the `smoke-run` stack — no model needed). Effort M.
+
+- [ ] **#61** **No coverage measurement.** No `pytest-cov`/`coverage` in `pyproject.toml` or CI;
+  which branches the ~69 test files exercise is invisible. #49/#51 are exactly the blind spots a
+  report surfaces (mocked-but-unasserted safety net; uncovered `invalidate`), as are the
+  intentional `except Exception` fail-open seams that could lose their one test unnoticed. Fix:
+  `pytest-cov` + `--cov=app`, **report-only** (no hard gate — the per-branch report is the value,
+  not a threshold number). Effort S.
+
+- [ ] **#64** **WAL cross-process concurrency asserted only by pragma value.**
+  `tests/unit/test_sqlite.py:178` checks `journal_mode=WAL` + `busy_timeout=5000` are *set*, but
+  no test opens two connections and writes concurrently to prove the documented "CLI running
+  while the API serves, no database-is-locked" claim. Effort S; lower priority (timing-flaky,
+  single-user scope) — do only after the above.
+
+### Code quality — maintainability
+
+- [ ] **#54** **`run_turn` builds `TurnResult`/`TurnDiagnostics`/controlled-failure three ways.**
+  `turn_orchestrator.py:291-522` repeats the same ~7-field `TurnResult(...)` (×4) and
+  `TurnDiagnostics(...)` (×3) constructions that must be kept in lockstep by hand; the two
+  controlled-failure paths near-duplicate persist+return. A `_build_controlled_failure_result(...)`
+  helper and one `_diagnostics_from(...)` factory collapse it. Effort M. **Risk: medium** — this
+  is the highest-leverage code and the [docs/21 danger zone](21_fable_handoff_reasoning.md#danger-zones-restated-with-reasoning);
+  the persona-switch commit / deferred-memory reload ordering is *deliberate* and must be left
+  alone. Behavior-preserving + gate-verified only; decline if the explicitness is preferred.
+
+- [ ] **#55** **`AppServices` optional-repo fields force unreachable guards in the API routes.**
+  `turn_repository`/`memory_repository`/`canon_repository`/`memory_indexer` are typed `| None`
+  (`composition.py:51-60`) only because the CLI builds a leaner bundle, but `build_services`
+  *always* populates them for the API path — so `routes.py:534-535,573-574,614-615`'s
+  `raise RuntimeError(...)` branches are dead and untested, muddying the thin-routes invariant.
+  Fix: a narrower `ReadServices`/`TurnServices` type with non-optional repos (M), or minimally
+  drop the dead guards (S). Ties to #48 (both are the one-bundle-two-consumers seam).
+
+- [ ] **#56** **Dead cloud-repair path taxes ~10 test fixtures.**
+  `build_cloud_repair_messages` (`critique.py:66-71` Protocol; `critic_agent.py:107-126`,
+  self-labeled "Currently uncalled") is dead since the 2026-07-02 session-bound-provider change
+  removed cloud escalation, yet every critic double must stub it because it's in the Protocol.
+  Fix: drop from Protocol + agent + fixtures + stubs (S). Decline if a future cloud-repair prompt
+  is genuinely anticipated — but then at least pull it out of the Protocol.
+
+- [ ] **#57** **Small dead / duplicated code on hot classes.** `_loader_for_content_root`
+  (`turn_orchestrator.py:602-603`) exactly duplicates the public `loader_for_session` and is
+  never called; `_build_local_route` (`:605-612`) is production code used only by one test
+  (`test_api_sessions.py:773`). And `SessionState` row-mapping is inlined twice
+  (`repositories.py:166-176`, `199-214`) instead of a `_row_to_session` helper mirroring the
+  existing `_row_to_turn`. Trivial, very low risk. Effort S.
+
+### Ops / DX / packaging
+
+- [ ] **#53** **`.dockerignore` keeps the live DB out of the image but not backups or WAL
+  sidecars.** It excludes `data/rolerag.db` and `data/qdrant` (clear intent: no personal data in
+  image layers) but not `data/backups/` (each snapshot is a *full* DB copy) nor
+  `data/rolerag.db-wal` / `-shm` (committed-but-uncheckpointed content). A `docker build` on a
+  machine that has run the app or `rolerag backup` bakes full roleplay history into a layer. Fix:
+  add `data/backups` + `data/*.db-wal` `data/*.db-shm` (or `data/*.db*`). Effort S; one line,
+  same privacy intent the existing exclusion already encodes.
+
+- [ ] **#52** **Frontend is unit-tested in CI but never type-checked or built there.** `ci.yml`
+  runs `ng test` only; strict template type-checking and the 1 MB bundle budget fire only at
+  `ng build`. A template type error or broken `@Input` passes CI green and surfaces later as
+  `dev-up.sh` "API runs without a UI" (`dev-up.sh:96-100`). Fix: add `npx ng build` (or at least
+  `tsc -p tsconfig.app.json --noEmit`) to CI — already known-green via Docker/dev-up, ~30–60 s.
+  Not a matrix expansion, so not in tension with the docs/10 CI-scope guardrail. Effort S.
+
+- [ ] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
+  `app` has a healthcheck but `qdrant` has none and `app.depends_on: [qdrant]` waits only for
+  *start*, not *ready* — so the app can take first turns before Qdrant accepts connections and
+  (retrieval being fail-open) degrade silently to no-retrieval on first-boot ingest. Neither
+  service sets `restart:`. `dev-up.sh` already polls `/readyz` (`:57`), so Compose is the weaker
+  entry point. Fix: Qdrant `/readyz` healthcheck + `depends_on: {qdrant: {condition:
+  service_healthy}}` + `restart: unless-stopped`. Effort S.
+
+- [ ] **#59** **High-risk Python deps are unbounded `>=` with no lockfile** (inconsistent with the
+  deliberately-capped `qdrant-client>=1.18,<2` and pinned `qdrant/qdrant:v1.18.1`). `openai>=1.40`
+  in particular could resolve to a 2.x with schema changes to the `chat.completions` call the whole
+  engine depends on; `pip install .` in the Dockerfile makes two builds months apart non-reproducible.
+  Fix (light): upper-bound at least `openai`, `fastapi`, `pydantic`/`pydantic-settings` — the
+  `openai` cap is worth it regardless. A full lockfile is likely YAGNI for a POC. Effort S (caps).
+
+- [ ] **#62** **No frontend `lint` script.** `frontend/package.json` has `test` but no `lint`, and
+  no ESLint config exists — so nothing lints the Angular/TS the way `ruff` guards the Python.
+  Fix: add `ng lint` (Angular ESLint) + a `lint` script; optionally wire into CI (#52) and
+  `make check`. Effort S. Low priority — thin-client by design.
+
+- [ ] **#63** **No dependency-vulnerability surface** (no `dependabot.yml`, no `pip-audit`/`npm
+  audit` step). The app binds `0.0.0.0` with no auth by design (docs/18), so a transitive CVE in
+  the HTTP stack is the realistic threat. Fix: a **non-blocking** `pip-audit` + `npm audit`
+  advisory step. Effort S. Most likely declined under personal-use scope + advisory noise from
+  dev-deps; listed for completeness. Lowest value of the set.
+
+*Minor notes (no ID):* Angular 19 is one major behind (thin client, no urgency — flag on next
+dep sweep); `make check` runs Python-only so it's a narrower gate than CI (ties to #52);
+`data/sessions/` is a git-tracked empty legacy dir (sessions live in SQLite now) — harmless.
 
 ## Not doing (personal-use scope)
 
