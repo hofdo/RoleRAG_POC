@@ -205,22 +205,26 @@ Ordered by value. Effort S/M/L.
 
 ### Code quality — maintainability
 
-- [ ] **#54** **`run_turn` builds `TurnResult`/`TurnDiagnostics`/controlled-failure three ways.**
-  `turn_orchestrator.py:291-522` repeats the same ~7-field `TurnResult(...)` (×4) and
-  `TurnDiagnostics(...)` (×3) constructions that must be kept in lockstep by hand; the two
-  controlled-failure paths near-duplicate persist+return. A `_build_controlled_failure_result(...)`
-  helper and one `_diagnostics_from(...)` factory collapse it. Effort M. **Risk: medium** — this
-  is the highest-leverage code and the [docs/21 danger zone](21_fable_handoff_reasoning.md#danger-zones-restated-with-reasoning);
-  the persona-switch commit / deferred-memory reload ordering is *deliberate* and must be left
-  alone. Behavior-preserving + gate-verified only; decline if the explicitness is preferred.
+- [x] **#54** **`run_turn` built `TurnResult`/`TurnDiagnostics`/controlled-failure three+ ways.**
+  **Shipped:** extracted `_controlled_failure_result(...)` (pairs persist + the
+  `CONTROLLED_FAILURE` `TurnResult` return so the two failure exits can't drift) and a
+  `_turn_diagnostics(...)` factory (the 3 identical `TurnDiagnostics` builds on the deferred,
+  memory, and failure paths). Pure extraction — the persona-switch commit / deferred-memory reload
+  ordering ([docs/21 danger zone](21_fable_handoff_reasoning.md#danger-zones-restated-with-reasoning))
+  was left untouched. Verified with the full gate **plus** `smoke-run` (no warnings); the
+  repair/controlled-failure unit tests pass unchanged.
 
-- [ ] **#55** **`AppServices` optional-repo fields force unreachable guards in the API routes.**
-  `turn_repository`/`memory_repository`/`canon_repository`/`memory_indexer` are typed `| None`
-  (`composition.py:51-60`) only because the CLI builds a leaner bundle, but `build_services`
-  *always* populates them for the API path — so `routes.py:534-535,573-574,614-615`'s
-  `raise RuntimeError(...)` branches are dead and untested, muddying the thin-routes invariant.
-  Fix: a narrower `ReadServices`/`TurnServices` type with non-optional repos (M), or minimally
-  drop the dead guards (S). Ties to #48 (both are the one-bundle-two-consumers seam).
+- [~] **#55** **`AppServices` optional-repo fields force unreachable guards in the API routes.**
+  **Deferred with rationale after investigation.** The `raise RuntimeError(...)` branches are not
+  purely dead — they're the **mypy narrowing** mechanism for the `| None` fields (drop them and
+  `mypy --strict` errors on the Optional access), so the "minimal" fix isn't viable. And the
+  Optional fields aren't only a CLI artifact: the API test doubles deliberately build *partial*
+  bundles (`test_api_sessions.py:99` passes none of the repos; the `test_api_turns.py` doubles pass
+  different subsets), so making the three always-populated repos required would churn 4 test
+  constructions plus need the repos built where they aren't used. The clean fix is a
+  `ReadServices`/`TurnServices` type split (composition + api deps + routes) — real work for a
+  cosmetic leak. Consistent with the repo's "no churn-for-cleanliness without measured benefit"
+  stance (cf. the #18 skip), this is left as-is rather than refactored.
 
 - [x] **#56** **Dead cloud-repair path taxed ~10 test fixtures.**
   `build_cloud_repair_messages` (Protocol + `CriticAgent` impl, self-labeled "Currently

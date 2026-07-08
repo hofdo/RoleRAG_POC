@@ -323,7 +323,7 @@ class TurnOrchestrator:
                 *routing.warnings,
                 f"actor failed: {exc}",
             ]
-            self._persist_controlled_failure(
+            return self._controlled_failure_result(
                 context=context,
                 user_message=turn_input.message,
                 text=CONTROLLED_FAILURE_TEXT,
@@ -334,17 +334,6 @@ class TurnOrchestrator:
                 timings=timings,
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
-            )
-            return TurnResult(
-                text=CONTROLLED_FAILURE_TEXT,
-                route=routing.route,
-                finish_reason=None,
-                memory_written=False,
-                critic_status=CriticStatus.SKIPPED,
-                warnings=failure_warnings,
-                retrieval=retrieval.diagnostics,
-                stage_timings=timings,
-                outcome=TurnOutcome.CONTROLLED_FAILURE,
             )
         warnings = [
             *retrieval.warnings,
@@ -388,7 +377,7 @@ class TurnOrchestrator:
         if resolution.repair_duration is not None:
             timings["repair"] = resolution.repair_duration
         if resolution.controlled_failure:
-            self._persist_controlled_failure(
+            return self._controlled_failure_result(
                 context=context,
                 user_message=turn_input.message,
                 text=resolution.text,
@@ -399,17 +388,6 @@ class TurnOrchestrator:
                 timings=timings,
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
-            )
-            return TurnResult(
-                text=resolution.text,
-                route=resolution.route,
-                finish_reason=resolution.finish_reason,
-                memory_written=False,
-                critic_status=resolution.critic_status,
-                warnings=warnings,
-                retrieval=retrieval.diagnostics,
-                stage_timings=timings,
-                outcome=TurnOutcome.CONTROLLED_FAILURE,
             )
         final_text = resolution.text
         final_route = resolution.route
@@ -455,9 +433,9 @@ class TurnOrchestrator:
             warnings.append("memory curation deferred: runs after this response")
             self.turn_repository.update_turn_diagnostics(
                 persistence.turn.id,
-                TurnDiagnostics(
-                    retrieval=retrieval.diagnostics,
-                    stage_timings=timings,
+                self._turn_diagnostics(
+                    retrieval_diagnostics=retrieval.diagnostics,
+                    timings=timings,
                     critic_status=critic_status,
                     finish_reason=final_finish_reason,
                     warnings=warnings,
@@ -501,9 +479,9 @@ class TurnOrchestrator:
         # stage_timings is complete).
         self.turn_repository.update_turn_diagnostics(
             persistence.turn.id,
-            TurnDiagnostics(
-                retrieval=retrieval.diagnostics,
-                stage_timings=timings,
+            self._turn_diagnostics(
+                retrieval_diagnostics=retrieval.diagnostics,
+                timings=timings,
                 critic_status=critic_status,
                 finish_reason=final_finish_reason,
                 warnings=warnings,
@@ -551,6 +529,68 @@ class TurnOrchestrator:
             warnings=list(memory.warnings),
         )
 
+    @staticmethod
+    def _turn_diagnostics(
+        *,
+        retrieval_diagnostics: TurnRetrievalDiagnostics | None,
+        timings: dict[str, float],
+        critic_status: CriticStatus,
+        finish_reason: str | None,
+        warnings: list[str],
+        memory_written: bool,
+    ) -> TurnDiagnostics:
+        """Single builder for persisted turn diagnostics so the deferred, memory, and
+        controlled-failure paths write the same field set (they must match the live
+        TurnResult)."""
+        return TurnDiagnostics(
+            retrieval=retrieval_diagnostics,
+            stage_timings=timings,
+            critic_status=critic_status,
+            finish_reason=finish_reason,
+            warnings=warnings,
+            memory_written=memory_written,
+        )
+
+    def _controlled_failure_result(
+        self,
+        *,
+        context: LoadedTurnContext,
+        user_message: str,
+        text: str,
+        route: ModelRoute,
+        finish_reason: str | None,
+        critic_status: CriticStatus,
+        warnings: list[str],
+        timings: dict[str, float],
+        retrieval_diagnostics: TurnRetrievalDiagnostics | None,
+        on_stage: Callable[[str], None] | None,
+    ) -> TurnResult:
+        """Persist the failed turn and build its CONTROLLED_FAILURE result together, so the
+        two failure exits (actor error, repair exhausted) cannot drift apart."""
+        self._persist_controlled_failure(
+            context=context,
+            user_message=user_message,
+            text=text,
+            route=route,
+            finish_reason=finish_reason,
+            critic_status=critic_status,
+            warnings=warnings,
+            timings=timings,
+            retrieval_diagnostics=retrieval_diagnostics,
+            on_stage=on_stage,
+        )
+        return TurnResult(
+            text=text,
+            route=route,
+            finish_reason=finish_reason,
+            memory_written=False,
+            critic_status=critic_status,
+            warnings=warnings,
+            retrieval=retrieval_diagnostics,
+            stage_timings=timings,
+            outcome=TurnOutcome.CONTROLLED_FAILURE,
+        )
+
     def _persist_controlled_failure(
         self,
         *,
@@ -584,9 +624,9 @@ class TurnOrchestrator:
                 )
             self.turn_repository.update_turn_diagnostics(
                 persistence.turn.id,
-                TurnDiagnostics(
-                    retrieval=retrieval_diagnostics,
-                    stage_timings=timings,
+                self._turn_diagnostics(
+                    retrieval_diagnostics=retrieval_diagnostics,
+                    timings=timings,
                     critic_status=critic_status,
                     finish_reason=finish_reason,
                     warnings=warnings,
