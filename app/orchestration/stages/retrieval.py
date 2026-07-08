@@ -64,6 +64,11 @@ class TurnRetrievalStage:
             recent_turns=context.recent_turns,
         )
         try:
+            # Over-fetch by the standing-facts count: a durable fact pinned into the
+            # Standing-facts block also wins rerank, so it is dropped from the prompt's
+            # retrieved set (docs/22 C1, via select_retrieved_chunks_for_prompt). Fetching
+            # the extra chunks means that exclusion recovers the freed slot with a distinct
+            # fact instead of shrinking the retrieved block below budget.
             chunks, diagnostics = self._retrieve(
                 query=query,
                 lexical_query=turn_input.message,
@@ -71,7 +76,7 @@ class TurnRetrievalStage:
                 session_id=context.session.id,
                 persona_id=context.persona.id,
                 scene_id=context.session.active_scene_id,
-                top_k=self.context_budget.retrieved_chunks,
+                top_k=self.context_budget.retrieved_chunks + len(context.standing_facts),
             )
             scores = [
                 chunk.score for chunk in chunks if chunk.visibility == Visibility.PLAYER

@@ -66,6 +66,7 @@ def build_actor_messages(
     visible_chunks = select_retrieved_chunks_for_prompt(
         retrieved_chunks,
         budget=context_budget or ContextBudget(),
+        exclude_texts=standing_facts,
     )
     prompt_lines.extend(
         [
