@@ -303,10 +303,14 @@ discipline. Each carries its named validation gate in docs/22.
   the Angular 21 major (breaking); the app's LAN-only, no-auth, client-render-only posture
   (docs/18) mitigates the realistic exposure. Tracked under the Angular-upgrade note below.
 
-*Minor notes (no ID):* **Angular 19 → 21 upgrade** is now more than cosmetic — the #63 audit
-flagged `GHSA-rgjc-h3x7-9mwg` (high) against `@angular/core ≤19.2.25`, fixed only by the Angular
-21 major. Not urgent (LAN-only, no-auth, client-render-only), but it's the next real dependency
-task; do it as a deliberate major bump (re-run `ng lint`/`ng build`/`ng test` + live-smoke UI).
+*Minor notes (no ID):* **Angular 19 → 21 upgrade — DONE (2026-07-08).** `ng update` 19→20→21,
+clearing `GHSA-rgjc-h3x7-9mwg` (the #63 audit's finding; hydration DOM-clobbering against
+`@angular/core ≤19.2.25`) — confirmed gone from `npm audit`. Node 20.19.6 satisfies the Angular 21
+engines floor (`^20.19.0`); TypeScript 5.7 → 5.9.3 (CLI-driven); `angular-eslint` stayed 21.0.1; all
+`ng update` code migrations were no-ops. Verified: `ng lint` + `ng build` + 70/70 karma + a
+live-smoke UI pass (Playwright green against the real 26B + Qdrant stack). Remaining `npm audit`
+highs are `http-proxy-middleware`, a dev-server-only transitive of `@angular-devkit/build-angular`
+(never in the shipped static bundle); no non-breaking fix, left as-is.
 `make check` runs Python-only so it's a narrower gate than CI; `data/sessions/` is a git-tracked
 empty legacy dir (sessions live in SQLite now) — harmless.
 
