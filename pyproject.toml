@@ -9,11 +9,15 @@ description = "Personal RoleRAG proof of concept"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.115",
+  # Upper-bound the libraries whose next major could break the engine, matching the
+  # deliberately-capped qdrant-client below. openai already resolves to 2.x (the chat
+  # completions call the whole engine depends on); <3 guards the next major without
+  # forcing a downgrade. See docs/BACKLOG.md #59.
+  "fastapi>=0.115,<1",
   "httpx>=0.27",
-  "openai>=1.40",
-  "pydantic>=2.8",
-  "pydantic-settings>=2.4",
+  "openai>=1.40,<3",
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
   "python-dotenv>=1.0",
   "qdrant-client[fastembed]>=1.18,<2",
   "rich>=13.7",

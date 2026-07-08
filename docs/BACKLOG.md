@@ -262,12 +262,12 @@ Ordered by value. Effort S/M/L.
   validate (unavailable in this environment); `dev-up.sh` already polls `/readyz` so the primary
   dev path is covered meanwhile.
 
-- [ ] **#59** **High-risk Python deps are unbounded `>=` with no lockfile** (inconsistent with the
-  deliberately-capped `qdrant-client>=1.18,<2` and pinned `qdrant/qdrant:v1.18.1`). `openai>=1.40`
-  in particular could resolve to a 2.x with schema changes to the `chat.completions` call the whole
-  engine depends on; `pip install .` in the Dockerfile makes two builds months apart non-reproducible.
-  Fix (light): upper-bound at least `openai`, `fastapi`, `pydantic`/`pydantic-settings` — the
-  `openai` cap is worth it regardless. A full lockfile is likely YAGNI for a POC. Effort S (caps).
+- [x] **#59** **High-risk Python deps were unbounded `>=`** (inconsistent with the deliberately-capped
+  `qdrant-client>=1.18,<2`). **Shipped:** upper-bounded `fastapi<1`, `openai<3`, `pydantic<3`,
+  `pydantic-settings<3`. Note: `openai` already resolves to **2.44** and the gate is green, so `<2`
+  would have wrongly forced a downgrade — `<3` allows the tested 2.x and guards the next major.
+  Verified with `pip install --dry-run` (resolves against installed versions) + full gate. A full
+  lockfile stays YAGNI for a single-user POC.
 
 - [ ] **#62** **No frontend `lint` script.** `frontend/package.json` has `test` but no `lint`, and
   no ESLint config exists — so nothing lints the Angular/TS the way `ruff` guards the Python.
