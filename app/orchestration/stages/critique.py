@@ -63,13 +63,6 @@ class CriticEvaluatingAgent(Protocol):
         repair_instruction: str | None,
     ) -> list[LlmMessage]: ...
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]: ...
-
 
 @dataclass(frozen=True)
 class CritiqueStageResult:

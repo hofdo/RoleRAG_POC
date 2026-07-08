@@ -140,14 +140,6 @@ class AlwaysAcceptCritic:
     ) -> list[LlmMessage]:
         raise AssertionError("repair should not be used in eval fixtures")
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        raise AssertionError("repair should not be used in eval fixtures")
-
 
 class EvalLoader:
     def __init__(self, fixture: "EvalFixture") -> None:

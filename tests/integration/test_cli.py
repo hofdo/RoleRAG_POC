@@ -253,9 +253,6 @@ class FakeCritic:
     def build_local_repair_messages(self, **_: object) -> list[object]:
         raise AssertionError("repair should not be used in this test")
 
-    def build_cloud_repair_messages(self, **_: object) -> list[object]:
-        raise AssertionError("repair should not be used in this test")
-
 
 def test_cli_help_exits_successfully() -> None:
     result = runner.invoke(app, ["--help"])

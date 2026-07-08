@@ -104,27 +104,6 @@ class CriticAgent:
         messages.append(LlmMessage(role="user", content="\n".join(repair_lines)))
         return messages
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: Sequence[LlmMessage],
-        issues: Sequence[str],
-    ) -> list[LlmMessage]:
-        # Currently uncalled: TurnRepairStage.run uses build_local_repair_messages on
-        # both providers (repair route follows the session provider, not a separate
-        # cloud escalation). Kept in case cloud repair ever needs a distinct prompt.
-        repair_lines = [
-            "Rewrite the response to fix critique issues.",
-            f"Issues: {', '.join(issues) if issues else 'unspecified critique rejection'}",
-            "Stay in character.",
-            "Answer the player's action directly.",
-            "Avoid hidden or private facts unless already visible in the provided context.",
-            "Return only the revised in-character response.",
-        ]
-        messages = list(actor_messages)
-        messages.append(LlmMessage(role="user", content="\n".join(repair_lines)))
-        return messages
-
     def _build_system_prompt(self) -> str:
         return "\n".join(
             [

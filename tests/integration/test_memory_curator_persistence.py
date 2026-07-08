@@ -76,14 +76,6 @@ class FakeCritic:
     ) -> list[LlmMessage]:
         raise AssertionError("repair should not be used in this test")
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        raise AssertionError("repair should not be used in this test")
-
 
 @pytest.mark.asyncio
 async def test_turn_orchestrator_persists_memory_episodes_after_successful_turn(

@@ -280,14 +280,6 @@ class FailingCriticAgent:
     ) -> list[LlmMessage]:
         return []
 
-    def build_cloud_repair_messages(
-        self,
-        *,
-        actor_messages: list[LlmMessage],
-        issues: list[str],
-    ) -> list[LlmMessage]:
-        return []
-
 
 class FailingCurator:
     def __init__(self, error: MemoryCuratorOutputError) -> None:
@@ -358,9 +350,6 @@ class _EchoingCriticAgent:
         return self.result
 
     def build_local_repair_messages(self, **_: object) -> list[Any]:
-        return []
-
-    def build_cloud_repair_messages(self, **_: object) -> list[Any]:
         return []
 
 

@@ -222,12 +222,12 @@ Ordered by value. Effort S/M/L.
   Fix: a narrower `ReadServices`/`TurnServices` type with non-optional repos (M), or minimally
   drop the dead guards (S). Ties to #48 (both are the one-bundle-two-consumers seam).
 
-- [ ] **#56** **Dead cloud-repair path taxes ~10 test fixtures.**
-  `build_cloud_repair_messages` (`critique.py:66-71` Protocol; `critic_agent.py:107-126`,
-  self-labeled "Currently uncalled") is dead since the 2026-07-02 session-bound-provider change
-  removed cloud escalation, yet every critic double must stub it because it's in the Protocol.
-  Fix: drop from Protocol + agent + fixtures + stubs (S). Decline if a future cloud-repair prompt
-  is genuinely anticipated — but then at least pull it out of the Protocol.
+- [x] **#56** **Dead cloud-repair path taxed ~10 test fixtures.**
+  `build_cloud_repair_messages` (Protocol + `CriticAgent` impl, self-labeled "Currently
+  uncalled") was dead since the 2026-07-02 session-bound-provider change removed cloud
+  escalation, yet every critic double had to stub it because it was on the Protocol. **Shipped:**
+  removed from `CriticEvaluatingAgent` Protocol, `CriticAgent`, the eval fixture, and all 9 test
+  stubs. `TurnRepairStage` already uses `build_local_repair_messages` on both providers. Gate green.
 
 - [ ] **#57** **Small dead / duplicated code on hot classes.** `_loader_for_content_root`
   (`turn_orchestrator.py:602-603`) exactly duplicates the public `loader_for_session` and is
