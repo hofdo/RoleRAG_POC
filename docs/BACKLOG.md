@@ -229,12 +229,12 @@ Ordered by value. Effort S/M/L.
   removed from `CriticEvaluatingAgent` Protocol, `CriticAgent`, the eval fixture, and all 9 test
   stubs. `TurnRepairStage` already uses `build_local_repair_messages` on both providers. Gate green.
 
-- [ ] **#57** **Small dead / duplicated code on hot classes.** `_loader_for_content_root`
-  (`turn_orchestrator.py:602-603`) exactly duplicates the public `loader_for_session` and is
-  never called; `_build_local_route` (`:605-612`) is production code used only by one test
-  (`test_api_sessions.py:773`). And `SessionState` row-mapping is inlined twice
-  (`repositories.py:166-176`, `199-214`) instead of a `_row_to_session` helper mirroring the
-  existing `_row_to_turn`. Trivial, very low risk. Effort S.
+- [x] **#57** **Small dead / duplicated code on hot classes.** **Shipped:** removed the never-called
+  `_loader_for_content_root` (a duplicate of the public `loader_for_session`); removed
+  `_build_local_route` from `TurnOrchestrator` and inlined its `ModelRoute` construction into the
+  one test that used it (`test_api_sessions.py`); extracted a `_row_to_session` static method on
+  `SQLiteSessionRepository` (mirroring the existing `_row_to_turn`) so `get_session` and
+  `list_recent_sessions` no longer inline the same row-mapping twice. Gate green.
 
 ### Ops / DX / packaging
 

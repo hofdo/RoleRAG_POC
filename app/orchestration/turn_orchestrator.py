@@ -599,17 +599,5 @@ class TurnOrchestrator:
     def loader_for_session(self, session: SessionState) -> TurnDataLoader:
         return self.session_stage.loader_for_content_root(session.content_root)
 
-    def _loader_for_content_root(self, content_root: str) -> TurnDataLoader:
-        return self.session_stage.loader_for_content_root(content_root)
-
-    def _build_local_route(self, *, reason: str) -> ModelRoute:
-        return ModelRoute(
-            provider=ModelProviderName.LOCAL,
-            model=self.config.local_model,
-            max_tokens=self.config.local_max_tokens,
-            temperature=self.config.local_temperature,
-            reason=reason,
-        )
-
 
 __all__ = ["CONTROLLED_FAILURE_TEXT", "TurnOrchestrator"]

@@ -158,22 +158,7 @@ class SQLiteSessionRepository:
         ).fetchone()
         if row is None:
             return None
-        provider = (
-            ModelProviderName(row["provider"])
-            if "provider" in row.keys()
-            else ModelProviderName.LOCAL
-        )
-        return SessionState(
-            id=row["id"],
-            world_id=row["world_id"],
-            active_scene_id=row["active_scene_id"],
-            active_persona_id=row["active_persona_id"],
-            player_name=row["player_name"],
-            content_root=row["content_root"],
-            provider=provider,
-            created_at=parse_datetime(row["created_at"]),
-            updated_at=parse_datetime(row["updated_at"]),
-        )
+        return self._row_to_session(row)
 
     def list_recent_sessions(self, limit: int) -> list[SessionState]:
         if limit <= 0:
@@ -196,24 +181,26 @@ class SQLiteSessionRepository:
             """,
             (limit,),
         ).fetchall()
-        return [
-            SessionState(
-                id=row["id"],
-                world_id=row["world_id"],
-                active_scene_id=row["active_scene_id"],
-                active_persona_id=row["active_persona_id"],
-                player_name=row["player_name"],
-                content_root=row["content_root"],
-                provider=(
-                    ModelProviderName(row["provider"])
-                    if "provider" in row.keys()
-                    else ModelProviderName.LOCAL
-                ),
-                created_at=parse_datetime(row["created_at"]),
-                updated_at=parse_datetime(row["updated_at"]),
-            )
-            for row in rows
-        ]
+        return [self._row_to_session(row) for row in rows]
+
+    @staticmethod
+    def _row_to_session(row: sqlite3.Row) -> SessionState:
+        return SessionState(
+            id=row["id"],
+            world_id=row["world_id"],
+            active_scene_id=row["active_scene_id"],
+            active_persona_id=row["active_persona_id"],
+            player_name=row["player_name"],
+            content_root=row["content_root"],
+            # provider column is absent on legacy DBs written before session-bound routing.
+            provider=(
+                ModelProviderName(row["provider"])
+                if "provider" in row.keys()
+                else ModelProviderName.LOCAL
+            ),
+            created_at=parse_datetime(row["created_at"]),
+            updated_at=parse_datetime(row["updated_at"]),
+        )
 
     def update_session_activity(self, session_id: str, *, updated_at: datetime) -> None:
         cursor = self.connection.execute(

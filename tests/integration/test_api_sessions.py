@@ -13,7 +13,7 @@ from app.composition import AppServices
 from app.config import Settings, get_settings
 from app.domain import PersonaCard, SceneState, SessionState
 from app.llm.provider import LlmProvider
-from app.llm.router import CloudMode
+from app.llm.router import CloudMode, ModelProviderName, ModelRoute
 from app.main import app
 from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
@@ -770,7 +770,13 @@ def test_get_session_returns_recent_turns_without_private_state(tmp_path: Path) 
         persona_id=session.active_persona_id,
         user_message="What do you know about the locked door?",
         assistant_message="Only that it has not opened in years.",
-        route=services.orchestrator._build_local_route(reason="default local route"),
+        route=ModelRoute(
+            provider=ModelProviderName.LOCAL,
+            model=services.orchestrator.config.local_model,
+            max_tokens=services.orchestrator.config.local_max_tokens,
+            temperature=services.orchestrator.config.local_temperature,
+            reason="default local route",
+        ),
     )
     services.close()
     app.dependency_overrides[get_read_services] = lambda: _build_services(tmp_path)
