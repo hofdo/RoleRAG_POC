@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-08 @ 5293417
+> Reviewed: 2026-07-08 @ 0c11c29
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -145,11 +145,13 @@ Ordered by value. Effort S/M/L.
 Qdrant readiness-gate needs a live Docker daemon to validate the probe). Deferred with rationale:
 **#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split),
 **#60** (needs a fake-provider ASGI server for a real e2e). The **RAG-core items** in
-[docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings)
-(C1/N1/C2/N2/N3) are intentionally **not** implemented here: they change retrieval/memory quality,
-which the measure-first invariant says to validate on **live-smoke** or the **P0.4 graded corpus**
-(neither available offline, no model) — shipping them blind would violate the repo's own
-discipline. Each carries its named validation gate in docs/22.
+[docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings):
+the two highest-value, **C1** (standing-facts double-spend) and **N1** (write-dedup framing
+inflation), are now **shipped** (`64db602`, `0c11c29`) — validated on a live 26B + Qdrant
+live-smoke (zero recall/extraction/retrieval-selection regression) plus byte-level unit tests,
+honoring the measure-first invariant. **C2/N2/N3** remain deferred (lower value; C2/N3 ride along
+with long-campaign P2.2, N2 waits for German play) and each carries its named validation gate in
+docs/22.
 
 ### Correctness — do first
 
