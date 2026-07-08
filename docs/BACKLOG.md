@@ -280,15 +280,20 @@ Ordered by value. Effort S/M/L.
   intentionally-unused convention. Verified `ng lint` clean, `ng build` clean, and all 70 SPA unit
   tests green.
 
-- [ ] **#63** **No dependency-vulnerability surface** (no `dependabot.yml`, no `pip-audit`/`npm
-  audit` step). The app binds `0.0.0.0` with no auth by design (docs/18), so a transitive CVE in
-  the HTTP stack is the realistic threat. Fix: a **non-blocking** `pip-audit` + `npm audit`
-  advisory step. Effort S. Most likely declined under personal-use scope + advisory noise from
-  dev-deps; listed for completeness. Lowest value of the set.
+- [x] **#63** **No dependency-vulnerability surface.** **Shipped:** a **non-blocking** `audit` CI
+  job (`continue-on-error: true`) running `pip-audit` + `npm audit --omit=dev` — advisory only,
+  never gates a merge. It already earned its keep: `pip-audit` is clean, but `npm audit` surfaced
+  a **high-severity Angular advisory** (`GHSA-rgjc-h3x7-9mwg`, hydration DOM-clobbering /
+  response-cache poisoning, affecting `@angular/core ≤19.2.25` — this SPA is on 19.2). Its fix is
+  the Angular 21 major (breaking); the app's LAN-only, no-auth, client-render-only posture
+  (docs/18) mitigates the realistic exposure. Tracked under the Angular-upgrade note below.
 
-*Minor notes (no ID):* Angular 19 is one major behind (thin client, no urgency — flag on next
-dep sweep); `make check` runs Python-only so it's a narrower gate than CI (ties to #52);
-`data/sessions/` is a git-tracked empty legacy dir (sessions live in SQLite now) — harmless.
+*Minor notes (no ID):* **Angular 19 → 21 upgrade** is now more than cosmetic — the #63 audit
+flagged `GHSA-rgjc-h3x7-9mwg` (high) against `@angular/core ≤19.2.25`, fixed only by the Angular
+21 major. Not urgent (LAN-only, no-auth, client-render-only), but it's the next real dependency
+task; do it as a deliberate major bump (re-run `ng lint`/`ng build`/`ng test` + live-smoke UI).
+`make check` runs Python-only so it's a narrower gate than CI; `data/sessions/` is a git-tracked
+empty legacy dir (sessions live in SQLite now) — harmless.
 
 ## Not doing (personal-use scope)
 
