@@ -144,8 +144,9 @@ Ordered by value. Effort S/M/L.
 #53, #54, #56, #57, #58, #59, #61, #62, #63, #64** (15, **#58** completed 2026-07-08: Qdrant
 `/readyz` healthcheck over bash `/dev/tcp` + `service_healthy` gate, validated on a live daemon).
 Deferred with rationale:
-**#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split),
-**#60** (needs a fake-provider ASGI server for a real e2e). The **RAG-core items** in
+**#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split).
+**#60** since **shipped 2026-07-08** (fake-provider ASGI contract app + Playwright spec in CI).
+The **RAG-core items** in
 [docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings):
 the two highest-value, **C1** (standing-facts double-spend) and **N1** (write-dedup framing
 inflation), are now **shipped** (`64db602`, `0c11c29`) — validated on a live 26B + Qdrant
@@ -196,17 +197,18 @@ docs/22.
   copy-on-load (caller mutation can't corrupt the mirror), append growth (incl. the not-cached
   no-op), and the consolidation→invalidate→reload sequence. Gate green (+5 tests).
 
-- [ ] **#60** **No deterministic frontend↔backend contract test.** *(Deferred — the one item from
-  this review not landed; it needs infrastructure that doesn't exist yet.)* A true e2e requires a
-  **fake-provider ASGI server** the SPA can hit over real HTTP — `app.main:app` composes real
-  providers, and the existing API tests inject fakes via in-process `TestClient.dependency_overrides`,
-  which Playwright can't drive. Building that server + Playwright wiring is real work, and the
-  browser-sandbox friction seen while doing #62 (Chrome needs `--no-sandbox` as root) adds CI risk.
-  The lighter "schema-contract snapshot" alternative substantially overlaps the response-shape
-  assertions already in `test_api_turns.py` / `test_api_sessions.py`. **Recommended build:** a small
-  `app.diagnostics` fake-provider ASGI entrypoint (reuse the `smoke-run` fake stack +
-  `InMemoryVectorStore`), started as a CI background service, with a Playwright spec that loads a
-  session and asserts the rendered turn — no model needed. Left for a dedicated pass.
+- [x] **#60** **No deterministic frontend↔backend contract test.** **Shipped.** Added
+  `app/diagnostics/contract_app.py`: it serves the *real* `app.main:app` (real routes, error
+  handlers, SPA mount) but overrides the `get_read_services`/`get_turn_services` dependencies with
+  an in-process fake stack — the `smoke_runner` `SmokeTestProvider` over a throwaway SQLite file,
+  no model, no Qdrant, no retriever (the turn pipeline is fail-open on retrieval and the fake
+  returns canned actor text regardless). `dependency_overrides` drives fakes over *real* HTTP, which
+  the in-process `TestClient` approach couldn't do for Playwright. A new `tests/e2e/spa-contract.spec.mjs`
+  (npm `test:e2e-contract`) loads the real SPA, creates a session, runs a turn, and asserts the
+  fake provider's fixed line renders verbatim — the deterministic contract, ~0.5s vs the live
+  spec's ~18s. Wired into the `deterministic` CI job as a background-service step (Playwright's
+  bundled Chromium, no `--no-sandbox` friction on the non-root runner). Verified locally: spec green
+  against `uvicorn app.diagnostics.contract_app:app`.
 
 - [x] **#61** **No coverage measurement.** **Shipped:** added `pytest-cov` (dev extra) +
   `[tool.coverage.run]` config, a `make coverage` target, and `--cov=app --cov-report=term-missing`

@@ -64,6 +64,26 @@ jobs:
         run: npm test -- --watch=false --browsers=ChromeHeadless
         working-directory: frontend
 
+      - name: Install root e2e dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Contract e2e (frontend<->backend, fake provider, no model)
+        # Deterministic contract test (#60): the real Angular SPA (built above) drives
+        # the fake-provider ASGI app over real HTTP -- no model, no Qdrant. Catches
+        # frontend<->backend request/response drift that in-process API tests can't.
+        run: |
+          python -m uvicorn app.diagnostics.contract_app:app --host 127.0.0.1 --port 18099 &
+          uvicorn_pid=$!
+          trap 'kill "$uvicorn_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -sf http://127.0.0.1:18099/runtime/status >/dev/null && break
+            sleep 1
+          done
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:18099 npm run test:e2e-contract
+
       - name: Run deterministic eval summary
         run: python -m app.evals.regression_runner
 

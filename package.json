@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:e2e-spa": "playwright test tests/e2e/spa-play.spec.mjs --project=chromium"
+    "test:e2e-spa": "playwright test tests/e2e/spa-play.spec.mjs --project=chromium",
+    "test:e2e-contract": "playwright test tests/e2e/spa-contract.spec.mjs --project=chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"
