@@ -140,6 +140,17 @@ invisible to the deterministic suite) live-smoke before claiming success, docs m
 
 Ordered by value. Effort S/M/L.
 
+**Status (worked through 2026-07-08).** Shipped and gate-verified: **#48, #49, #50, #51, #52,
+#53, #54, #56, #57, #59, #61, #62, #63, #64** (14). Partial: **#58** (restart policies shipped;
+Qdrant readiness-gate needs a live Docker daemon to validate the probe). Deferred with rationale:
+**#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split),
+**#60** (needs a fake-provider ASGI server for a real e2e). The **RAG-core items** in
+[docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings)
+(C1/N1/C2/N2/N3) are intentionally **not** implemented here: they change retrieval/memory quality,
+which the measure-first invariant says to validate on **live-smoke** or the **P0.4 graded corpus**
+(neither available offline, no model) — shipping them blind would violate the repo's own
+discipline. Each carries its named validation gate in docs/22.
+
 ### Correctness — do first
 
 - [x] **#48** *(bug)* **CLI is a second composition root that has drifted from the API.**
@@ -182,13 +193,17 @@ Ordered by value. Effort S/M/L.
   copy-on-load (caller mutation can't corrupt the mirror), append growth (incl. the not-cached
   no-op), and the consolidation→invalidate→reload sequence. Gate green (+5 tests).
 
-- [ ] **#60** **No deterministic frontend↔backend contract test.** The only browser test
-  (`tests/e2e/spa-play.spec.mjs`) needs a real model + full stack and runs *only* in
-  `live-smoke.yml` (self-hosted). `ci.yml` runs `ng test` with mocked HTTP. A backend schema
-  rename (turn-detail payload, `DeleteLastTurnResponse`, SSE frame shape) that breaks the Angular
-  client compiles clean, passes `ng test`, and only surfaces in a manual/weekly GPU run. Fix: a
-  Playwright (or lighter schema-contract) run against FastAPI wired with fake providers +
-  `InMemoryVectorStore` (the `smoke-run` stack — no model needed). Effort M.
+- [ ] **#60** **No deterministic frontend↔backend contract test.** *(Deferred — the one item from
+  this review not landed; it needs infrastructure that doesn't exist yet.)* A true e2e requires a
+  **fake-provider ASGI server** the SPA can hit over real HTTP — `app.main:app` composes real
+  providers, and the existing API tests inject fakes via in-process `TestClient.dependency_overrides`,
+  which Playwright can't drive. Building that server + Playwright wiring is real work, and the
+  browser-sandbox friction seen while doing #62 (Chrome needs `--no-sandbox` as root) adds CI risk.
+  The lighter "schema-contract snapshot" alternative substantially overlaps the response-shape
+  assertions already in `test_api_turns.py` / `test_api_sessions.py`. **Recommended build:** a small
+  `app.diagnostics` fake-provider ASGI entrypoint (reuse the `smoke-run` fake stack +
+  `InMemoryVectorStore`), started as a CI background service, with a Playwright spec that loads a
+  session and asserts the rendered turn — no model needed. Left for a dedicated pass.
 
 - [x] **#61** **No coverage measurement.** **Shipped:** added `pytest-cov` (dev extra) +
   `[tool.coverage.run]` config, a `make coverage` target, and `--cov=app --cov-report=term-missing`
