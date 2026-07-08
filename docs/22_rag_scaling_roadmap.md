@@ -1,12 +1,14 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-08 @ 5293417
+> Reviewed: 2026-07-08 @ 0c11c29
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
 > (consolidation age guard; pinned-canon ↔ retrieved-chunk double-spend) and added three new
 > findings — all folded into
-> [§ 2026-07-08 review](#2026-07-08-review-confirmations--new-findings) below. Engine-quality,
+> [§ 2026-07-08 review](#2026-07-08-review-confirmations--new-findings) below. **The two
+> highest-value findings, C1 and N1, are now shipped** (`64db602`, `0c11c29`; byte-tested +
+> live-smoke no-regression) — see their subsections. Engine-quality,
 > test, and ops recommendations from the same review live in
 > [docs/BACKLOG.md](BACKLOG.md#review-2026-07-08--engine-quality-testing-ops).
 >
@@ -378,6 +380,13 @@ rest are gated on the **P0.4 graded corpus** and/or live-smoke, per the measure-
 
 ### C1 — Standing-facts ↔ retrieved-chunk double-spend now *displaces* distinct facts (confirmed, promote)
 
+> **Shipped 2026-07-08 (`64db602`).** `select_retrieved_chunks_for_prompt` now excludes
+> chunks whose normalized text matches a standing fact, and `TurnRetrievalStage` over-fetches
+> `top_k + len(standing_facts)` so the freed slot is recovered. Byte-identical when there are
+> no standing facts; slot-recovery is unit-tested byte-for-byte. Live-smoke (8-turn) showed
+> zero `retrieval_selection_misses` / `retrieval_miss_ranks` regression. Full distinct-fact-count
+> gain awaits the **P0.4** graded corpus (not yet built).
+
 Confirms the unverified "pinned-canon + retrieved-chunk duplication" candidate, and adds the
 mechanism that makes it a **recall** regression, not just token waste. A durable,
 high-importance PLAYER memory tagged `promise`/`rule`/`agreement` is pinned verbatim into the
@@ -411,6 +420,14 @@ meant for scale. **Fix:** min-age param + batch-size cap on `select_consolidatab
 default already; validate on the P2.2 long live-smoke run; byte-identical when `threshold==0`.
 
 ### N1 — Write-dedup false-drops distinct durable facts, and the extractor's own framing prefix inflates the ratio (new)
+
+> **Shipped 2026-07-08 (`0c11c29`).** Took the cheapest of the three listed fixes: strip the
+> constant `The player stated:` framing before computing coverage terms (candidate + each
+> existing summary). The stored summary is unchanged; a no-op for model/author summaries. Unit
+> tests prove a framing-only false-drop now writes and an identical framed fact still dedups (no
+> new false-writes). Live-smoke (8-turn) showed zero `memory_extraction_misses` regression. If
+> the **P0.4** adversarial-distractor subset (once built) still shows residual false-drops, escalate
+> to rare-term weighting or a threshold bump.
 
 `is_covered_by_summaries` (`deterministic_extractor.py:112-132`, `COVERAGE_THRESHOLD = 0.5`,
 consumed by write-dedup at `memory.py:168` and `memory_dedup.py:50`) drops a new candidate when
@@ -457,7 +474,8 @@ priority than C1/N1 — do alongside P2.2.
 
 ### Triage
 
-Do first (small, high value, both recall losses on the highest-value facts): **C1**, **N1**.
+~~Do first (small, high value, both recall losses on the highest-value facts): **C1**, **N1**.~~
+**C1 + N1 shipped 2026-07-08** (`64db602`, `0c11c29`) — byte-tested + live-smoke no-regression.
 Do when German play lands: **N2**. Do alongside long-campaign P2.2 work: **C2**, then **N3**.
 
 ## Explicitly not proposed (decision record honored)
