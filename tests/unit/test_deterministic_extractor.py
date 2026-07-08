@@ -170,3 +170,20 @@ def test_reversal_present_in_both_summaries_is_still_covered() -> None:
         "Mira no longer trusts the player",
         ["Mira no longer trusts the player and revoked the safehouse offer"],
     )
+
+
+def test_framing_prefix_does_not_false_drop_distinct_facts() -> None:
+    # docs/22 N1: the extractor wraps every candidate in `The player stated: "..."`,
+    # injecting shared {player, stated} terms. Two unrelated facts share ONLY that
+    # framing (0.5 overlap -> dropped before the fix); stripping the framing before
+    # the coverage math leaves 0 real overlap, so the distinct fact is written.
+    assert not is_covered_by_summaries(
+        'The player stated: "The password is oak."',
+        ['The player stated: "The signal is three taps."'],
+    )
+
+
+def test_framing_prefix_still_dedups_identical_framed_fact() -> None:
+    # No new false-writes: an identical framed fact still dedups after stripping.
+    fact = 'The player stated: "I promise to guard the northern gate."'
+    assert is_covered_by_summaries(fact, [fact])

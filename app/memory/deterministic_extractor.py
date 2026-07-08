@@ -17,6 +17,13 @@ from app.rag.ranking import content_terms
 DETERMINISTIC_EVENT_IMPORTANCE = 4
 COVERAGE_THRESHOLD = 0.5
 
+# Constant framing every deterministic candidate is wrapped in. Kept verbatim in
+# the stored summary (it keeps the exact event keys retrievable by the lexical
+# boost), but stripped before coverage-term math: otherwise the shared
+# {player, stated} vocabulary inflates every write-dedup overlap toward the drop
+# threshold and false-drops distinct facts (docs/22 N1).
+_FRAMING_LEAD = "The player stated:"
+
 _REVERSAL_MARKERS = re.compile(
     r"\b(?:not|never|no\s+longer|stopped|refused?|betray(?:ed|s)?|broke|broken"
     r"|revoked?|withdrew|withdrawn|abandoned|died|dead|ended)\b",
@@ -98,7 +105,7 @@ def extract_explicit_durable_events(
             MemoryCandidate(
                 # Verbatim sentence keeps the exact event keys retrievable by
                 # the lexical ranking boost.
-                summary=f'The player stated: "{sentence}"',
+                summary=f'{_FRAMING_LEAD} "{sentence}"',
                 visibility=Visibility.PLAYER,
                 importance=DETERMINISTIC_EVENT_IMPORTANCE,
                 tags=tags,
@@ -109,6 +116,18 @@ def extract_explicit_durable_events(
     return candidates
 
 
+def _strip_framing(summary: str) -> str:
+    """Drop the constant `The player stated:` framing (and its wrapping quotes) so
+    coverage terms reflect the event, not the shared framing vocabulary (docs/22 N1).
+    A no-op for model-curated or author summaries, which carry no such prefix."""
+    text = summary.strip()
+    if text.lower().startswith(_FRAMING_LEAD.lower()):
+        text = text[len(_FRAMING_LEAD) :].strip()
+        if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+            text = text[1:-1].strip()
+    return text
+
+
 def is_covered_by_summaries(
     candidate_summary: str,
     summaries: Sequence[str],
@@ -116,12 +135,12 @@ def is_covered_by_summaries(
     threshold: float = COVERAGE_THRESHOLD,
 ) -> bool:
     """True when an existing summary already carries most of the candidate's terms."""
-    candidate_terms = content_terms(candidate_summary)
+    candidate_terms = content_terms(_strip_framing(candidate_summary))
     if not candidate_terms:
         return True
     candidate_markers = _reversal_markers(candidate_summary)
     for summary in summaries:
-        overlap = len(candidate_terms & content_terms(summary))
+        overlap = len(candidate_terms & content_terms(_strip_framing(summary)))
         if overlap / len(candidate_terms) < threshold:
             continue
         # A reversal marker present in the candidate but absent from the covering
