@@ -328,14 +328,13 @@ P1.1/P1.2 land and P0.4 shows remaining headroom. fastembed 0.8.0 verified candi
 
 ## Verified small fixes (do anytime)
 
-- **Tags-filter parity divergence (verified first-hand).** `InMemoryVectorStore` requires a
-  chunk to carry **all** filter tags (`issubset`,
-  [vector_store.py:386-387](../app/rag/vector_store.py)) while Qdrant matches **any**
-  (`MatchAny`, [vector_store.py:359-365](../app/rag/vector_store.py)). Actor retrieval
-  never sets `tags`, so gameplay is unaffected — but any future tag-scoped feature would
-  pass deterministic tests and behave differently live. Pick one semantic (AND is the safer
-  read of the in-memory intent), implement it in both stores, and pin it with a
-  paired-store test. Effort S. — [ ]
+- **Tags-filter parity divergence (verified first-hand).** `InMemoryVectorStore` required a
+  chunk to carry **all** filter tags (`issubset`) while Qdrant matched **any** (`MatchAny`).
+  Actor retrieval never sets `tags`, so gameplay was unaffected — but any future tag-scoped
+  feature would pass deterministic tests and behave differently live. **Done 2026-07-08**
+  (BACKLOG #50): Qdrant now ANDs tags (one `MatchValue` per tag), and
+  `tests/unit/test_vector_store_parity.py` pins parity across *every* filter dimension through
+  both stores (Qdrant via embedded `:memory:` local mode). — [x]
 
 ## Unverified candidates from the 2026-07-07 sweep (verify before building)
 

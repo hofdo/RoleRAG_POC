@@ -164,15 +164,15 @@ Ordered by value. Effort S/M/L.
 
 ### Testing & verification
 
-- [ ] **#50** **No paired InMemory↔Qdrant vector-store parity harness** (guards the visibility
-  boundary, invariant #2). `app/rag/vector_store.py` maintains two filter implementations by hand
-  — `_chunk_matches_filters` (`:375`, in-memory) and `_build_qdrant_filter` (`:321`, Qdrant) —
-  and `tests/unit/test_vector_store.py` tests each store *separately with different fixtures*.
-  They already diverge (tags: `issubset`/AND in-memory vs `MatchAny`/ANY in Qdrant, `:386` vs
-  `:363`). No test runs one fixture set through both `.search()` paths asserting identical
-  filtering. docs/22 proposes a tags-only paired test; the higher-value move is a **parametrized
-  parity harness** over every filter dimension (visibility, world, scene, persona, session) so a
-  future hybrid/sparse leg that forgets `query_filter` can't silently break scoping. Effort S–M.
+- [x] **#50** **No paired InMemory↔Qdrant vector-store parity harness** (guards the visibility
+  boundary, invariant #2). The two hand-written filter impls (`_chunk_matches_filters`,
+  `_build_qdrant_filter`) diverged on tags — `issubset`/AND in-memory vs `MatchAny`/OR in Qdrant.
+  **Shipped:** `tests/unit/test_vector_store_parity.py` runs one fixture set through *both*
+  `.search()` paths (Qdrant via an embedded `QdrantClient(":memory:")` local-mode client, so the
+  real matcher runs) across every filter dimension — visibility, world, scene, persona, session,
+  single tag, two-tag AND, absent tag, combined, and match-nothing — asserting identical id sets.
+  The Qdrant tags filter is now AND (one `MatchValue` per tag) to match the in-memory intent.
+  This subsumes the docs/22 "Verified small fixes" tags item. Gate green (+12 tests).
 
 - [ ] **#51** **`SessionSummaryCache` invalidate/copy semantics only indirectly covered.**
   `grep invalidate tests/` is empty. Nothing asserts (a) `load()` returns a copy (a caller
