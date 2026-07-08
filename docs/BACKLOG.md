@@ -272,10 +272,13 @@ Ordered by value. Effort S/M/L.
   Verified with `pip install --dry-run` (resolves against installed versions) + full gate. A full
   lockfile stays YAGNI for a single-user POC.
 
-- [ ] **#62** **No frontend `lint` script.** `frontend/package.json` has `test` but no `lint`, and
-  no ESLint config exists — so nothing lints the Angular/TS the way `ruff` guards the Python.
-  Fix: add `ng lint` (Angular ESLint) + a `lint` script; optionally wire into CI (#52) and
-  `make check`. Effort S. Low priority — thin-client by design.
+- [x] **#62** **No frontend `lint` script.** Nothing linted the Angular/TS the way `ruff` guards
+  the Python. **Shipped:** `ng add angular-eslint` (flat `eslint.config.js`, `npm run lint`
+  target) + a `Lint SPA` CI step. Fixed the 9 findings it surfaced — a genuinely unused import and
+  a no-op test expression (both real), an `Array<T>`→`T[]` style nit, and the SSE payload typed
+  `any`→`unknown` with per-branch casts; configured `no-unused-vars` to honor the `^_`
+  intentionally-unused convention. Verified `ng lint` clean, `ng build` clean, and all 70 SPA unit
+  tests green.
 
 - [ ] **#63** **No dependency-vulnerability surface** (no `dependabot.yml`, no `pip-audit`/`npm
   audit` step). The app binds `0.0.0.0` with no auth by design (docs/18), so a transitive CVE in

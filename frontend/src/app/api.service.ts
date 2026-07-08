@@ -70,7 +70,7 @@ async function requestJson<T>(
 function applyEvent(
   result: TurnResult,
   eventName: string,
-  payload: any,
+  payload: unknown,
   onStage?: (stage: string) => void,
 ): boolean {
   if (eventName === 'stage') {
@@ -82,21 +82,22 @@ function applyEvent(
     throw new ApiError(p.code ?? 'stream_error', p.message ?? 'Turn failed.', p.status ?? 502);
   }
   if (eventName === 'text') {
-    result.text += payload.text;
+    result.text += (payload as { text: string }).text;
     return false;
   }
   if (eventName === 'final' || eventName === 'failure') {
+    const p = payload as TurnResult;
     if (eventName === 'failure') {
-      result.text = payload.text;
+      result.text = p.text;
     }
     result.status = 'completed';
-    result.route = payload.route;
-    result.finish_reason = payload.finish_reason ?? null;
-    result.memory_written = payload.memory_written;
-    result.critic_status = payload.critic_status;
-    result.warnings = payload.warnings;
-    result.retrieval = payload.retrieval ?? null;
-    result.stage_timings = payload.stage_timings;
+    result.route = p.route;
+    result.finish_reason = p.finish_reason ?? null;
+    result.memory_written = p.memory_written;
+    result.critic_status = p.critic_status;
+    result.warnings = p.warnings;
+    result.retrieval = p.retrieval ?? null;
+    result.stage_timings = p.stage_timings;
     return true;
   }
   return false;

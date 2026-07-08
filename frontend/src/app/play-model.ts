@@ -17,7 +17,6 @@ import type {
   SessionMemoriesResponse,
   SessionTurnDetailsResponse,
   StageTimings,
-  TurnResult,
 } from './models';
 
 export const SESSION_DEFAULTS = Object.freeze({

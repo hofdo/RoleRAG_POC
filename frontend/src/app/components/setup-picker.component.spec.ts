@@ -66,7 +66,7 @@ function make(): { fixture: ReturnType<typeof TestBed.createComponent<SetupPicke
 describe('SetupPickerComponent', () => {
   it('loads recent sessions on construction', async () => {
     const { fixture, store } = make();
-    fixture.componentInstance;
+    expect(fixture.componentInstance).toBeTruthy();
     await Promise.resolve();
     await Promise.resolve();
 
