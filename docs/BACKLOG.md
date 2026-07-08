@@ -174,13 +174,13 @@ Ordered by value. Effort S/M/L.
   The Qdrant tags filter is now AND (one `MatchValue` per tag) to match the in-memory intent.
   This subsumes the docs/22 "Verified small fixes" tags item. Gate green (+12 tests).
 
-- [ ] **#51** **`SessionSummaryCache` invalidate/copy semantics only indirectly covered.**
-  `grep invalidate tests/` is empty. Nothing asserts (a) `load()` returns a copy (a caller
-  mutating the dedup list can't corrupt the cached mirror) or (b) consolidation's
-  `invalidate()` (`memory_consolidation.py:121`) forces a reload. If either broke, write-dedup
-  would compare against a stale summary set and silently drop legitimate memories or keep
-  duplicates — a recall-affecting path. Fix: a focused unit test on the three methods incl. the
-  consolidation→invalidate→reload sequence. Effort S.
+- [x] **#51** **`SessionSummaryCache` invalidate/copy semantics only indirectly covered.**
+  Nothing asserted (a) `load()` returns a copy or (b) consolidation's `invalidate()` forces a
+  reload — either breaking would make write-dedup compare against a stale/mutated summary set and
+  silently drop memories or keep duplicates. **Shipped:**
+  `tests/unit/orchestration/stages/test_session_summary_cache.py` covers load-once-then-cache,
+  copy-on-load (caller mutation can't corrupt the mirror), append growth (incl. the not-cached
+  no-op), and the consolidation→invalidate→reload sequence. Gate green (+5 tests).
 
 - [ ] **#60** **No deterministic frontend↔backend contract test.** The only browser test
   (`tests/e2e/spa-play.spec.mjs`) needs a real model + full stack and runs *only* in
