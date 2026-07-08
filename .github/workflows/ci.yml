@@ -41,10 +41,19 @@ jobs:
         run: mypy .
 
       - name: Test Python
-        run: pytest
+        # Coverage is report-only (no threshold gate); it surfaces which branches the
+        # suite exercises. See pyproject [tool.coverage.run] and `make coverage`.
+        run: pytest --cov=app --cov-report=term-missing
 
       - name: Install SPA dependencies
         run: npm ci
+        working-directory: frontend
+
+      - name: Build SPA
+        # ng build runs strict template type-checking and enforces the bundle budget —
+        # neither of which `ng test` (Karma units) can catch. Docker/dev-up build the SPA
+        # too, so this is known-green; it keeps a build-breaking regression out of a merge.
+        run: npx ng build
         working-directory: frontend
 
       - name: Test SPA

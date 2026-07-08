@@ -1,7 +1,7 @@
 # RoleRAG — common tasks. Run `make` or `make help` for the list.
 # Thin wrappers over the documented commands; no logic lives here.
 .DEFAULT_GOAL := help
-.PHONY: help up down dev dev-down install check lint type test smoke
+.PHONY: help up down dev dev-down install check lint type test coverage smoke
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -32,6 +32,9 @@ type: ## Mypy strict type-check
 
 test: ## Run the Python test suite
 	.venv/bin/pytest
+
+coverage: ## Run the test suite with a report-only coverage summary (not a gate)
+	.venv/bin/pytest --cov=app --cov-report=term-missing
 
 smoke: ## Deterministic offline end-to-end smoke
 	.venv/bin/python -m app.cli smoke-run

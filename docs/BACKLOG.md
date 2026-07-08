@@ -190,12 +190,11 @@ Ordered by value. Effort S/M/L.
   Playwright (or lighter schema-contract) run against FastAPI wired with fake providers +
   `InMemoryVectorStore` (the `smoke-run` stack — no model needed). Effort M.
 
-- [ ] **#61** **No coverage measurement.** No `pytest-cov`/`coverage` in `pyproject.toml` or CI;
-  which branches the ~69 test files exercise is invisible. #49/#51 are exactly the blind spots a
-  report surfaces (mocked-but-unasserted safety net; uncovered `invalidate`), as are the
-  intentional `except Exception` fail-open seams that could lose their one test unnoticed. Fix:
-  `pytest-cov` + `--cov=app`, **report-only** (no hard gate — the per-branch report is the value,
-  not a threshold number). Effort S.
+- [x] **#61** **No coverage measurement.** **Shipped:** added `pytest-cov` (dev extra) +
+  `[tool.coverage.run]` config, a `make coverage` target, and `--cov=app --cov-report=term-missing`
+  on CI's Python test step — **report-only**, no threshold gate. Baseline is 91% line / branch.
+  The config pins `core = "sysmon"` (Python 3.12 sys.monitoring) because coverage's default C
+  tracer collides with numpy's C extension under fastembed ("cannot load module more than once").
 
 - [ ] **#64** **WAL cross-process concurrency asserted only by pragma value.**
   `tests/unit/test_sqlite.py:178` checks `journal_mode=WAL` + `busy_timeout=5000` are *set*, but
@@ -244,12 +243,11 @@ Ordered by value. Effort S/M/L.
   `data/rolerag.db-wal`, `data/rolerag.db-shm`, and `data/backups` so a `docker build` on a
   machine that has run the app or `rolerag backup` no longer bakes roleplay history into a layer.
 
-- [ ] **#52** **Frontend is unit-tested in CI but never type-checked or built there.** `ci.yml`
-  runs `ng test` only; strict template type-checking and the 1 MB bundle budget fire only at
-  `ng build`. A template type error or broken `@Input` passes CI green and surfaces later as
-  `dev-up.sh` "API runs without a UI" (`dev-up.sh:96-100`). Fix: add `npx ng build` (or at least
-  `tsc -p tsconfig.app.json --noEmit`) to CI — already known-green via Docker/dev-up, ~30–60 s.
-  Not a matrix expansion, so not in tension with the docs/10 CI-scope guardrail. Effort S.
+- [x] **#52** **Frontend was unit-tested in CI but never type-checked or built there.** `ci.yml`
+  ran `ng test` only; strict template type-checking and the bundle budget fire only at `ng build`.
+  **Shipped:** added a `Build SPA` (`npx ng build`) step to `ci.yml`; verified the build is green
+  locally (Angular 19, ~8 s). Refreshed the stale `frontend/README.md` note that said CI doesn't
+  build.
 
 - [~] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
   `app` had a healthcheck but `qdrant` had none and `app.depends_on: [qdrant]` waits only for

@@ -43,7 +43,8 @@ npm test           # Karma unit tests (CI runs: npm test -- --watch=false --brow
 is a plain `npx ng build` (the `/app/` baseHref is pinned in [angular.json](angular.json));
 `make dev` and the Dockerfile run it — output lands in `dist/frontend/browser`, which
 `app/main.py` mounts at `/app` with a deep-link fallback so client-side routes survive a hard
-refresh. CI runs the Karma tests but does not build the bundle.
+refresh. CI runs the Karma tests **and** `ng build` (the build catches strict template type
+errors and bundle-budget breaches that the unit tests can't).
 
 The end-to-end test lives at the repo root ([tests/e2e/spa-play.spec.mjs](../tests/e2e/spa-play.spec.mjs)):
 `PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 npm run test:e2e-spa` (needs the full stack + model).
