@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from app.persistence.sqlite import connect_sqlite, initialize_database
+
+
+def _insert_session(connection: sqlite3.Connection, session_id: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO sessions
+            (id, world_id, active_scene_id, active_persona_id, player_name, created_at, updated_at)
+        VALUES (?, 'w', 'sc', 'p', 'player', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """,
+        (session_id,),
+    )
 
 
 def test_initialize_database_creates_sessions_turns_and_memory_tables(tmp_path: Path) -> None:
@@ -182,3 +195,59 @@ def test_connect_sqlite_enables_wal_and_busy_timeout(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     finally:
         connection.close()
+
+
+def test_wal_reader_is_not_blocked_by_an_open_writer(tmp_path: Path) -> None:
+    # WAL lets a second connection keep reading committed data while another holds an
+    # uncommitted write — the documented "CLI and API share this file" property (#64).
+    path = tmp_path / "shared.db"
+    writer = connect_sqlite(path)
+    initialize_database(writer)
+    _insert_session(writer, "s1")
+    writer.commit()
+
+    reader = connect_sqlite(path)
+    try:
+        _insert_session(writer, "s2")  # holds the write lock, uncommitted
+        seen_during_write = {r["id"] for r in reader.execute("SELECT id FROM sessions")}
+        assert seen_during_write == {"s1"}  # reader sees the last committed snapshot, not s2
+
+        writer.commit()
+        seen_after_commit = {r["id"] for r in reader.execute("SELECT id FROM sessions")}
+        assert seen_after_commit == {"s1", "s2"}
+    finally:
+        reader.close()
+        writer.close()
+
+
+def test_second_writer_waits_on_busy_timeout_instead_of_locking(tmp_path: Path) -> None:
+    # A second writer must WAIT for the first to commit (busy_timeout), not fail with
+    # "database is locked" — proving the pragma value actually changes behavior.
+    path = tmp_path / "shared.db"
+    conn_a = connect_sqlite(path)
+    initialize_database(conn_a)
+    conn_b = connect_sqlite(path)
+
+    holds_write_lock = threading.Event()
+
+    def hold_then_commit() -> None:
+        _insert_session(conn_b, "b")  # acquires the WAL write lock
+        holds_write_lock.set()
+        time.sleep(0.2)  # keep the lock held so conn_a genuinely contends
+        conn_b.commit()
+
+    holder = threading.Thread(target=hold_then_commit)
+    holder.start()
+    try:
+        assert holds_write_lock.wait(timeout=5.0)
+        # Without busy_timeout this raises sqlite3.OperationalError immediately; with it, the
+        # write blocks until the holder commits (~0.2s) and then succeeds.
+        _insert_session(conn_a, "a")
+        conn_a.commit()
+    finally:
+        holder.join()
+
+    rows = {r["id"] for r in conn_a.execute("SELECT id FROM sessions")}
+    assert rows == {"a", "b"}
+    conn_a.close()
+    conn_b.close()

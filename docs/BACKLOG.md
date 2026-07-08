@@ -196,11 +196,12 @@ Ordered by value. Effort S/M/L.
   The config pins `core = "sysmon"` (Python 3.12 sys.monitoring) because coverage's default C
   tracer collides with numpy's C extension under fastembed ("cannot load module more than once").
 
-- [ ] **#64** **WAL cross-process concurrency asserted only by pragma value.**
-  `tests/unit/test_sqlite.py:178` checks `journal_mode=WAL` + `busy_timeout=5000` are *set*, but
-  no test opens two connections and writes concurrently to prove the documented "CLI running
-  while the API serves, no database-is-locked" claim. Effort S; lower priority (timing-flaky,
-  single-user scope) — do only after the above.
+- [x] **#64** **WAL cross-process concurrency asserted only by pragma value.** Only the pragma
+  *values* were checked. **Shipped:** two behavioral tests — a fully-deterministic one proving a
+  WAL reader keeps reading the last committed snapshot while another connection holds an
+  uncommitted write, and a coordinated-thread one proving a second writer *waits* on
+  `busy_timeout` (then succeeds) instead of failing with "database is locked". Stable across
+  repeated runs (0.2s held lock vs the 5s timeout gives wide margin). Gate green (+2 tests).
 
 ### Code quality — maintainability
 
