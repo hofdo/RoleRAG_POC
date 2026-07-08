@@ -7,12 +7,29 @@ services:
       - "6333:6333"
     volumes:
       - ./data/qdrant:/qdrant/storage
+    # The qdrant/qdrant image ships no curl/wget/nc, but it does ship bash -- so
+    # probe /readyz over bash's /dev/tcp. /bin/sh is dash (no /dev/tcp), hence the
+    # explicit `bash`. A closed/unready port makes the connect fail non-zero, so the
+    # check reports unhealthy rather than deadlocking the readiness gate below.
+    healthcheck:
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf "GET /readyz HTTP/1.0\r\n\r\n" >&3 && grep -q "200 OK" <&3'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   app:
     build: .
     restart: unless-stopped
     depends_on:
-      - qdrant
+      # Wait for Qdrant to be *ready* (healthcheck passing), not merely started --
+      # otherwise the app can race ahead and hit a not-yet-serving vector store.
+      qdrant:
+        condition: service_healthy
     ports:
       - "${DEV_API_PORT:-8000}:8000"
     environment:

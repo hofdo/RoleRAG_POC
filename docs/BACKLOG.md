@@ -141,8 +141,9 @@ invisible to the deterministic suite) live-smoke before claiming success, docs m
 Ordered by value. Effort S/M/L.
 
 **Status (worked through 2026-07-08).** Shipped and gate-verified: **#48, #49, #50, #51, #52,
-#53, #54, #56, #57, #59, #61, #62, #63, #64** (14). Partial: **#58** (restart policies shipped;
-Qdrant readiness-gate needs a live Docker daemon to validate the probe). Deferred with rationale:
+#53, #54, #56, #57, #58, #59, #61, #62, #63, #64** (15, **#58** completed 2026-07-08: Qdrant
+`/readyz` healthcheck over bash `/dev/tcp` + `service_healthy` gate, validated on a live daemon).
+Deferred with rationale:
 **#55** (its "dead" guards are load-bearing for mypy; clean fix is an unjustified type split),
 **#60** (needs a fake-provider ASGI server for a real e2e). The **RAG-core items** in
 [docs/22 § 2026-07-08 review](22_rag_scaling_roadmap.md#2026-07-08-review-confirmations--new-findings):
@@ -271,16 +272,15 @@ docs/22.
   locally (Angular 19, ~8 s). Refreshed the stale `frontend/README.md` note that said CI doesn't
   build.
 
-- [~] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
-  `app` had a healthcheck but `qdrant` had none and `app.depends_on: [qdrant]` waits only for
-  *start*, not *ready*; neither service set `restart:`. **Partially shipped:** added
-  `restart: unless-stopped` to both services (survives host reboots) and validated with
-  `docker compose config`. **Deferred:** the Qdrant `/readyz` healthcheck + `depends_on:
-  {qdrant: {condition: service_healthy}}` readiness gate — the `qdrant/qdrant` image ships no
-  `curl`/`wget`/`bash`, so the probe command must be chosen against a running image, and a wrong
-  probe with `condition: service_healthy` deadlocks stack startup. Needs a live Docker daemon to
-  validate (unavailable in this environment); `dev-up.sh` already polls `/readyz` so the primary
-  dev path is covered meanwhile.
+- [x] **#58** **docker-compose: no Qdrant healthcheck, no readiness gate, no restart policy.**
+  `app` had a healthcheck but `qdrant` had none and `app.depends_on: [qdrant]` waited only for
+  *start*, not *ready*; neither service set `restart:`. **Shipped:** `restart: unless-stopped` on
+  both services, plus a Qdrant `/readyz` healthcheck and the `depends_on: {qdrant: {condition:
+  service_healthy}}` readiness gate. The `qdrant/qdrant:v1.18.1` image ships no `curl`/`wget`/`nc`
+  but *does* ship `bash`, so the probe hits `/readyz` over bash's `/dev/tcp` (dash `/bin/sh` lacks
+  it, hence the explicit `bash`); a closed/unready port makes the connect fail non-zero, so the
+  check reports unhealthy rather than deadlocking the gate. Validated against a live daemon:
+  `docker compose config` is valid and `docker compose up -d qdrant` reaches `healthy` in ~8s.
 
 - [x] **#59** **High-risk Python deps were unbounded `>=`** (inconsistent with the deliberately-capped
   `qdrant-client>=1.18,<2`). **Shipped:** upper-bounded `fastapi<1`, `openai<3`, `pydantic<3`,
