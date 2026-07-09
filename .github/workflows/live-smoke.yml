@@ -48,7 +48,7 @@ on:
         required: true
         default: "0"
       turn_count:
-        description: "Rose Gallery conversation turns. This workflow validates 5-50; scripts/live-smoke.sh itself accepts LIVE_TURN_COUNT up to 100."
+        description: "Rose Gallery conversation turns. This workflow validates 5-100, matching scripts/live-smoke.sh's LIVE_TURN_COUNT range."
         required: true
         default: "8"
       fail_on_structured_warnings:
@@ -106,7 +106,7 @@ jobs:
           TURN_COUNT: ${{ inputs.turn_count || '8' }}
           FAIL_ON_STRUCTURED_WARNINGS: ${{ inputs.fail_on_structured_warnings || '1' }}
         run: |
-          [[ "$TURN_COUNT" =~ ^[0-9]+$ ]] && (( TURN_COUNT >= 5 && TURN_COUNT <= 50 ))
+          [[ "$TURN_COUNT" =~ ^[0-9]+$ ]] && (( TURN_COUNT >= 5 && TURN_COUNT <= 100 ))
           [[ "$FAIL_ON_STRUCTURED_WARNINGS" == "0" || "$FAIL_ON_STRUCTURED_WARNINGS" == "1" ]]
 
       - name: Run live smoke

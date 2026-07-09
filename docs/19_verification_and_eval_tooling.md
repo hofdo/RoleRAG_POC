@@ -1,6 +1,6 @@
 # 19 — Verification & Eval Tooling
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-10 @ 61e45b6
 
 ## Purpose
 
@@ -72,8 +72,8 @@ path (it also names where the workflow uploads artifacts from).
 [`.github/workflows/live-smoke.yml`](../.github/workflows/live-smoke.yml) runs the live
 checkpoint on a self-hosted runner. Triggers and knobs:
 
-- **Manual `workflow_dispatch`** with inputs `turn_count` (validated `5`–`50` at the
-  workflow level; the script itself accepts `LIVE_TURN_COUNT` up to `100`),
+- **Manual `workflow_dispatch`** with inputs `turn_count` (validated `5`–`100` at the
+  workflow level, matching the script's own `LIVE_TURN_COUNT` range),
   `llama_server_path`, `llama_hf_model`, `llama_model_path`, `llama_ctx_size`, and
   `llama_n_gpu_layers` — the `llama_*` inputs map onto the `LLAMA_CPP_*` env vars below.
 - **Weekly `schedule`** that is a silent no-op unless the repository variable

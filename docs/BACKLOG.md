@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-09 @ 0feb94b
+> Reviewed: 2026-07-10 @ 61e45b6
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -121,10 +121,9 @@ decision) are recorded elsewhere in this file and are not repeated here.
 
 ## Open follow-ups (workflow)
 
-- [ ] Raise the `live-smoke.yml` `turn_count` validation cap (currently 5–50) — or add a separate
-  `long_turn_count` input — so CI can drive the 100-turn runs that `scripts/live-smoke.sh` already
-  supports. Deferred here because changing the range is a workflow behavior change, out of scope
-  for the docs sweep.
+- [x] **CI-cap** Raised the `live-smoke.yml` `turn_count` validation cap from 5–50 to 5–100,
+  matching `scripts/live-smoke.sh`'s own `LIVE_TURN_COUNT` range, so CI can drive the 100-turn
+  runs the script already supports; input description and `docs/19` updated to match.
 
 ## Review 2026-07-08 — engine quality, testing, ops
 
