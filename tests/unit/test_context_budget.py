@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from app.domain import RetrievedChunk, Visibility
-from app.orchestration.context_budget import ContextBudget, select_retrieved_chunks_for_prompt
+from app.orchestration.context_budget import (
+    ContextBudget,
+    _truncate_text,
+    select_retrieved_chunks_for_prompt,
+)
 
 
 def _chunk(
@@ -71,4 +75,52 @@ def test_select_exclude_texts_empty_is_byte_identical() -> None:
         exclude_texts=(),
     )
     assert [c.model_dump() for c in baseline] == [c.model_dump() for c in with_empty]
+
+
+# -- docs/22 P0.3: sentence-boundary chunk trimming ------------------------------------
+
+
+def test_truncate_text_under_cap_is_byte_identical() -> None:
+    text = "The regent distrusts the chancellor."
+    assert _truncate_text(text, 800) == text
+    assert _truncate_text(text, len(text)) == text
+
+
+def test_truncate_text_trims_at_last_sentence_boundary() -> None:
+    text = "The regent distrusts the chancellor. He plans to expose the forged ledger soon."
+    # Cap lands inside the second sentence; the trim should back up to the sentence
+    # boundary after "chancellor." rather than hard-cutting mid-clause.
+    result = _truncate_text(text, 60)
+    assert result == "The regent distrusts the chancellor...."
+    assert result.startswith("The regent distrusts the chancellor.")
+    assert len(result) <= 60
+
+
+def test_truncate_text_falls_back_to_word_boundary_without_sentence_punctuation() -> None:
+    text = "the quick brown fox jumps over the lazy dog near the riverbank"
+    result = _truncate_text(text, 30)
+    assert result == "the quick brown fox jumps..."
+    assert len(result) <= 30
+    # No sentence punctuation anywhere, so the fallback must be a clean word boundary.
+    assert not result[:-3].endswith(" ")
+
+
+def test_truncate_text_hard_cuts_pathological_text_with_no_boundary() -> None:
+    # No spaces and no sentence punctuation at all within the budget window.
+    text = "A" * 20
+    assert _truncate_text(text, 10) == "AAAAAAA..."
+
+
+def test_truncate_text_keeps_omission_marker_when_trimmed() -> None:
+    text = "word " * 200
+    result = _truncate_text(text, 50)
+    assert len(text) > 50
+    assert result.endswith("...")
+    assert len(result) <= 50
+
+
+def test_truncate_text_tiny_cap_returns_dots_only() -> None:
+    text = "The regent distrusts the chancellor."
+    assert _truncate_text(text, 3) == "..."
+    assert _truncate_text(text, 1) == "."
 

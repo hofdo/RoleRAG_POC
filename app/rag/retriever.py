@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -15,6 +16,8 @@ from app.rag.ranking import (
     rerank_chunks,
 )
 from app.rag.vector_store import VectorStore
+
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?:\s|$)")
 
 
 class Retriever:
@@ -169,6 +172,28 @@ def build_retrieval_query(
 
 
 def _clip_line(text: str, max_chars: int = 300) -> str:
+    """Trim ``text`` to at most ``max_chars`` (docs/22 P0.3).
+
+    Prefers the last sentence boundary before the cap, then the last word
+    boundary, then a hard cut; always keeps the explicit ``"..."`` marker when
+    trimming occurs. Mirrors ``_truncate_text`` in
+    ``app.orchestration.context_budget``.
+    """
     if len(text) <= max_chars:
         return text
-    return f"{text[: max_chars - 3]}..."
+    if max_chars <= 3:
+        return "." * max_chars
+    budget = max_chars - 3
+    window = text[:budget]
+
+    last_sentence_end = -1
+    for match in _SENTENCE_BOUNDARY_RE.finditer(window):
+        last_sentence_end = match.start() + 1
+    if last_sentence_end > 0:
+        return f"{window[:last_sentence_end]}..."
+
+    last_space = window.rfind(" ")
+    if last_space > 0:
+        return f"{window[:last_space]}..."
+
+    return f"{window}..."

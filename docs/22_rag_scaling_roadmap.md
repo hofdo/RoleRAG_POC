@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-08 @ 0c11c29
+> Reviewed: 2026-07-09 @ 9097877
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -98,6 +98,15 @@ prefill. Effort S. — [ ]
 
 ### P0.3 Sentence-boundary chunk trimming in the prompt budget
 
+> **Shipped 2026-07-09.** `_truncate_text` and `_clip_line` now trim at the last sentence
+> boundary (`.`/`!`/`?` followed by whitespace-or-end) inside the cap window; if none exists,
+> fall back to the last word boundary; if neither exists, hard-cut. The `"..."` omission marker
+> is always kept when trimming occurs, and under-cap text is byte-identical to before. Both
+> functions changed in lockstep with the same regex/fallback logic. Unit-tested byte-for-byte
+> (under-cap identity, sentence-boundary trim, word-boundary fallback, pathological no-boundary
+> hard-cut, marker presence, tiny-cap edge case). Full deterministic gate + regression runner
+> pass unchanged — ranking evals are unaffected because trim happens after selection.
+
 **Problem.** `_truncate_text` cuts retrieved chunks mid-sentence at 800 chars with `"..."`
 ([app/orchestration/context_budget.py:36-41](../app/orchestration/context_budget.py)) —
 retrieval can rank the right chunk first and the prompt still loses the fact if it sits
@@ -108,7 +117,7 @@ past the cut. Same pattern in the retrieval-query clip (`_clip_line`,
 keep the explicit omission marker. Deterministic, testable byte-for-byte.
 
 **Validate.** Unit tests; ranking evals unchanged (trim happens after selection).
-Effort S. — [ ]
+Effort S. — [x]
 
 ### P0.4 Eval assets before retrieval upgrades (the measurement gate)
 

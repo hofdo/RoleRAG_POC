@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 from app.domain import PersonaCard, RetrievedChunk, SceneState, StoredTurn, Visibility
 from app.llm.router import ModelProviderName, ModelRoute
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
-from app.rag.retriever import ActorContextRetriever, Retriever, build_retrieval_query
+from app.rag.retriever import (
+    ActorContextRetriever,
+    Retriever,
+    _clip_line,
+    build_retrieval_query,
+)
 from app.rag.vector_store import InMemoryVectorStore
 
 
@@ -413,3 +418,53 @@ def test_build_retrieval_query_uses_visible_context_and_latest_two_turns() -> No
     assert "spy waits nearby" not in query
     assert "aiding the coup" not in query
     assert "forged a ledger" not in query
+
+
+# -- docs/22 P0.3: sentence-boundary chunk trimming ------------------------------------
+
+
+def test_clip_line_under_cap_is_byte_identical() -> None:
+    text = "The regent distrusts the chancellor."
+    assert _clip_line(text, max_chars=800) == text
+    assert _clip_line(text, max_chars=len(text)) == text
+
+
+def test_clip_line_trims_at_last_sentence_boundary() -> None:
+    text = "The regent distrusts the chancellor. He plans to expose the forged ledger soon."
+    result = _clip_line(text, max_chars=60)
+    assert result == "The regent distrusts the chancellor...."
+    assert len(result) <= 60
+
+
+def test_clip_line_falls_back_to_word_boundary_without_sentence_punctuation() -> None:
+    text = "the quick brown fox jumps over the lazy dog near the riverbank"
+    result = _clip_line(text, max_chars=30)
+    assert result == "the quick brown fox jumps..."
+    assert len(result) <= 30
+    assert not result[:-3].endswith(" ")
+
+
+def test_clip_line_hard_cuts_pathological_text_with_no_boundary() -> None:
+    text = "A" * 20
+    assert _clip_line(text, max_chars=10) == "AAAAAAA..."
+
+
+def test_clip_line_keeps_omission_marker_when_trimmed() -> None:
+    text = "word " * 200
+    result = _clip_line(text, max_chars=50)
+    assert len(text) > 50
+    assert result.endswith("...")
+    assert len(result) <= 50
+
+
+def test_clip_line_tiny_cap_returns_dots_only() -> None:
+    text = "The regent distrusts the chancellor."
+    assert _clip_line(text, max_chars=3) == "..."
+    assert _clip_line(text, max_chars=1) == "."
+
+
+def test_clip_line_default_max_chars_unchanged_at_300() -> None:
+    text = "x" * 500
+    result = _clip_line(text)
+    assert len(result) <= 300
+    assert result.endswith("...")

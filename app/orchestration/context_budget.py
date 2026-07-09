@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Sequence
 
 from pydantic import BaseModel, Field
 
 from app.domain import RetrievedChunk, Visibility
+
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?:\s|$)")
 
 
 class ContextBudget(BaseModel):
@@ -50,8 +53,28 @@ def _normalize_for_match(text: str) -> str:
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
+    """Trim ``text`` to at most ``max_chars`` (docs/22 P0.3).
+
+    Prefers cutting at the last sentence boundary before the cap so a retrieved
+    chunk doesn't lose a fact mid-clause; falls back to the last word boundary,
+    then a hard cut, for text with no punctuation/whitespace to anchor on. The
+    explicit ``"..."`` omission marker is always kept when trimming occurs.
+    """
     if len(text) <= max_chars:
         return text
     if max_chars <= 3:
         return "." * max_chars
-    return f"{text[: max_chars - 3]}..."
+    budget = max_chars - 3
+    window = text[:budget]
+
+    last_sentence_end = -1
+    for match in _SENTENCE_BOUNDARY_RE.finditer(window):
+        last_sentence_end = match.start() + 1
+    if last_sentence_end > 0:
+        return f"{window[:last_sentence_end]}..."
+
+    last_space = window.rfind(" ")
+    if last_space > 0:
+        return f"{window[:last_space]}..."
+
+    return f"{window}..."
