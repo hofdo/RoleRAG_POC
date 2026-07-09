@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-09 @ 9097877
+> Reviewed: 2026-07-09 @ 96a0e24
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -470,6 +470,18 @@ language setting (S); optional German stemming (M). Additive/opt-in; gate on P0.
 
 ### N3 — Read-time prompt dedup is id-only; near-duplicate memory *text* co-fills slots when write-dedup is off (new; complements P2.2 / #30)
 
+> **Shipped 2026-07-09.** `select_retrieved_chunks_for_prompt` now also tracks the
+> normalized text (the same `_normalize_for_match` helper C1 uses) of every chunk it has
+> already selected and skips later chunks whose normalized text repeats, regardless of id.
+> First occurrence (highest rank) wins, so ranking order and determinism are unchanged; the
+> freed slot is filled by the next distinct chunk via the existing loop (no separate
+> over-fetch needed — the id-dedup and C1 standing-facts exclusion already run in the same
+> pass and compose cleanly with the new check). Unit-tested: duplicate-text/distinct-id
+> chunks fill exactly one slot and the freed slot goes to the next distinct chunk;
+> legitimately distinct chunks are untouched; interaction with the C1 exclusion still holds.
+> Byte-identical when no duplicate normalized text is present. Full deterministic gate +
+> regression runner pass unchanged.
+
 Credit where due: the persona-memory dual-write and consolidation paths are already id-safe (the
 indexer keeps `id=memory.id`; originals are `CONSOLIDATED_TAG`-unindexed), so those are *not* a
 problem. The real gap: with semantic write-dedup shipping OFF by default
@@ -485,7 +497,9 @@ priority than C1/N1 — do alongside P2.2.
 
 ~~Do first (small, high value, both recall losses on the highest-value facts): **C1**, **N1**.~~
 **C1 + N1 shipped 2026-07-08** (`64db602`, `0c11c29`) — byte-tested + live-smoke no-regression.
-Do when German play lands: **N2**. Do alongside long-campaign P2.2 work: **C2**, then **N3**.
+**N3 shipped 2026-07-09** — byte-tested; same normalizer as C1, no live-smoke needed (pure
+prompt-assembly, unit-testable byte-for-byte). Do when German play lands: **N2**. Do alongside
+long-campaign P2.2 work: **C2**.
 
 ## Explicitly not proposed (decision record honored)
 

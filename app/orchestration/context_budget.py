@@ -28,16 +28,27 @@ def select_retrieved_chunks_for_prompt(
     *and* wins rerank, so without this it double-spends one of only
     ``budget.retrieved_chunks`` slots, evicting a distinct fact (docs/22 C1). The
     caller over-fetches so the freed slot is filled by the next distinct chunk.
+
+    Distinct-id chunks whose normalized text duplicates a chunk already selected are
+    also dropped (docs/22 N3): with semantic write-dedup off, near-identical memories
+    can accumulate under different ids and would otherwise co-fill retrieved slots.
+    First occurrence (highest rank) wins, so ranking order and determinism are
+    preserved; the freed slot goes to the next distinct chunk, same as the C1 path.
     """
     excluded = {_normalize_for_match(text) for text in exclude_texts}
     selected: list[RetrievedChunk] = []
     seen_ids: set[str] = set()
+    seen_texts: set[str] = set()
     for chunk in chunks:
         if chunk.visibility != Visibility.PLAYER or chunk.id in seen_ids:
             continue
-        if excluded and _normalize_for_match(chunk.text) in excluded:
+        normalized_text = _normalize_for_match(chunk.text)
+        if excluded and normalized_text in excluded:
+            continue
+        if normalized_text in seen_texts:
             continue
         seen_ids.add(chunk.id)
+        seen_texts.add(normalized_text)
         selected.append(
             chunk.model_copy(
                 update={"text": _truncate_text(chunk.text, budget.max_retrieved_chunk_chars)}

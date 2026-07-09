@@ -64,6 +64,59 @@ def test_select_excludes_standing_fact_duplicates_and_recovers_the_slot() -> Non
     assert [chunk.id for chunk in selected] == ["mem-distinct", "mem-extra"]
 
 
+def test_select_dedupes_duplicate_text_distinct_ids_and_recovers_the_slot() -> None:
+    # docs/22 N3: with semantic write-dedup off, near-identical memories can
+    # accumulate under distinct ids. Duplicate normalized text must not co-fill
+    # slots; first occurrence (highest rank) wins and the freed slot goes to the
+    # next distinct chunk.
+    chunks = [
+        _chunk("mem-a", text="The regent distrusts the chancellor."),
+        _chunk("mem-b", text="  The   regent distrusts THE chancellor.  "),
+        _chunk("mem-c", text="A storm is expected by nightfall."),
+    ]
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks,
+        budget=ContextBudget(retrieved_chunks=2, max_retrieved_chunk_chars=800),
+    )
+
+    assert [chunk.id for chunk in selected] == ["mem-a", "mem-c"]
+
+
+def test_select_leaves_legitimately_distinct_chunks_untouched() -> None:
+    chunks = [
+        _chunk("mem-a", text="The regent distrusts the chancellor."),
+        _chunk("mem-b", text="The chancellor distrusts the regent."),
+        _chunk("mem-c", text="A storm is expected by nightfall."),
+    ]
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks,
+        budget=ContextBudget(retrieved_chunks=3, max_retrieved_chunk_chars=800),
+    )
+
+    assert [chunk.id for chunk in selected] == ["mem-a", "mem-b", "mem-c"]
+
+
+def test_select_text_dedup_interacts_with_standing_facts_exclusion() -> None:
+    # A chunk excluded by the C1 standing-facts match must not block a later,
+    # genuinely distinct duplicate-text pair from also being deduped by N3.
+    chunks = [
+        _chunk("mem-promise", text="The player promised to guard the northern gate."),
+        _chunk("mem-distinct", text="The regent distrusts the chancellor."),
+        _chunk("mem-distinct-dup", text="the regent distrusts THE chancellor."),
+        _chunk("mem-extra", text="A storm is expected by nightfall."),
+    ]
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks,
+        budget=ContextBudget(retrieved_chunks=3, max_retrieved_chunk_chars=800),
+        exclude_texts=["the player promised to  guard the  NORTHERN gate."],
+    )
+
+    assert [chunk.id for chunk in selected] == ["mem-distinct", "mem-extra"]
+
+
 def test_select_exclude_texts_empty_is_byte_identical() -> None:
     chunks = [_chunk("player-1", text="only fact")]
     baseline = select_retrieved_chunks_for_prompt(
