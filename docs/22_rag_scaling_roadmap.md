@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-09 @ 3b4355e
+> Reviewed: 2026-07-09 @ 0feb94b
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -414,7 +414,25 @@ distinct-fact count in the actor prompt on live-smoke.
 
 ### C2 — Consolidation folds the whole eligible backlog with no age floor (age-guard confirmed; one-shot compression new)
 
-Confirms the "no age guard" candidate and adds a second coupled issue. (a) **No age floor:**
+> **Shipped 2026-07-09 (`0feb94b`).** Added `min_age` and `batch_cap` keyword params to
+> `select_consolidatable` (rank-based age, derived from the existing oldest-first
+> `created_at`-then-`id` ordering — no wall-clock dependency). `min_age` holds the N newest
+> eligible memories out of the foldable pool (the rolling recent window); `batch_cap` folds
+> only the oldest N of what's left per pass. Wired through `MemoryConsolidator` →
+> `TurnMemoryStage` → `TurnOrchestratorConfig` → `composition.py` exactly like the existing
+> `consolidation_threshold`/`consolidation_importance_ceiling` knobs, with paired
+> `MEMORY_CONSOLIDATION_MIN_AGE` / `MEMORY_CONSOLIDATION_BATCH_CAP` Settings + `.env.example`
+> keys. Both default to 0 (no-op): the threshold gate itself now runs against the
+> age-floored pool (so a fresh low-importance memory can't be swallowed the instant the raw
+> backlog count crosses threshold), and `batch_cap` only bounds how many of that pool are
+> folded in a given pass, never whether consolidation triggers — at the 0/0 defaults this
+> reproduces the pre-C2 selection byte-for-byte, proven by unit tests at both the
+> `select_consolidatable` primitive and the `TurnMemoryStage` integration level.
+> Consolidation itself still ships OFF by default (`MEMORY_CONSOLIDATION_THRESHOLD=0`); live
+> validation of non-zero `min_age`/`batch_cap` rides with the [P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence)
+> long live-smoke run per the measure-first workflow, not this change.
+>
+> Confirms the "no age guard" candidate and adds a second coupled issue. (a) **No age floor:**
 `select_consolidatable` (`consolidation.py:49-66`) sorts oldest-first but has no minimum-age
 filter, so a low-importance untagged memory written *this turn* is swallowed the moment the
 backlog crosses threshold — it never gets a chance to be retrieved on its own. (b) **Whole-backlog
@@ -506,7 +524,9 @@ priority than C1/N1 — do alongside P2.2.
 **C1 + N1 shipped 2026-07-08** (`64db602`, `0c11c29`) — byte-tested + live-smoke no-regression.
 **N3 shipped 2026-07-09, over-fetch sizing corrected same day in review round** — byte-tested;
 same normalizer as C1, no live-smoke needed (pure prompt-assembly, unit-testable byte-for-byte).
-Do when German play lands: **N2**. Do alongside long-campaign P2.2 work: **C2**.
+**C2 shipped 2026-07-09** (`0feb94b`) — byte-tested defaults; live validation of non-zero
+`min_age`/`batch_cap` still rides with the long-campaign P2.2 live-smoke run, not this change.
+Do when German play lands: **N2**.
 
 ## Explicitly not proposed (decision record honored)
 

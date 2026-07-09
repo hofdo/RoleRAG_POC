@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-08 @ 0c11c29
+> Reviewed: 2026-07-09 @ 0feb94b
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -151,9 +151,12 @@ The **RAG-core items** in
 the two highest-value, **C1** (standing-facts double-spend) and **N1** (write-dedup framing
 inflation), are now **shipped** (`64db602`, `0c11c29`) — validated on a live 26B + Qdrant
 live-smoke (zero recall/extraction/retrieval-selection regression) plus byte-level unit tests,
-honoring the measure-first invariant. **C2/N2/N3** remain deferred (lower value; C2/N3 ride along
-with long-campaign P2.2, N2 waits for German play) and each carries its named validation gate in
-docs/22.
+honoring the measure-first invariant. **N3** (read-time normalized-text dedup) and **C2**
+(consolidation min-age floor + batch-size cap) also **shipped** (2026-07-09) — byte-tested,
+defaults byte-identical to pre-change selection; both are pure deterministic logic so no
+live-smoke was required, except live validation of non-zero C2 knobs, which still rides along
+with long-campaign P2.2. **N2** remains deferred (waits for German play) and carries its named
+validation gate in docs/22.
 
 ### Correctness — do first
 
