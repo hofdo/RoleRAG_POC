@@ -28,6 +28,8 @@ class MemoryConsolidator:
         cache: SessionSummaryCache,
         consolidation_threshold: int,
         consolidation_importance_ceiling: int,
+        consolidation_min_age: int = 0,
+        consolidation_batch_cap: int = 0,
         cloud_provider: LlmProvider | None = None,
     ) -> None:
         self.provider = provider
@@ -39,6 +41,8 @@ class MemoryConsolidator:
         self._cache = cache
         self.consolidation_threshold = consolidation_threshold
         self.consolidation_importance_ceiling = consolidation_importance_ceiling
+        self.consolidation_min_age = consolidation_min_age
+        self.consolidation_batch_cap = consolidation_batch_cap
 
     async def consolidate_if_needed(
         self,
@@ -58,14 +62,24 @@ class MemoryConsolidator:
         ):
             return ()
         try:
-            candidates = select_consolidatable(
+            # Threshold gate uses the age-floored pool (min_age excluded), so the
+            # rolling recent window can't be bypassed by triggering early; batch_cap
+            # is applied separately below and only bounds how many of that pool are
+            # actually folded in this pass, never whether consolidation triggers.
+            eligible = select_consolidatable(
                 self.memory_store.list_memories_for_session(session_id),
                 importance_ceiling=self.consolidation_importance_ceiling,
+                min_age=self.consolidation_min_age,
             )
         except Exception as exc:
             return (f"memory consolidation skipped: {exc}",)
-        if len(candidates) < self.consolidation_threshold:
+        if len(eligible) < self.consolidation_threshold:
             return ()
+        candidates = (
+            eligible[: self.consolidation_batch_cap]
+            if self.consolidation_batch_cap > 0
+            else eligible
+        )
 
         warnings: list[str] = []
         # Consolidation reuses the memory route: same provider as regular memory

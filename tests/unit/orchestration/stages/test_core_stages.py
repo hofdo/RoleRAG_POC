@@ -986,6 +986,114 @@ async def test_memory_stage_does_not_consolidate_below_threshold() -> None:
     assert not any("consolidation" in warning for warning in result.warnings)
 
 
+@pytest.mark.asyncio
+async def test_memory_stage_min_age_excludes_too_young_memories_from_threshold() -> None:
+    # 3 filler memories reach the threshold=3 backlog, but min_age=1 holds the single
+    # newest one out of the eligible pool, leaving only 2 -- below threshold, so
+    # consolidation must not trigger even though the raw backlog count did.
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 3)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+        consolidation_min_age=1,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert len(store.persisted) == 3
+    assert store.consolidated_ids == []
+    assert not any("consolidation" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_batch_cap_folds_only_oldest_n_and_keeps_recent_window() -> None:
+    # 5 filler memories clear threshold=3; batch_cap=2 folds only the oldest 2,
+    # leaving the 3 newest untouched (the rolling recent window).
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 5)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+        consolidation_batch_cap=2,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    oldest_two_ids = [episode.id for episode in store.persisted[:2]]
+    remaining_ids = [episode.id for episode in store.persisted[2:5]]
+    assert len(store.persisted) == 6  # 5 filler - 2 consolidated + 1 summary
+    assert set(store.consolidated_ids) == set(oldest_two_ids)
+    assert set(indexer.unindexed) == set(oldest_two_ids)
+    for remaining_id in remaining_ids:
+        assert remaining_id not in store.consolidated_ids
+    assert any("rolled up 2 memories" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_defaults_match_pre_c2_behavior() -> None:
+    # min_age=0, batch_cap=0 (the defaults, and what every pre-existing call site still
+    # passes) must fold the whole eligible backlog in one shot, exactly as before C2.
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 3)
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+    )
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:3]]
+    assert len(store.persisted) == 4
+    assert set(store.consolidated_ids) == set(original_ids)
+    assert any("rolled up 3 memories" in warning for warning in result.warnings)
+
+
 class DecliningCurator:
     async def consolidate(self, **_: object) -> str:
         raise AssertionError("consolidate not expected in this test")

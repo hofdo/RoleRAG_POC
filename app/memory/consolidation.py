@@ -50,9 +50,21 @@ def select_consolidatable(
     memories: Sequence[MemoryEpisode],
     *,
     importance_ceiling: int,
+    min_age: int = 0,
+    batch_cap: int = 0,
 ) -> list[MemoryEpisode]:
     """Old, low-importance, non-durable, not-already-consolidated PLAYER memories,
-    ordered oldest first (the natural batch to roll up)."""
+    ordered oldest first (the natural batch to roll up).
+
+    Age is rank-based, derived from the oldest-first ordering already computed here
+    (created_at, then id as a deterministic tie-break) -- no wall-clock dependency.
+    ``min_age`` keeps the ``min_age`` newest eligible memories out of the result (a
+    rolling recent window), so a low-importance memory written this turn always gets
+    at least ``min_age`` turns of standalone retrievability before it can be folded.
+    ``batch_cap`` caps the result to the oldest N after the age floor is applied.
+    Both default to 0, which is a no-op: 0 excludes nothing and 0 means unlimited,
+    reproducing the pre-C2 selection byte-for-byte.
+    """
     eligible = [
         memory
         for memory in memories
@@ -63,6 +75,10 @@ def select_consolidatable(
         and SUMMARY_TAG not in memory.tags
     ]
     eligible.sort(key=_age_sort_key)
+    if min_age > 0:
+        eligible = eligible[:-min_age] if min_age < len(eligible) else []
+    if batch_cap > 0:
+        eligible = eligible[:batch_cap]
     return eligible
 
 

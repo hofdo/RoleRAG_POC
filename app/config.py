@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     # memory_consolidation_max_importance are eligible.
     memory_consolidation_threshold: int = Field(default=0, ge=0)
     memory_consolidation_max_importance: int = Field(default=3, ge=1, le=5)
+    # Minimum-age floor + batch-size cap on the consolidation candidate backlog
+    # (app/memory/consolidation.py select_consolidatable). Age is rank-based (oldest
+    # first among eligible memories) -- no wall-clock dependency. min_age=0 excludes
+    # nothing (no rolling recent window); batch_cap=0 folds the whole eligible backlog
+    # in one shot. Both 0 by default: byte-identical to pre-C2 selection even when
+    # consolidation is enabled. Tune alongside memory_consolidation_threshold once
+    # long-campaign consolidation is validated live (P2.2).
+    memory_consolidation_min_age: int = Field(default=0, ge=0)
+    memory_consolidation_batch_cap: int = Field(default=0, ge=0)
     # SSE: split the validated response into fragments of this many characters for
     # progressive client rendering. 0 = single frame (no behavior change). Never
     # exposes pre-validation tokens — fragments come from the already-validated text.

@@ -58,6 +58,8 @@ class TurnMemoryStage:
         write_dedup_cosine_threshold: float = 1.0,
         consolidation_threshold: int = 0,
         consolidation_importance_ceiling: int = 3,
+        consolidation_min_age: int = 0,
+        consolidation_batch_cap: int = 0,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -83,6 +85,8 @@ class TurnMemoryStage:
             cache=self._summary_cache,
             consolidation_threshold=consolidation_threshold,
             consolidation_importance_ceiling=consolidation_importance_ceiling,
+            consolidation_min_age=consolidation_min_age,
+            consolidation_batch_cap=consolidation_batch_cap,
         )
 
     async def run(

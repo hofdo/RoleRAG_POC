@@ -139,6 +139,8 @@ class TurnOrchestratorConfig:
     containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP
     memory_consolidation_threshold: int = 0
     memory_consolidation_max_importance: int = 3
+    memory_consolidation_min_age: int = 0
+    memory_consolidation_batch_cap: int = 0
 
 
 class TurnOrchestrator:
@@ -246,6 +248,8 @@ class TurnOrchestrator:
             write_dedup_cosine_threshold=config.write_dedup_cosine_threshold,
             consolidation_threshold=config.memory_consolidation_threshold,
             consolidation_importance_ceiling=config.memory_consolidation_max_importance,
+            consolidation_min_age=config.memory_consolidation_min_age,
+            consolidation_batch_cap=config.memory_consolidation_batch_cap,
         )
 
     @property
