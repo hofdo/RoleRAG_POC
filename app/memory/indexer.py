@@ -31,12 +31,17 @@ class MemoryIndexer:
         vector_store: VectorStore,
         importance_floor: int = 1,
         session_memory_max_episodes: int = 0,
+        model_key: str | None = None,
     ) -> None:
         self.memory_store = memory_store
         self.embedding_provider = embedding_provider
         self.vector_store = vector_store
         self.importance_floor = importance_floor
         self.session_memory_max_episodes = session_memory_max_episodes
+        # Embedding-model identity fingerprint (P1.4). None (default) preserves prior
+        # behavior byte-identically: ensure_collection skips the fingerprint check/adopt
+        # entirely when model_key is None.
+        self.model_key = model_key
 
     def index_memories(self, memories: Sequence[MemoryEpisode]) -> MemoryIndexingResult:
         eligible = [
@@ -53,6 +58,7 @@ class MemoryIndexer:
         self.vector_store.ensure_collection(
             RagCollection.SESSION_MEMORY,
             self.embedding_provider.dimension,
+            model_key=self.model_key,
         )
         self.vector_store.upsert_chunks(RagCollection.SESSION_MEMORY, chunks, vectors)
         self._index_persona_memories(eligible)
@@ -131,7 +137,9 @@ class MemoryIndexer:
         ]
         vectors = self.embedding_provider.embed_batch([chunk.text for chunk in chunks])
         self.vector_store.ensure_collection(
-            RagCollection.PERSONA_MEMORY, self.embedding_provider.dimension
+            RagCollection.PERSONA_MEMORY,
+            self.embedding_provider.dimension,
+            model_key=self.model_key,
         )
         self.vector_store.upsert_chunks(RagCollection.PERSONA_MEMORY, chunks, vectors)
 

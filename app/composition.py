@@ -224,6 +224,7 @@ def build_services(
             vector_store=vector_store,
             importance_floor=settings.rag_index_importance_floor,
             session_memory_max_episodes=settings.session_memory_max_episodes,
+            model_key=settings.embedding_model,
         )
         if embedding_provider is not None and vector_store is not None
         else None

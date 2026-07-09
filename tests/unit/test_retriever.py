@@ -30,7 +30,9 @@ class FakeVectorStore:
         self.chunks = chunks
         self.search_calls: list[tuple[RagCollection, list[float], RetrievalFilter, int]] = []
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         raise AssertionError("ensure_collection should not be called during retrieval")
 
     def replace_source(

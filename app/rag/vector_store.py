@@ -19,6 +19,15 @@ except ImportError:  # pragma: no cover - exercised only when optional dependenc
     QdrantClientType = None
     qdrant_models = None
 
+# Embedding-model identity fingerprint (P1.4): a reserved point id/payload marker for the
+# per-collection sentinel meta point. Fixed and namespaced away from real chunk ids (which
+# route through _qdrant_point_id / uuid5) so it can never collide with a chunk. Every query
+# path (_build_qdrant_filter) excludes _SENTINEL_PAYLOAD_KEY so the sentinel never surfaces
+# in search results.
+_FINGERPRINT_SENTINEL_ID = str(uuid5(NAMESPACE_URL, "rolerag:__embedding_model_fingerprint__"))
+_SENTINEL_PAYLOAD_KEY = "__rolerag_sentinel__"
+_FINGERPRINT_PAYLOAD_KEY = "embedding_model"
+
 
 class VectorStoreDimensionMismatch(ValueError):
     """Raised when a collection already exists with a different vector size."""
@@ -33,8 +42,36 @@ class VectorStoreDimensionMismatch(ValueError):
         )
 
 
+class VectorStoreModelMismatch(ValueError):
+    """Raised when a collection's stored embedding-model fingerprint differs from the
+    model identity the caller is about to write with.
+
+    Same-dimension model swaps (e.g. ``all-MiniLM-L6-v2`` -> a same-384-dim multilingual
+    model, P1.2) pass the existing size check silently and mix incompatible vector spaces.
+    See docs/22_rag_scaling_roadmap.md#p12-embedding-model-upgrade-path-multilingual for the
+    migration runbook (reset-index -> reindex-memories / re-ingest) this error points to.
+    """
+
+    RUNBOOK_HINT = (
+        "Run the embedding-migration runbook before switching EMBEDDING_MODEL: "
+        "docs/22_rag_scaling_roadmap.md#p12-embedding-model-upgrade-path-multilingual "
+        "(reset-index the affected collection(s), then reindex-memories / re-ingest)."
+    )
+
+    def __init__(self, collection: RagCollection, existing: str, requested: str) -> None:
+        self.collection = collection
+        self.existing = existing
+        self.requested = requested
+        super().__init__(
+            f"collection {collection.value} was indexed with embedding model {existing!r}, "
+            f"not {requested!r}. {self.RUNBOOK_HINT}"
+        )
+
+
 class VectorStore(Protocol):
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None: ...
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None: ...
 
     def replace_source(
         self,
@@ -68,16 +105,33 @@ class InMemoryVectorStore:
     def __init__(self) -> None:
         self._vector_sizes: dict[RagCollection, int] = {}
         self._entries: dict[RagCollection, list[tuple[RagChunk, list[float]]]] = defaultdict(list)
+        # Embedding-model identity fingerprint (P1.4), parity with QdrantVectorStore's
+        # sentinel meta point. Absent key == unfingerprinted collection (pre-P1.4 or a
+        # caller that never passed model_key) -- adopted on first fingerprinted contact,
+        # never invented from a bare ensure_collection(..., model_key=None) call.
+        self._model_fingerprints: dict[RagCollection, str] = {}
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         existing = self._vector_sizes.get(collection)
         if existing is not None and existing != vector_size:
             raise VectorStoreDimensionMismatch(collection, existing, vector_size)
         self._vector_sizes[collection] = vector_size
+        if model_key is None:
+            return
+        existing_fingerprint = self._model_fingerprints.get(collection)
+        if existing_fingerprint is None:
+            # Backward compatibility: adopt the current model identity on first
+            # fingerprinted contact with an unfingerprinted (or brand-new) collection.
+            self._model_fingerprints[collection] = model_key
+        elif existing_fingerprint != model_key:
+            raise VectorStoreModelMismatch(collection, existing_fingerprint, model_key)
 
     def drop_collection(self, collection: RagCollection) -> None:
         self._vector_sizes.pop(collection, None)
         self._entries.pop(collection, None)
+        self._model_fingerprints.pop(collection, None)
 
     def replace_source(
         self,
@@ -185,7 +239,9 @@ class QdrantVectorStore:
             self._client = QdrantClientType(url=self._url)
         return self._client
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         models = _require_qdrant_models()
         if self.client.collection_exists(collection_name=collection.value):
             existing = self.client.get_collection(
@@ -193,6 +249,7 @@ class QdrantVectorStore:
             ).config.params.vectors.size
             if existing != vector_size:
                 raise VectorStoreDimensionMismatch(collection, existing, vector_size)
+            self._check_or_adopt_fingerprint(collection, vector_size, model_key)
             return
         self.client.create_collection(
             collection_name=collection.value,
@@ -201,10 +258,72 @@ class QdrantVectorStore:
                 distance=models.Distance.COSINE,
             ),
         )
+        self._check_or_adopt_fingerprint(collection, vector_size, model_key)
 
     def drop_collection(self, collection: RagCollection) -> None:
         if self.client.collection_exists(collection_name=collection.value):
             self.client.delete_collection(collection_name=collection.value)
+
+    def read_model_fingerprint(self, collection: RagCollection) -> str | None:
+        """Read-only lookup of a collection's embedding-model fingerprint, if any.
+
+        Never writes/adopts -- used by ``doctor --check-qdrant`` to surface a mismatch
+        loudly without mutating state as a side effect of an inspection command. Returns
+        ``None`` for a missing collection or an unfingerprinted (pre-P1.4) collection.
+        """
+        if not self.client.collection_exists(collection_name=collection.value):
+            return None
+        return self._read_fingerprint(collection)
+
+    def _check_or_adopt_fingerprint(
+        self, collection: RagCollection, vector_size: int, model_key: str | None
+    ) -> None:
+        """Store/verify the embedding-model identity via a sentinel meta point (P1.4).
+
+        Fingerprint and collection lifecycles are atomic: the sentinel lives inside the
+        same Qdrant collection it fingerprints, so ``drop_collection`` clears it for free
+        and there is no separate store to go stale. A collection with no sentinel yet
+        (pre-P1.4 install, or a caller that passes ``model_key=None``) is left alone --
+        the fingerprint is adopted lazily on the first call that *does* pass a model_key,
+        so existing installs keep working byte-identically.
+        """
+        if model_key is None:
+            return
+        existing = self._read_fingerprint(collection)
+        if existing is None:
+            self._write_fingerprint(collection, vector_size, model_key)
+        elif existing != model_key:
+            raise VectorStoreModelMismatch(collection, existing, model_key)
+
+    def _read_fingerprint(self, collection: RagCollection) -> str | None:
+        records = self.client.retrieve(
+            collection_name=collection.value,
+            ids=[_FINGERPRINT_SENTINEL_ID],
+            with_payload=True,
+        )
+        if not records:
+            return None
+        payload = records[0].payload or {}
+        model_key = payload.get(_FINGERPRINT_PAYLOAD_KEY)
+        return str(model_key) if model_key is not None else None
+
+    def _write_fingerprint(
+        self, collection: RagCollection, vector_size: int, model_key: str
+    ) -> None:
+        models = _require_qdrant_models()
+        self.client.upsert(
+            collection_name=collection.value,
+            points=[
+                models.PointStruct(
+                    id=_FINGERPRINT_SENTINEL_ID,
+                    vector=[0.0] * vector_size,
+                    payload={
+                        _SENTINEL_PAYLOAD_KEY: True,
+                        _FINGERPRINT_PAYLOAD_KEY: model_key,
+                    },
+                )
+            ],
+        )
 
     def replace_source(
         self,
@@ -367,7 +486,17 @@ def _build_qdrant_filter(filters: RetrievalFilter) -> Any:
                 match=models.MatchValue(value=tag),
             )
         )
-    return models.Filter(must=must)
+    # Defense in depth: the sentinel meta point (P1.4 embedding-model fingerprint) already
+    # carries no `visibility` field, so the `must` clause above never matches it -- this
+    # `must_not` makes the exclusion explicit and independent of that incidental fact, so it
+    # keeps holding even if the visibility filter's shape ever changes.
+    must_not = [
+        models.FieldCondition(
+            key=_SENTINEL_PAYLOAD_KEY,
+            match=models.MatchValue(value=True),
+        )
+    ]
+    return models.Filter(must=must, must_not=must_not)
 
 
 def _require_qdrant_models() -> Any:

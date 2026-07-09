@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-09 @ 0feb94b
+> Reviewed: 2026-07-09 @ 46c8dca
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -213,6 +213,34 @@ Effort M (runbook S, benchmark M; +S if prefixes needed). — [ ]
 
 ### P1.4 Embedding-model identity fingerprint (adversarially verified, new)
 
+> **Shipped 2026-07-09.** Both stores now carry the embedding-model identity *inside* the
+> vector store, atomic with the collection lifecycle: `QdrantVectorStore` writes a reserved
+> sentinel meta point (fixed `uuid5` id, `__rolerag_sentinel__` payload marker) per collection;
+> `InMemoryVectorStore` carries a parity `dict[RagCollection, str]`. `ensure_collection` gained
+> an opt-in `model_key: str | None = None` parameter and a new `VectorStoreModelMismatch`
+> (`ValueError` subclass, sits beside `VectorStoreDimensionMismatch`, message points at this
+> section as the migration runbook). Byte-identical when `model_key` is omitted — the check/adopt
+> logic never runs. Real callers (`ingest_document`/`ingest_lore_manifest`, `MemoryIndexer`, and
+> every `composition.py`/`cli.py` wiring site) now pass `settings.embedding_model`; the CLI
+> `ingest`/`ingest-scenario-lore`/`reindex-memories`/`start-session` paths already had
+> `ValueError`/`Exception` catch-alls, so a mismatch fails loud with the runbook hint for free.
+> Live-turn indexing (`stages/memory.py`'s `except Exception` around `index_memories`) already
+> turns any indexing exception into a write-blocking turn warning without losing the SQLite
+> write — verified with a dedicated orchestrator test using the real exception type, not just a
+> generic stub error. `doctor --check-qdrant` gained a read-only fingerprint scan
+> (`QdrantVectorStore.read_model_fingerprint`, never adopts) across all three collections and
+> fails loud on any mismatch, with the runbook hint attached. `drop_collection`/`reset-index`
+> clear the fingerprint for both stores (Qdrant: the sentinel lives inside the dropped
+> collection; in-memory: an explicit dict pop). Backward compatible: an unfingerprinted
+> collection (pre-P1.4 or a caller that never passes `model_key`) adopts the current model
+> identity on first fingerprinted contact instead of raising. The sentinel is excluded from
+> every Qdrant search two ways — it carries no `visibility` payload field (never matches the
+> existing `must` clause) and an explicit `must_not` on the sentinel marker — proven by a
+> dedicated embedded-`QdrantClient(":memory:")` test. Unit-tested on both stores (mismatch
+> raise, drop-then-recreate clears, fingerprint adoption, sentinel-never-in-results,
+> read-is-read-only) plus a `doctor --check-qdrant` mismatch/pass test. Full deterministic gate
+> + regression runner pass unchanged.
+
 **Problem (confirmed).** The only guard on the index is vector **size**
 ([vector_store.py:188-196](../app/rag/vector_store.py) Qdrant, `:72-76` in-memory); the
 embedding model's identity is stored nowhere. Swapping `EMBEDDING_MODEL` between
@@ -230,7 +258,7 @@ P1.2 runbook as the remedy; during a live turn the memory stage already wraps in
 `except Exception` ([stages/memory.py:262-264](../app/orchestration/stages/memory.py)), so
 in-play protection is write-blocking + warning — additionally surface the mismatch in
 `doctor` for a loud signal. `drop_collection`/`reset-index` must clear the fingerprint or
-the runbook bricks on a stale one. Effort S–M. — [ ]
+the runbook bricks on a stale one. Effort S–M. — [x]
 
 **Validate.** Unit tests both stores (mismatch raise, drop-then-recreate clears);
 `doctor --check-qdrant` surfaces it; P1.2 runbook exercised end-to-end once.

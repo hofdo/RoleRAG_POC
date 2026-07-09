@@ -11,6 +11,8 @@ from app.diagnostics.runtime_checks import (
     is_usable_cloud_key,
 )
 from app.llm.router import CloudMode
+from app.rag.models import RagCollection
+from app.rag.vector_store import VectorStoreModelMismatch
 
 
 def test_is_usable_cloud_api_key_rejects_placeholders() -> None:
@@ -120,3 +122,77 @@ def test_runtime_diagnostics_sends_local_provider_auth_header(
         "timeout": 5.0,
     }
     assert "super-secret-local" not in str(report.model_dump(mode="json"))
+
+
+class _FakeQdrantClientForFingerprintCheck:
+    def get_collections(self) -> object:
+        class _Collections:
+            collections: list[object] = []
+
+        return _Collections()
+
+
+class _FakeQdrantVectorStore:
+    """Stands in for QdrantVectorStore in the `doctor --check-qdrant` path: reachable,
+    zero collections, with a canned fingerprint lookup (P1.4)."""
+
+    def __init__(self, *, fingerprints: dict[RagCollection, str]) -> None:
+        self._fingerprints = fingerprints
+        self.client = _FakeQdrantClientForFingerprintCheck()
+
+    def read_model_fingerprint(self, collection: RagCollection) -> str | None:
+        return self._fingerprints.get(collection)
+
+
+def test_doctor_check_qdrant_surfaces_embedding_model_fingerprint_mismatch(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_store = _FakeQdrantVectorStore(
+        fingerprints={RagCollection.CANON_LORE: "paraphrase-multilingual-MiniLM-L12-v2"}
+    )
+    monkeypatch.setattr(
+        "app.diagnostics.runtime_checks.QdrantVectorStore", lambda url: fake_store
+    )
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.OFF,
+        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+    )
+
+    report = build_runtime_diagnostics(settings, check_qdrant=True)
+
+    checks = {check.name: check for check in report.checks}
+    qdrant_check = checks["qdrant"]
+    assert qdrant_check.status == DiagnosticStatus.FAIL
+    assert report.status == DiagnosticStatus.FAIL
+    assert "canon_lore" in qdrant_check.message
+    assert "paraphrase-multilingual-MiniLM-L12-v2" in qdrant_check.message
+    assert "sentence-transformers/all-MiniLM-L6-v2" in qdrant_check.message
+    assert qdrant_check.hint == VectorStoreModelMismatch.RUNBOOK_HINT
+
+
+def test_doctor_check_qdrant_passes_when_fingerprint_matches_or_is_absent(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_store = _FakeQdrantVectorStore(
+        fingerprints={
+            RagCollection.CANON_LORE: "sentence-transformers/all-MiniLM-L6-v2",
+            # SESSION_MEMORY/PERSONA_MEMORY absent -> unfingerprinted (pre-P1.4), must not fail.
+        }
+    )
+    monkeypatch.setattr(
+        "app.diagnostics.runtime_checks.QdrantVectorStore", lambda url: fake_store
+    )
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=tmp_path / ".missing",
+        database_path=str(tmp_path / "configured.db"),
+        cloud_mode=CloudMode.OFF,
+        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+    )
+
+    report = build_runtime_diagnostics(settings, check_qdrant=True)
+
+    checks = {check.name: check for check in report.checks}
+    assert checks["qdrant"].status == DiagnosticStatus.PASS
+    assert report.status == DiagnosticStatus.PASS

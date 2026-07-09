@@ -10,6 +10,7 @@ from app.rag.vector_store import (
     InMemoryVectorStore,
     QdrantVectorStore,
     VectorStoreDimensionMismatch,
+    VectorStoreModelMismatch,
     _qdrant_point_id,
     _search_qdrant_points,
 )
@@ -229,6 +230,52 @@ def test_in_memory_drop_collection_clears_state() -> None:
         limit=10,
     )
     assert [chunk.id for chunk in remaining] == ["memory-1"]
+
+
+def test_in_memory_ensure_collection_without_model_key_never_fingerprints() -> None:
+    # Byte-identical legacy behavior: callers that never pass model_key (evals, older
+    # callers) get no fingerprint check/adopt at all, no matter how many times called.
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.CANON_LORE, 3)
+    store.ensure_collection(RagCollection.CANON_LORE, 3)  # would raise if it fingerprinted
+    assert store._model_fingerprints == {}
+
+
+def test_in_memory_ensure_collection_adopts_fingerprint_on_first_fingerprinted_contact() -> None:
+    # Backward compatibility: an existing (or brand-new) collection with no fingerprint
+    # yet adopts the current model identity instead of failing.
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.CANON_LORE, 3)  # unfingerprinted contact first
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-a")
+
+    assert store._model_fingerprints[RagCollection.CANON_LORE] == "model-a"
+    # Once adopted, the same model_key keeps passing.
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-a")
+
+
+def test_in_memory_ensure_collection_raises_model_mismatch() -> None:
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-a")
+
+    with pytest.raises(VectorStoreModelMismatch) as exc_info:
+        store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-b")
+
+    message = str(exc_info.value)
+    assert "canon_lore" in message
+    assert "model-a" in message
+    assert "model-b" in message
+
+
+def test_in_memory_drop_then_recreate_clears_fingerprint() -> None:
+    store = InMemoryVectorStore()
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-a")
+
+    store.drop_collection(RagCollection.CANON_LORE)
+
+    # A stale fingerprint would otherwise brick the embedding-migration runbook.
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="model-b")
+    assert store._model_fingerprints[RagCollection.CANON_LORE] == "model-b"
 
 
 class _FakeVectors:

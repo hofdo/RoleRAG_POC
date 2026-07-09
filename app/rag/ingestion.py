@@ -38,6 +38,7 @@ def ingest_document(
     embedding_provider: EmbeddingProvider,
     vector_store: VectorStore,
     chunking_config: ChunkingConfig | None = None,
+    model_key: str | None = None,
 ) -> IngestionResult:
     path = request.path
     if not path.exists():
@@ -67,7 +68,9 @@ def ingest_document(
         for index, chunk_text_value in enumerate(chunks_text)
     ]
     vectors = embedding_provider.embed_batch([chunk.text for chunk in chunks])
-    vector_store.ensure_collection(request.collection, embedding_provider.dimension)
+    vector_store.ensure_collection(
+        request.collection, embedding_provider.dimension, model_key=model_key
+    )
     vector_store.replace_source(request.collection, source, chunks, vectors)
     return IngestionResult(
         source=source,
@@ -82,6 +85,7 @@ def ingest_lore_manifest(
     embedding_provider: EmbeddingProvider,
     vector_store: VectorStore,
     chunking_config: ChunkingConfig | None = None,
+    model_key: str | None = None,
 ) -> list[IngestionResult]:
     """Ingest every document listed in ``<content_root>/documents/manifest.json`` into CANON_LORE.
 
@@ -111,6 +115,7 @@ def ingest_lore_manifest(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
             chunking_config=chunking_config,
+            model_key=model_key,
         )
         for document in manifest.documents
     ]

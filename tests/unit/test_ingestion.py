@@ -29,7 +29,9 @@ class RecordingVectorStore:
         self.ensure_calls: list[tuple[RagCollection, int]] = []
         self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         self.ensure_calls.append((collection, vector_size))
 
     def replace_source(

@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from app.config import Settings, is_usable_cloud_api_key
 from app.llm.router import CloudMode
 from app.persistence import FileDataLoader, connect_sqlite, initialize_database
-from app.rag.vector_store import QdrantVectorStore
+from app.rag.models import RagCollection
+from app.rag.vector_store import QdrantVectorStore, VectorStoreModelMismatch
 
 
 class DiagnosticStatus(str, Enum):
@@ -175,6 +176,23 @@ def _check_qdrant(settings: Settings) -> DiagnosticCheck:
             message=f"Qdrant reachability check failed: {exc}",
             hint="Start Qdrant with `docker compose up -d qdrant` and verify QDRANT_URL.",
         )
+
+    mismatches = _find_fingerprint_mismatches(store, settings.embedding_model)
+    if mismatches:
+        return DiagnosticCheck(
+            name="qdrant",
+            status=DiagnosticStatus.FAIL,
+            message=(
+                "Qdrant collection(s) were indexed with a different embedding model than "
+                f"the configured EMBEDDING_MODEL={settings.embedding_model!r}: "
+                + "; ".join(
+                    f"{collection.value} has {fingerprint!r}"
+                    for collection, fingerprint in mismatches
+                )
+            ),
+            hint=VectorStoreModelMismatch.RUNBOOK_HINT,
+        )
+
     return DiagnosticCheck(
         name="qdrant",
         status=DiagnosticStatus.PASS,
@@ -183,6 +201,21 @@ def _check_qdrant(settings: Settings) -> DiagnosticCheck:
             f"with {collection_count} collections."
         ),
     )
+
+
+def _find_fingerprint_mismatches(
+    store: QdrantVectorStore, expected_model_key: str
+) -> list[tuple[RagCollection, str]]:
+    """Read-only scan (P1.4): does not create collections or write a fingerprint --
+    only reports what's already stored, so an unfingerprinted (pre-P1.4) or missing
+    collection is silently fine, exactly like ``ensure_collection``'s adopt-on-first-contact
+    backward-compatibility rule."""
+    mismatches = []
+    for collection in RagCollection:
+        fingerprint = store.read_model_fingerprint(collection)
+        if fingerprint is not None and fingerprint != expected_model_key:
+            mismatches.append((collection, fingerprint))
+    return mismatches
 
 
 def _check_local_provider(settings: Settings) -> DiagnosticCheck:

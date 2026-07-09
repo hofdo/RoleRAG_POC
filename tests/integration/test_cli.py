@@ -106,7 +106,9 @@ class RecordingVectorStore:
         self.drop_calls: list[RagCollection] = []
         self.delete_session_calls: list[tuple[RagCollection, str]] = []
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         self.ensure_calls.append((collection, vector_size))
 
     def drop_collection(self, collection: RagCollection) -> None:

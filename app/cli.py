@@ -118,6 +118,7 @@ def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
             ),
+            model_key=settings.embedding_model,
         )
     except Exception as exc:  # degrade gracefully: a session must still be creatable offline
         # Includes a manifest that references a missing document -- warn rather than swallow,
@@ -174,6 +175,7 @@ def _build_services(
                 vector_store=vector_store,
                 importance_floor=settings.rag_index_importance_floor,
                 session_memory_max_episodes=settings.session_memory_max_episodes,
+                model_key=settings.embedding_model,
             )
             if embedding_provider is not None and vector_store is not None
             else None
@@ -477,6 +479,7 @@ def ingest(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
             ),
+            model_key=settings.embedding_model,
         )
     except (FileNotFoundError, ImportError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
@@ -504,6 +507,7 @@ def ingest_scenario_lore(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
             ),
+            model_key=settings.embedding_model,
         )
     except (FileNotFoundError, ImportError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
@@ -542,6 +546,7 @@ def reindex_memories(
             memory_store=memory_store,
             embedding_provider=_build_embedding_provider(settings),
             vector_store=_build_vector_store(settings),
+            model_key=settings.embedding_model,
         ).reindex_session(session_id)
     except Exception as exc:
         connection.close()

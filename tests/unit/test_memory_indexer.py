@@ -33,7 +33,9 @@ class RecordingVectorStore:
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
         self.deleted_ids: list[str] = []
 
-    def ensure_collection(self, collection: RagCollection, vector_size: int) -> None:
+    def ensure_collection(
+        self, collection: RagCollection, vector_size: int, model_key: str | None = None
+    ) -> None:
         self.ensure_calls.append((collection, vector_size))
 
     def replace_source(

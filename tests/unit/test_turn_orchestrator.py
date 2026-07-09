@@ -30,6 +30,8 @@ from app.persistence import (
     connect_sqlite,
     initialize_database,
 )
+from app.rag.models import RagCollection
+from app.rag.vector_store import VectorStoreModelMismatch
 
 
 class FakeProvider(LlmProvider):
@@ -553,6 +555,56 @@ async def test_turn_orchestrator_returns_response_when_memory_indexing_fails(
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.memory_written is True
     assert result.warnings == ["memory indexing skipped: qdrant offline"]
+    assert len(memory_indexer.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_treats_embedding_model_mismatch_as_write_blocking_warning(
+    tmp_path: Path,
+) -> None:
+    """P1.4 in-play protection: a stale/mismatched embedding-model fingerprint must not
+    crash the turn or lose the SQLite write -- it blocks only the vector-store write and
+    surfaces a turn warning, exactly like any other memory-indexing failure (the memory
+    stage's `except Exception` around `index_memories` already covers this generically;
+    this test pins the specific P1.4 exception type through the same path)."""
+    provider = FakeProvider()
+    mismatch = VectorStoreModelMismatch(
+        RagCollection.SESSION_MEMORY, "all-MiniLM-L6-v2", "a-different-model"
+    )
+    memory_indexer = StubMemoryIndexer(error=mismatch)
+    orchestrator = _build_orchestrator(
+        tmp_path,
+        provider,
+        memory_curator=StubMemoryCurator(
+            result=type(
+                "CuratorResult",
+                (),
+                {
+                    "write_memory": True,
+                    "memories": [
+                        MemoryCandidate(
+                            summary="The player promised to return before dawn.",
+                            visibility=Visibility.PLAYER,
+                            importance=4,
+                        )
+                    ],
+                },
+            )()
+        ),
+        memory_indexer=memory_indexer,
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="I promise I will return before dawn to face the regent.",
+        )
+    )
+
+    assert result.text == "I have heard enough to know the regent fears open daylight."
+    # The SQLite write (authoritative state) still succeeds; only vector indexing is blocked.
+    assert result.memory_written is True
+    assert result.warnings == [f"memory indexing skipped: {mismatch}"]
     assert len(memory_indexer.calls) == 1
 
 
