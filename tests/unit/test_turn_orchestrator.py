@@ -616,7 +616,11 @@ async def test_turn_orchestrator_includes_only_public_retrieved_context(tmp_path
     assert retriever.calls[0]["world_id"] == "demo_world"
     assert retriever.calls[0]["session_id"] == "demo-session"
     assert retriever.calls[0]["persona_id"] == "archivist"
-    assert retriever.calls[0]["top_k"] == 3
+    # retrieval_top_k=3 (== context_budget.retrieved_chunks), no standing facts: the
+    # stage over-fetches by the C1 standing-facts count (0 here) plus a bounded N3
+    # duplicate-text worst-case margin of retrieved_chunks - 1 (docs/22 N3 review
+    # round) -- 3 + 0 + 2 = 5.
+    assert retriever.calls[0]["top_k"] == 5
 
 
 @pytest.mark.asyncio

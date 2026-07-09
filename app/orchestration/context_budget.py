@@ -33,7 +33,11 @@ def select_retrieved_chunks_for_prompt(
     also dropped (docs/22 N3): with semantic write-dedup off, near-identical memories
     can accumulate under different ids and would otherwise co-fill retrieved slots.
     First occurrence (highest rank) wins, so ranking order and determinism are
-    preserved; the freed slot goes to the next distinct chunk, same as the C1 path.
+    preserved; the freed slot goes to the next distinct chunk, same as the C1 path --
+    but only if the caller's fetched ``chunks`` window contains one. Unlike the C1
+    exclusion count, the number of N3 collisions isn't known ahead of the fetch, so
+    ``TurnRetrievalStage.run`` over-fetches a bounded worst-case margin
+    (``retrieved_chunks - 1``) rather than an exact count; see its docstring.
     """
     excluded = {_normalize_for_match(text) for text in exclude_texts}
     selected: list[RetrievedChunk] = []

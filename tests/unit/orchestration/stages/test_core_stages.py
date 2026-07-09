@@ -724,6 +724,91 @@ def test_retrieval_stage_passes_player_message_as_lexical_query() -> None:
     assert "What did I promise?" in str(captured["query"])
 
 
+def test_retrieval_stage_over_fetches_for_standing_facts_and_n3_dedup_margin() -> None:
+    # docs/22 N3 review round: the over-fetch must cover both the C1 standing-facts
+    # exclusion count AND a bounded worst-case margin for read-time normalized-text
+    # dedup (retrieved_chunks - 1), or the prompt block can silently shrink below
+    # budget when duplicate-text/distinct-id chunks land inside a fixed-size window.
+    captured: dict[str, object] = {}
+
+    def capture(**kwargs: object) -> list[RetrievedChunk]:
+        captured.update(kwargs)
+        return []
+
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor=capture),
+        context_budget=ContextBudget(retrieved_chunks=5),
+    )
+    context = _context()
+    context = LoadedTurnContext(
+        session=context.session,
+        persona=context.persona,
+        scene=context.scene,
+        recent_turns=context.recent_turns,
+        standing_facts=("fact one", "fact two"),
+    )
+
+    stage.run(
+        turn_input=TurnInput(session_id="session", message="Look around."),
+        context=context,
+    )
+
+    # 5 (budget) + 2 (standing facts) + 4 (N3 worst-case margin, retrieved_chunks - 1).
+    assert captured["top_k"] == 11
+
+
+def test_retrieval_stage_backfill_survives_duplicate_text_collisions_end_to_end() -> None:
+    # Reproduces the reviewer's boundary case end to end: a ranked window sized only
+    # for the pre-fix formula (retrieved_chunks + len(standing_facts)) contains two
+    # duplicate-text pairs and one distinct chunk. Under the pre-fix top_k the fetch
+    # window itself would be capped at 5, so the block would silently shrink to 3
+    # selected chunks even though 5 distinct-text PLAYER chunks exist upstream. The
+    # widened over-fetch must surface enough of them for the prompt step to still
+    # reach the full budget.
+    def make_chunk(chunk_id: str, text: str) -> RetrievedChunk:
+        return RetrievedChunk(
+            id=chunk_id,
+            source="demo.md",
+            source_type="lore",
+            text=text,
+            score=0.9,
+            visibility=Visibility.PLAYER,
+        )
+
+    ranked_pool = [
+        make_chunk("a1", "The regent distrusts the chancellor."),
+        make_chunk("a2", "the regent distrusts THE chancellor."),
+        make_chunk("b1", "A storm is expected by nightfall."),
+        make_chunk("b2", "  A storm is expected by  NIGHTFALL."),
+        make_chunk("c1", "The bridge was repaired last week."),
+        make_chunk("c2", "A new merchant arrived in town."),
+        make_chunk("c3", "The well ran dry this morning."),
+        make_chunk("c4", "Soldiers were spotted near the pass."),
+        make_chunk("c5", "The harvest festival begins tomorrow."),
+    ]
+
+    def fake_retrieve(*, top_k: int, **_: object) -> list[RetrievedChunk]:
+        # Mirrors rerank_chunks: the ranked pool is truncated to exactly top_k.
+        return ranked_pool[:top_k]
+
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor=fake_retrieve),
+        context_budget=ContextBudget(retrieved_chunks=5),
+    )
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message="Look around."),
+        context=_context(),
+    )
+
+    from app.orchestration.context_budget import select_retrieved_chunks_for_prompt
+
+    selected = select_retrieved_chunks_for_prompt(
+        result.chunks, budget=ContextBudget(retrieved_chunks=5)
+    )
+    assert len(selected) == 5
+
+
 class RecordingMemoryStore:
     def __init__(self) -> None:
         self.persisted: list[Any] = []

@@ -69,6 +69,24 @@ class TurnRetrievalStage:
             # retrieved set (docs/22 C1, via select_retrieved_chunks_for_prompt). Fetching
             # the extra chunks means that exclusion recovers the freed slot with a distinct
             # fact instead of shrinking the retrieved block below budget.
+            #
+            # Also over-fetch by up to retrieved_chunks - 1 for read-time normalized-text
+            # dedup (docs/22 N3, review round: the original N3 landing under-sized this).
+            # select_retrieved_chunks_for_prompt drops later chunks whose normalized text
+            # duplicates an earlier one, and rerank_chunks truncates its candidate pool to
+            # exactly top_k *before* that dedup ever runs -- so a fixed-size window has no
+            # replacement candidate available once a duplicate is dropped, and the block
+            # silently shrinks. Worst case, every slot but one in the first
+            # `retrieved_chunks` window is a duplicate of an earlier one, so
+            # retrieved_chunks - 1 extra candidates are needed to guarantee a distinct
+            # backfill is available whenever the ranked pool actually contains one.
+            # Bounded and deterministic; does not change ranking or truncate anything the
+            # prompt step wasn't already going to drop.
+            top_k = (
+                self.context_budget.retrieved_chunks
+                + len(context.standing_facts)
+                + max(self.context_budget.retrieved_chunks - 1, 0)
+            )
             chunks, diagnostics = self._retrieve(
                 query=query,
                 lexical_query=turn_input.message,
@@ -76,7 +94,7 @@ class TurnRetrievalStage:
                 session_id=context.session.id,
                 persona_id=context.persona.id,
                 scene_id=context.session.active_scene_id,
-                top_k=self.context_budget.retrieved_chunks + len(context.standing_facts),
+                top_k=top_k,
             )
             scores = [
                 chunk.score for chunk in chunks if chunk.visibility == Visibility.PLAYER
