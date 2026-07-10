@@ -1,6 +1,6 @@
 # 02 — Current MVP Architecture
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-10 @ 9097877
 
 ## Purpose
 
@@ -38,7 +38,7 @@ modules — lives in [docs/09_current_architecture_map.md](09_current_architectu
 
 - [app/cli.py](../app/cli.py), [app/main.py](../app/main.py), [app/api/](../app/api): Typer CLI,
   FastAPI bootstrap, and thin HTTP adapters over shared services.
-- [frontend/](../frontend): Angular 19 SPA (play, RAG inspector, analytics, eval), built to
+- [frontend/](../frontend): Angular 21 SPA (play, RAG inspector, analytics, eval), built to
   `frontend/dist/frontend/browser` and mounted at `/app` by `app/main.py`.
 - [app/config.py](../app/config.py), [app/composition.py](../app/composition.py): `Settings`
   loaded from `.env`; provider, repository, retriever, and orchestrator construction.

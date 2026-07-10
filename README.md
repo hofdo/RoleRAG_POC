@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-10 @ 9097877
 
 Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
@@ -34,7 +34,7 @@ and [CHANGELOG.md](CHANGELOG.md) for the full inventory):
   lifetime; `CLOUD_MODE=off|ask|auto` gates cloud **creation** only (see
   [Environment and Routing](#environment-and-routing)). No per-turn escalation, fallback,
   or mid-turn switching.
-- **Surfaces** — a 24-command Typer CLI, a small FastAPI API, and an Angular 19 SPA served
+- **Surfaces** — a 24-command Typer CLI, a small FastAPI API, and an Angular 21 SPA served
   at `/app` (play, RAG inspector, analytics, eval trends; the root `/` redirects to it).
 - **Turn pipeline** — retrieval-aware actor prompt with visibility filtering, deterministic
   reranking across `session_memory`/`persona_memory`/`canon_lore`, a bounded critic + repair

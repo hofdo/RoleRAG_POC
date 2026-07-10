@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-08 @ 0c11c29
+> Reviewed: 2026-07-10 @ 9097877
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -317,6 +317,92 @@ highs are `http-proxy-middleware`, a dev-server-only transitive of `@angular-dev
 (never in the shipped static bundle); no non-breaking fix, left as-is.
 `make check` runs Python-only so it's a narrower gate than CI; `data/sessions/` is a git-tracked
 empty legacy dir (sessions live in SQLite now) — harmless.
+
+## Review 2026-07-10 — independent current-state analysis
+
+A second, independent code-grounded review at `9097877` (cross-model verification against an
+external GPT-5.6 analysis brief; both reviews reached the same overall verdict). Verified before
+filing: deterministic gate green locally (ruff / `mypy --strict` / 614 pytest / 84-check
+regression runner) and GitHub Actions CI green at this commit. Everything below was confirmed
+against source, not inherited from either review. RAG-core findings were re-confirmed but add
+nothing new — the P0.4 measurement gate and P2.2 long-campaign validation in
+[docs/22](22_rag_scaling_roadmap.md) remain the authoritative retrieval roadmap (this review
+independently endorses P0.4 as the highest-value RAG work; note the live checkpoint's recall
+probes all land at or before turn 50, so 100-turn runs assert nothing about late recall — already
+recorded there).
+
+Ordered by value. Effort S/M/L.
+
+### Correctness / safety — do first
+
+- [ ] **#65** *(safety, M)* **Critic prompt lacks a final visibility projection for retrieved
+  chunks.** The actor path independently drops non-player chunks at prompt build
+  (`context_budget.select_retrieved_chunks_for_prompt` skips `visibility != PLAYER`), but the
+  critic path formats whatever chunks it is handed
+  (`critic_agent._format_retrieved_chunks` prints the visibility label without filtering on it);
+  the only chunk-level gates are upstream in the retriever. `include_hidden=False` covers
+  authored persona/scene fields only. In the shipped configuration nothing leaks — but a
+  misbehaving or future custom `actor_context_retriever` (settable via a public property on the
+  orchestrator) would deliver a GM/private chunk straight into a **cloud** critic prompt,
+  violating invariant #2 at the trust boundary. Fix: project `retrieved_chunks` to the route's
+  allowed visibility inside `TurnCritiqueStage.run` (player-only when the route is cloud) and add
+  a malicious-retriever case to the `provider_binding` regression category. Acceptance: a
+  retriever that returns GM/character-private chunks cannot get one into any cloud request.
+
+- [ ] **#66** *(bug, S)* **Reroll leaves a deleted turn's persona/scene switch committed.**
+  `DELETE /sessions/{id}/turns/last` reverses the turn row, its memories (timestamp provenance),
+  and its vectors — but not `sessions.active_persona_id`/`active_scene_id` committed by that
+  turn's post-persistence switch (`turn_orchestrator.run_turn` persona-switch commit). Deleting
+  the turn strands the session on a persona/scene the surviving history never switched to. Fix in
+  the reroll path + integration test; while there, consider wrapping the three separately-committed
+  delete steps in one transaction (a crash between them currently orphans memory rows).
+
+- [ ] **#67** *(bug, S)* **CLI orchestrator wiring omits three collaborators the API wires.**
+  #48 fixed *config* parity, but `cli._build_services` still constructs the `TurnOrchestrator`
+  without `canon_repository` (CLI turns silently ignore author-pinned canon facts that API turns
+  honor), `structured_failure_sink` (CLI structured-output failures are never recorded), and
+  `memory_embedding_provider` (semantic write-dedup/consolidation can never activate on CLI even
+  when configured). Fix: delegate to `composition.build_services` (or extend
+  `test_composition_config_parity.py` to pin collaborator parity, not just config parity).
+
+### Decision
+
+- [ ] **#68** *(decision, S)* **Paraphrase-flag policy is undocumented risk acceptance.**
+  `secret_guard.scan_reply` redacts verbatim hidden-fact echoes but only *flags* likely
+  paraphrases; the orchestrator appends a warning and still persists and returns the flagged
+  reply to the player. No layer repairs or withholds it, and no decision record says this is
+  intentional. Decide: (a) accept and record under Decisions (cheap, honest), or (b) escalate a
+  paraphrase flag to the bounded repair pass / controlled failure (dearer; changes turn-failure
+  rates — validate via live-smoke). Either outcome closes the gap between the code and a strict
+  reading of the secrecy invariant.
+
+### Observability
+
+- [ ] **#69** *(observability, M)* **Token usage is captured but dead; context budget is
+  character-based and unverified against real context windows.** `LlmResponse.usage`
+  (prompt/completion/total tokens, `openai_compatible.py`) has zero consumers; there is no
+  preflight size estimate, no configured model-context ceiling, no overflow warning; retrieved
+  chunks and recent dialogue are clipped mid-word by character count. Ship: persist usage into
+  turn diagnostics (additive), a configured context ceiling + warning threshold, and
+  word/sentence-boundary trimming. Acceptance: an oversized scenario is observable *before*
+  generation, validated against llama.cpp logs (docs/22 measure-first: offline evals cannot see
+  this).
+
+### Testing
+
+- [ ] **#70** *(testing, S)* **The #64 WAL test is single-process; the real CLI+API race is
+  untested.** Both #64 tests run two connections in one interpreter — no second OS process
+  despite the commit title. The actual exposure is `append_turn`'s read-then-write
+  `turn_index = count_turns + 1`, which two concurrent writers can both compute; the
+  `UNIQUE(session_id, turn_index)` constraint fails safe (IntegrityError) rather than corrupting,
+  but nothing tests or documents that. Either add a true cross-process test + an atomic
+  `INSERT … SELECT MAX(turn_index)+1`, or record the single-writer-per-session assumption as a
+  documented limit. Low urgency for single-user scope; filed so the "proven cross-process" claim
+  isn't over-read.
+
+*Fixed directly with this review (no ID):* stale "Angular 19" references swept to Angular 21
+(README, docs/02, docs/09, docs/SIDE_PROJECTS, frontend/README); CHANGELOG gained an
+`Unreleased` section covering the post-1.2.0 batch (#48–#64, Angular 21, RAG C1/N1, #60).
 
 ## Not doing (personal-use scope)
 
