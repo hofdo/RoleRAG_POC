@@ -428,7 +428,7 @@ Ordered by value. Effort S/M/L.
 
 ### Observability
 
-- [ ] **#69** *(observability, M)* **Token usage is captured but dead; context budget is
+- [x] **#69** *(observability, M)* **Token usage is captured but dead; context budget is
   character-based and unverified against real context windows.** `LlmResponse.usage`
   (prompt/completion/total tokens, `openai_compatible.py`) has zero consumers; there is no
   preflight size estimate, no configured model-context ceiling, no overflow warning; retrieved
@@ -436,7 +436,50 @@ Ordered by value. Effort S/M/L.
   turn diagnostics (additive), a configured context ceiling + warning threshold, and
   word/sentence-boundary trimming. Acceptance: an oversized scenario is observable *before*
   generation, validated against llama.cpp logs (docs/22 measure-first: offline evals cannot see
-  this).
+  this). **Shipped:** three additive, opt-in pieces, all byte-identical by default.
+  (1) *Usage persistence:* `TurnDiagnostics.token_usage` and `TurnResult.token_usage`
+  (`app/domain/models.py`) — optional `dict[str, int] | None`, so old `diagnostics_json` rows
+  without the key deserialize with `token_usage=None`. Usage now threads through
+  `GenerationStageResult.usage` and `RepairStageResult`/`RepairResolution.usage`
+  (`app/orchestration/stages/generation.py`, `repair.py`) up to
+  `TurnOrchestrator._turn_diagnostics`: the reported usage is always the generation that produced
+  the *served* text — the repair generation's when a repair ran, otherwise the initial actor
+  generation's (mirrors how `finish_reason` was already tracked) — and `None` when no generation
+  completed at all (actor failed before any usable response). Exposed as an optional
+  `token_usage` field on `CreateTurnResponse`, `TurnDetailResponse`, and `StreamFinalPayload`/
+  `StreamFailurePayload` (`app/api/schemas.py`, wired in `app/api/routes.py` +`app/api/sse.py`);
+  SPA untouched. (2) *Context-ceiling preflight:* new `Settings.model_context_window_tokens`
+  (default `0` = disabled) and `Settings.context_warn_ratio` (default `0.85`), mirrored in
+  `.env.example`. When enabled, `app/orchestration/context_budget.py::context_preflight_warning`
+  estimates prompt+completion tokens from the built actor messages via a chars/4 heuristic
+  (`estimate_prompt_tokens`, `CHARS_PER_TOKEN_ESTIMATE`) and appends a warning
+  (`"context preflight: estimated N tokens vs window W (warn ratio R)"`) to the turn's warnings
+  when it crosses `warn_ratio * window` — before generation runs, warn-only, never blocking. Once
+  a real usage report arrives, `context_usage_warning` checks actual `prompt_tokens` against the
+  same threshold and appends a second, independent warning
+  (`"context preflight: actual prompt_tokens N exceeded R * window W"`) if the real count crosses
+  it — actual beats estimate, and both can fire independently (e.g. the estimate under-shot).
+  (3) *Boundary-aware trimming:* `_truncate_text` (`context_budget.py`) and
+  `_truncate_recent_dialogue_message` (`context_builder.py`) now cut at the last word boundary
+  within budget instead of mid-word, falling back to the old hard cut only when no boundary exists
+  within budget (a single unbroken run of characters at least as long as the budget); never
+  exceeds `max_chars` either way. Existing regression fixtures use single-run test strings with no
+  embedded spaces near the cut point, so their pinned truncated output is unaffected (verified by
+  running the full offline gate). Tests: `tests/unit/test_context_budget.py` (boundary
+  cut/exact-fit/no-space-fallback/unchanged-when-short, estimator math, preflight/actual-usage
+  warning threshold and disabled-by-default cases), `tests/unit/test_context_builder.py` (same
+  boundary cases for dialogue trimming), `tests/unit/orchestration/stages/test_core_stages.py`
+  (usage threading, preflight/actual-usage warnings enabled vs. disabled),
+  `tests/unit/test_turn_orchestrator.py` (token_usage reflects the repair generation when a repair
+  ran, `None` when the actor fails before any generation, diagnostics-round-trip parity),
+  `tests/unit/test_repositories.py` (a hand-written pre-#69 `diagnostics_json` payload with no
+  `token_usage` key still deserializes), `tests/unit/test_config.py` (new-key defaults and
+  overrides). **PENDING:** the llama.cpp validation half of the acceptance criterion — comparing
+  the preflight warning against real llama-server logs on a deliberately oversized scenario — is
+  NOT yet done. The deterministic offline gate (ruff/mypy/pytest/regression_runner) cannot see
+  this; it requires `bash scripts/live-smoke.sh` against a real local model with
+  `MODEL_CONTEXT_WINDOW_TOKENS` set to that model's actual context size, which has not been run
+  for this change.
 
 ### Testing
 

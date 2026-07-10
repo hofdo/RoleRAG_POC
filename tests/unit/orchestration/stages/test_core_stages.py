@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -32,6 +33,9 @@ from app.orchestration.stages import (
     TurnRetrievalStage,
     TurnRoutingStage,
 )
+from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
+from app.orchestration.stages.retrieval import RetrievalStageResult
+from app.orchestration.stages.routing import RoutingStageResult
 
 
 def _context() -> LoadedTurnContext:
@@ -517,6 +521,175 @@ def test_generation_stage_warns_on_silent_prompt_truncation() -> None:
 
     assert any("recent dialogue truncated" in warning for warning in warnings)
     assert any("retrieved context truncated" in warning for warning in warnings)
+
+
+class _UsageScriptedProvider(LlmProvider):
+    """Answers every request with a fixed piece of text and a scripted usage dict,
+    so tests can assert exactly what GenerationStageResult.usage / warnings carry."""
+
+    def __init__(self, *, usage: dict[str, int], text: str = "A short reply.") -> None:
+        self.usage = usage
+        self.text = text
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        return LlmResponse(
+            text=self.text,
+            provider="fake",
+            model=request.model,
+            usage=self.usage,
+            finish_reason="stop",
+        )
+
+
+@dataclass(frozen=True)
+class _GenerationRunArgs:
+    turn_input: TurnInput
+    context: LoadedTurnContext
+    retrieval: RetrievalStageResult
+    routing: RoutingStageResult
+
+
+def _generation_run_args(*, message: str = "Hello there.") -> _GenerationRunArgs:
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=50,
+        temperature=0.5,
+        reason="test route",
+    )
+    return _GenerationRunArgs(
+        turn_input=TurnInput(session_id="session", message=message),
+        context=_context(),
+        retrieval=RetrievalStageResult(chunks=(), confidence=0.9, warnings=()),
+        routing=RoutingStageResult(route=route, scene_complexity=1, warnings=()),
+    )
+
+
+async def _run_generation_stage(
+    stage: TurnGenerationStage, args: _GenerationRunArgs
+) -> GenerationStageResult:
+    return await stage.run(
+        turn_input=args.turn_input,
+        context=args.context,
+        retrieval=args.retrieval,
+        routing=args.routing,
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_run_threads_usage_from_response() -> None:
+    provider = _UsageScriptedProvider(
+        usage={"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50}
+    )
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert result.usage == {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50}
+    assert result.text == "A short reply."
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_disabled_by_default() -> None:
+    # model_context_window_tokens defaults to 0: no estimate, no warning, no
+    # behavior change, no matter how large the prompt is.
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+    args = _generation_run_args(message="x" * 100_000)
+
+    result = await _run_generation_stage(stage, args)
+
+    assert not any("context preflight" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_fires_above_threshold() -> None:
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=100,
+        context_warn_ratio=0.5,
+    )
+    # System prompt alone (persona/scene boilerplate) plus this is easily >200 chars
+    # (~>50 estimated tokens vs a 50-token threshold).
+    args = _generation_run_args(message="x" * 1000)
+
+    result = await _run_generation_stage(stage, args)
+
+    assert any("context preflight: estimated" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_silent_below_threshold() -> None:
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=1_000_000,
+        context_warn_ratio=0.85,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert not any("context preflight" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_actual_usage_warning_fires_when_configured() -> None:
+    provider = _UsageScriptedProvider(usage={"prompt_tokens": 900, "total_tokens": 950})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=1000,
+        context_warn_ratio=0.85,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert any(
+        "context preflight: actual prompt_tokens 900" in warning for warning in result.warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_actual_usage_warning_disabled_by_default() -> None:
+    # Even a huge reported prompt_tokens must not warn when the window is disabled.
+    provider = _UsageScriptedProvider(usage={"prompt_tokens": 999_999})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert not any("context preflight" in warning for warning in result.warnings)
 
 
 @pytest.mark.asyncio

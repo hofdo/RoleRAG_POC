@@ -788,6 +788,7 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         errors=classify_warnings(result.warnings),
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
         stage_timings=result.stage_timings,
+        token_usage=result.token_usage,
     )
 
 
@@ -817,6 +818,7 @@ def _to_turn_detail_response(turn: StoredTurn) -> TurnDetailResponse:
             if diagnostics is not None
             else None
         ),
+        token_usage=diagnostics.token_usage if diagnostics is not None else None,
     )
 
 

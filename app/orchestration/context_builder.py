@@ -128,10 +128,20 @@ def _format_retrieved_chunks(chunks: Sequence[RetrievedChunk]) -> str:
 
 
 def _truncate_recent_dialogue_message(text: str, *, max_chars: int) -> str:
+    """Cut the retained body at the last word boundary within max_chars instead of
+    mid-word, then append the existing "[Prior dialogue truncated...]" notice
+    (the notice itself is deliberately additional context beyond max_chars, not
+    counted against it -- unchanged from before). Falls back to a hard cut when no
+    boundary is found within the budget."""
     if len(text) <= max_chars:
         return text
-    omitted = len(text) - max_chars
+    truncated = text[:max_chars]
+    boundary = truncated.rfind(" ")
+    if boundary > 0:
+        truncated = truncated[:boundary]
+    truncated = truncated.rstrip()
+    omitted = len(text) - len(truncated)
     return (
-        f"{text[:max_chars].rstrip()}\n"
+        f"{truncated}\n"
         f"[Prior dialogue truncated for prompt budget; omitted {omitted} characters.]"
     )

@@ -28,7 +28,22 @@ def test_settings_use_llamacpp_friendly_local_defaults(tmp_path: Path) -> None:
     assert settings.live_long_turn_count == 0
     assert settings.live_turn_count == 8
     assert settings.live_fail_on_structured_warnings is True
+    assert settings.model_context_window_tokens == 0
+    assert settings.context_warn_ratio == 0.85
     assert "cloud_llm_enabled" not in settings.model_dump()
+
+
+def test_settings_accept_context_ceiling_overrides(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "MODEL_CONTEXT_WINDOW_TOKENS=8192\nCONTEXT_WARN_RATIO=0.7\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.model_context_window_tokens == 8192
+    assert settings.context_warn_ratio == 0.7
 
 
 def test_settings_accept_valid_cloud_mode_override(tmp_path: Path) -> None:

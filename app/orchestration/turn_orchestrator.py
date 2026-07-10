@@ -139,6 +139,10 @@ class TurnOrchestratorConfig:
     containment_overlap_threshold: float = DEFAULT_PARAPHRASE_OVERLAP
     memory_consolidation_threshold: int = 0
     memory_consolidation_max_importance: int = 3
+    # Opt-in context-ceiling preflight (#69). Defaults mirror Settings: 0 disables
+    # entirely (byte-identical -- no estimate, no warning, no behavior change).
+    model_context_window_tokens: int = 0
+    context_warn_ratio: float = 0.85
 
 
 class TurnOrchestrator:
@@ -213,6 +217,8 @@ class TurnOrchestrator:
             recent_dialogue_max_message_chars=config.recent_dialogue_max_message_chars,
             actor_agent=self.actor_agent,
             truncation_retry_budget_multiplier=config.truncation_retry_budget_multiplier,
+            model_context_window_tokens=config.model_context_window_tokens,
+            context_warn_ratio=config.context_warn_ratio,
         )
         self.critique_stage = TurnCritiqueStage(
             provider=provider,
@@ -334,6 +340,7 @@ class TurnOrchestrator:
                 timings=timings,
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
+                token_usage=None,  # no generation completed at all
             )
         warnings = [
             *retrieval.warnings,
@@ -376,6 +383,11 @@ class TurnOrchestrator:
         warnings.extend(resolution.warnings)
         if resolution.repair_duration is not None:
             timings["repair"] = resolution.repair_duration
+        # The generation that actually produced resolution.text: the repair
+        # generation's usage when a repair ran, otherwise the initial actor
+        # generation's (mirrors resolution.finish_reason's provenance). An empty
+        # dict (no usage reported) normalizes to None rather than {} (#69).
+        final_usage = resolution.usage or None
         if resolution.controlled_failure:
             return self._controlled_failure_result(
                 context=context,
@@ -388,6 +400,7 @@ class TurnOrchestrator:
                 timings=timings,
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
+                token_usage=final_usage,
             )
         final_text = resolution.text
         final_route = resolution.route
@@ -440,6 +453,7 @@ class TurnOrchestrator:
                     finish_reason=final_finish_reason,
                     warnings=warnings,
                     memory_written=False,
+                    token_usage=final_usage,
                 ),
             )
             return TurnResult(
@@ -451,6 +465,7 @@ class TurnOrchestrator:
                 warnings=warnings,
                 retrieval=retrieval.diagnostics,
                 stage_timings=timings,
+                token_usage=final_usage,
                 deferred_memory=DeferredMemoryJob(
                     session_id=context.session.id,
                     turn_id=persistence.turn.id,
@@ -486,6 +501,7 @@ class TurnOrchestrator:
                 finish_reason=final_finish_reason,
                 warnings=warnings,
                 memory_written=memory.memory_written,
+                token_usage=final_usage,
             ),
         )
         return TurnResult(
@@ -497,6 +513,7 @@ class TurnOrchestrator:
             warnings=warnings,
             retrieval=retrieval.diagnostics,
             stage_timings=timings,
+            token_usage=final_usage,
         )
 
     async def run_deferred_memory(self, job: DeferredMemoryJob) -> None:
@@ -538,6 +555,7 @@ class TurnOrchestrator:
         finish_reason: str | None,
         warnings: list[str],
         memory_written: bool,
+        token_usage: dict[str, int] | None = None,
     ) -> TurnDiagnostics:
         """Single builder for persisted turn diagnostics so the deferred, memory, and
         controlled-failure paths write the same field set (they must match the live
@@ -549,6 +567,7 @@ class TurnOrchestrator:
             finish_reason=finish_reason,
             warnings=warnings,
             memory_written=memory_written,
+            token_usage=token_usage,
         )
 
     def _controlled_failure_result(
@@ -564,6 +583,7 @@ class TurnOrchestrator:
         timings: dict[str, float],
         retrieval_diagnostics: TurnRetrievalDiagnostics | None,
         on_stage: Callable[[str], None] | None,
+        token_usage: dict[str, int] | None = None,
     ) -> TurnResult:
         """Persist the failed turn and build its CONTROLLED_FAILURE result together, so the
         two failure exits (actor error, repair exhausted) cannot drift apart."""
@@ -578,6 +598,7 @@ class TurnOrchestrator:
             timings=timings,
             retrieval_diagnostics=retrieval_diagnostics,
             on_stage=on_stage,
+            token_usage=token_usage,
         )
         return TurnResult(
             text=text,
@@ -588,6 +609,7 @@ class TurnOrchestrator:
             warnings=warnings,
             retrieval=retrieval_diagnostics,
             stage_timings=timings,
+            token_usage=token_usage,
             outcome=TurnOutcome.CONTROLLED_FAILURE,
         )
 
@@ -604,6 +626,7 @@ class TurnOrchestrator:
         timings: dict[str, float],
         retrieval_diagnostics: TurnRetrievalDiagnostics | None,
         on_stage: Callable[[str], None] | None,
+        token_usage: dict[str, int] | None = None,
     ) -> None:
         """Keep failed turns in history: the player's message survives, the failure
         diagnostics become queryable, and acceptance tooling can account for every
@@ -631,6 +654,7 @@ class TurnOrchestrator:
                     finish_reason=finish_reason,
                     warnings=warnings,
                     memory_written=False,
+                    token_usage=token_usage,
                 ),
             )
         except Exception as exc:  # noqa: BLE001

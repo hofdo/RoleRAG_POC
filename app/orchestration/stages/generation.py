@@ -6,7 +6,11 @@ from app.agents import ActorAgent
 from app.domain import TurnInput
 from app.llm.provider import LlmMessage, LlmProvider, LlmResponse, resolve_provider
 from app.llm.router import ModelRoute
-from app.orchestration.context_budget import ContextBudget
+from app.orchestration.context_budget import (
+    ContextBudget,
+    context_preflight_warning,
+    context_usage_warning,
+)
 from app.orchestration.context_builder import build_actor_messages
 from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult, TurnRoutingStage
@@ -35,6 +39,7 @@ class GenerationStageResult:
     text: str
     route: ModelRoute
     finish_reason: str | None
+    usage: dict[str, int]
     messages: tuple[LlmMessage, ...]
     warnings: tuple[str, ...]
 
@@ -52,6 +57,10 @@ class TurnGenerationStage:
         # Default mirrors Settings.truncation_retry_budget_multiplier; composition
         # passes the configured value (single source of truth).
         truncation_retry_budget_multiplier: int = 2,
+        # Opt-in context-ceiling preflight (#69). Defaults mirror Settings: 0 disables
+        # entirely (byte-identical -- no estimate, no warning, no behavior change).
+        model_context_window_tokens: int = 0,
+        context_warn_ratio: float = 0.85,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -60,6 +69,8 @@ class TurnGenerationStage:
         self.recent_dialogue_max_message_chars = recent_dialogue_max_message_chars
         self.actor_agent = actor_agent or ActorAgent()
         self.truncation_retry_budget_multiplier = truncation_retry_budget_multiplier
+        self.model_context_window_tokens = model_context_window_tokens
+        self.context_warn_ratio = context_warn_ratio
 
     async def run(
         self,
@@ -79,7 +90,13 @@ class TurnGenerationStage:
             context_budget=self.context_budget,
             recent_dialogue_max_message_chars=self.recent_dialogue_max_message_chars,
         )
-        text, route, finish_reason, warnings = await self.generate_messages(
+        preflight_warning = context_preflight_warning(
+            messages,
+            max_tokens=routing.route.max_tokens,
+            context_window_tokens=self.model_context_window_tokens,
+            warn_ratio=self.context_warn_ratio,
+        )
+        text, route, finish_reason, usage, warnings = await self.generate_messages(
             route=routing.route,
             messages=messages,
         )
@@ -87,9 +104,13 @@ class TurnGenerationStage:
             text=text,
             route=route,
             finish_reason=finish_reason,
+            usage=usage,
             messages=tuple(messages),
-            warnings=(*self._context_truncation_warnings(context=context, retrieval=retrieval),
-                      *warnings),
+            warnings=(
+                *self._context_truncation_warnings(context=context, retrieval=retrieval),
+                *((preflight_warning,) if preflight_warning is not None else ()),
+                *warnings,
+            ),
         )
 
     def _context_truncation_warnings(
@@ -126,11 +147,28 @@ class TurnGenerationStage:
         *,
         route: ModelRoute,
         messages: list[LlmMessage] | tuple[LlmMessage, ...],
-    ) -> tuple[str, ModelRoute, str | None, tuple[str, ...]]:
+    ) -> tuple[str, ModelRoute, str | None, dict[str, int], tuple[str, ...]]:
         response, used_route, complete_warnings = await self._generate_complete(
             route=route, messages=list(messages)
         )
-        return response.text, used_route, response.finish_reason, complete_warnings
+        return (
+            response.text,
+            used_route,
+            response.finish_reason,
+            response.usage,
+            complete_warnings,
+        )
+
+    def _usage_warnings(self, response: LlmResponse) -> tuple[str, ...]:
+        """Post-hoc counterpart to the pre-generation preflight warning: fires once a
+        real usage report is available and actual prompt_tokens crosses the same
+        threshold the estimate was checked against. Actual beats estimate (#69)."""
+        warning = context_usage_warning(
+            response.usage,
+            context_window_tokens=self.model_context_window_tokens,
+            warn_ratio=self.context_warn_ratio,
+        )
+        return (warning,) if warning is not None else ()
 
     async def _generate_complete(
         self,
@@ -140,7 +178,7 @@ class TurnGenerationStage:
     ) -> tuple[LlmResponse, ModelRoute, tuple[str, ...]]:
         response, warnings = await self._generate_non_empty(route=route, messages=messages)
         if response.finish_reason != "length":
-            return response, route, warnings
+            return response, route, (*warnings, *self._usage_warnings(response))
         retry_route = route.model_copy(
             update={"max_tokens": route.max_tokens * self.truncation_retry_budget_multiplier}
         )
@@ -157,7 +195,7 @@ class TurnGenerationStage:
             raise TruncatedProviderResponseError(
                 provider=route.provider.value, model=route.model
             )
-        return retry_response, retry_route, warnings
+        return retry_response, retry_route, (*warnings, *self._usage_warnings(retry_response))
 
     async def _generate_non_empty(
         self,
