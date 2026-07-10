@@ -385,13 +385,35 @@ Ordered by value. Effort S/M/L.
   Protocols — more invasive than this fix warrants; left for a follow-up if the crash-window risk
   is ever judged worth it.
 
-- [ ] **#67** *(bug, S)* **CLI orchestrator wiring omits three collaborators the API wires.**
-  #48 fixed *config* parity, but `cli._build_services` still constructs the `TurnOrchestrator`
-  without `canon_repository` (CLI turns silently ignore author-pinned canon facts that API turns
-  honor), `structured_failure_sink` (CLI structured-output failures are never recorded), and
-  `memory_embedding_provider` (semantic write-dedup/consolidation can never activate on CLI even
-  when configured). Fix: delegate to `composition.build_services` (or extend
-  `test_composition_config_parity.py` to pin collaborator parity, not just config parity).
+- [x] **#67** *(bug, S)* **CLI orchestrator wiring omits three collaborators the API wires.**
+  #48 fixed *config* parity, but `cli._build_services` still constructed the `TurnOrchestrator`
+  without `canon_repository` (CLI turns silently ignored author-pinned canon facts that API turns
+  honor), `structured_failure_sink` (CLI structured-output failures were never recorded), and
+  `memory_embedding_provider` (semantic write-dedup/consolidation could never activate on CLI even
+  when configured); the returned `AppServices` also omitted `turn_repository`, `memory_repository`,
+  `canon_repository`, and `memory_indexer`. **Shipped:** `cli._build_services` now delegates
+  outright to `composition.build_services` — the ~55-line hand-rolled assembly is gone, replaced by
+  a one-line call, so the two composition roots can no longer drift on *either* config or
+  collaborators. The five CLI-local builder aliases that only the deleted assembly used
+  (`_build_local_provider`, `_build_cloud_provider`, `_build_critic_agent`, `_build_file_loader`,
+  `_build_memory_curator`) were removed as dead code; the three aliases other CLI commands still
+  call directly (`ingest`, `ingest-scenario-lore`, `reindex-memories`, `reset-index`,
+  `delete-session`, `reset-db`, `retrieve-debug`'s manual retriever, lore auto-ingest) —
+  `_build_embedding_provider`, `_build_vector_store`, `_build_actor_context_retriever` — were kept.
+  `tests/integration/test_cli.py` patches that targeted the removed CLI aliases for
+  `_build_services`-routed commands (`start-session`, `resume`, `turn`, `retrieve-debug`'s loader)
+  now target `app.composition.build_*` instead, since that's where those calls are resolved after
+  delegation; patches for the still-direct CLI aliases were left as `app.cli._build_*`.
+  `tests/unit/test_composition_config_parity.py` gained
+  `test_cli_and_api_build_services_wire_the_same_collaborators`, which builds both roots with fake
+  providers and asserts `canon_repository`, `structured_failure_sink`, and
+  `memory_embedding_provider` all reach the built orchestrator on both surfaces — the concrete #67
+  regression tripwire — plus `test_cli_build_services_delegates_to_composition_build_services`
+  pinning the delegation itself. Gate green (85 regression checks). Live-smoke caveat, same as #48:
+  this changes real CLI turn behavior (canon facts now injected, structured failures now logged,
+  semantic dedup now reachable) — a live `bash scripts/live-smoke.sh` pass is advisable before
+  relying on it in a real session, since the deterministic gate can't exercise real canon-fact
+  retrieval quality or a live embedding backend.
 
 ### Decision
 

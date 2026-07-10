@@ -25,13 +25,8 @@ from app import __version__
 from app.composition import (
     AppServices,
     build_actor_context_retriever,
-    build_cloud_provider,
-    build_critic_agent,
     build_embedding_provider,
-    build_file_loader,
-    build_local_provider,
-    build_memory_curator,
-    build_orchestrator_config,
+    build_services,
     build_vector_store,
     redact_settings,
 )
@@ -52,8 +47,7 @@ from app.diagnostics import (
 from app.domain import TurnInput, TurnResult, Visibility
 from app.llm.provider import ProviderTimeoutError, ProviderUnavailableError
 from app.llm.router import CloudMode, ModelProviderName, ModelRoute, ModelTask, choose_route
-from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
-from app.orchestration.turn_orchestrator import TurnOrchestrator
+from app.memory import MemoryEpisodeStore, MemoryIndexer
 from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
@@ -90,11 +84,6 @@ async def _run_turn(
 
 
 _redact_settings = redact_settings
-_build_local_provider = build_local_provider
-_build_cloud_provider = build_cloud_provider
-_build_critic_agent = build_critic_agent
-_build_file_loader = build_file_loader
-_build_memory_curator = build_memory_curator
 _build_embedding_provider = build_embedding_provider
 _build_vector_store = build_vector_store
 _build_actor_context_retriever = build_actor_context_retriever
@@ -143,57 +132,19 @@ def _build_services(
     enable_retrieval: bool,
     content_root: Path | str | None = None,
 ) -> AppServices:
-    resolved_content_root = content_root or settings.content_root
-    connection = connect_sqlite(settings.database_path)
-    initialize_database(connection)
-    session_repository = SQLiteSessionRepository(connection)
-    turn_repository = SQLiteTurnRepository(connection)
-    memory_repository = SQLiteMemoryRepository(connection)
-    memory_store = MemoryEpisodeStore(memory_repository=memory_repository)
-    recent_dialogue_store = RecentDialogueStore(
-        turn_repository=turn_repository,
-        recent_turns=settings.recent_dialogue_turns,
-    )
-    embedding_provider = _build_embedding_provider(settings) if enable_retrieval else None
-    vector_store = _build_vector_store(settings) if enable_retrieval else None
-    orchestrator = TurnOrchestrator(
-        loader=_build_file_loader(resolved_content_root),
-        loader_factory=_build_file_loader,
-        provider=_build_local_provider(settings),
-        cloud_provider=_build_cloud_provider(settings),
-        critic_agent=_build_critic_agent(settings),
-        session_repository=session_repository,
-        turn_repository=turn_repository,
-        recent_dialogue_store=recent_dialogue_store,
-        memory_store=memory_store,
-        memory_curator=_build_memory_curator(settings),
-        memory_indexer=(
-            MemoryIndexer(
-                memory_store=memory_store,
-                embedding_provider=embedding_provider,
-                vector_store=vector_store,
-                importance_floor=settings.rag_index_importance_floor,
-                session_memory_max_episodes=settings.session_memory_max_episodes,
-            )
-            if embedding_provider is not None and vector_store is not None
-            else None
-        ),
-        actor_context_retriever=(
-            _build_actor_context_retriever(
-                settings,
-                embedding_provider=embedding_provider,
-                vector_store=vector_store,
-            )
-            if embedding_provider is not None and vector_store is not None
-            else None
-        ),
-        config=build_orchestrator_config(settings, content_root=str(resolved_content_root)),
-    )
-    return AppServices(
-        connection=connection,
-        session_repository=session_repository,
-        orchestrator=orchestrator,
-        recent_dialogue_store=recent_dialogue_store,
+    """Delegate to the composition root so CLI and API turns share one collaborator graph.
+
+    This used to re-assemble the orchestrator's dependencies locally, which let it drift
+    from ``app.composition.build_services`` (#67): CLI turns silently ignored author-pinned
+    canon facts (no ``canon_repository`` wired in), structured-output failures were never
+    recorded (no ``structured_failure_sink``), and semantic write-dedup could never activate
+    (no ``memory_embedding_provider``). Delegating keeps both surfaces identical by
+    construction instead of by manual parity upkeep.
+    """
+    return build_services(
+        settings,
+        enable_retrieval=enable_retrieval,
+        content_root=content_root,
     )
 
 
