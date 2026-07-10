@@ -76,7 +76,7 @@ class FakeLoader:
             name="Winter Palace Intrigue",
             default_scene_id="rose-gallery",
             persona_ids=["archivist", "warden"],
-            scene_ids=["rose-gallery"],
+            scene_ids=["rose-gallery", "east-wing"],
         )
 
     def load_persona(self, persona_id: str) -> PersonaCard:
@@ -1380,6 +1380,102 @@ def test_delete_last_turn_returns_404_for_unknown_session(tmp_path: Path) -> Non
     app.dependency_overrides.clear()
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "session_not_found"
+
+
+def test_delete_last_turn_restores_pre_override_persona(tmp_path: Path) -> None:
+    # Regression test for #66: TurnOrchestrator.run_turn commits a per-turn persona
+    # override to sessions.active_persona_id only AFTER the turn persists
+    # successfully. Rerolling (deleting) that turn must undo the commit, or the
+    # session is stranded on a persona the surviving history never switched to.
+    #
+    # A first, non-switching turn establishes "archivist" as a value recorded on a
+    # surviving turn -- the switch commit made by the second (rerolled) turn must
+    # restore exactly that value. (A switch on the very first turn of a session is
+    # a separate, documented edge case: see
+    # test_restore_persona_after_turn_delete_leaves_unrecoverable_creation_persona_alone
+    # in tests/unit/test_repositories.py.)
+    services, provider, _ = _build_services(tmp_path)
+    provider.responses.append("I am the warden of this wing.")
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    before_switch = services.session_repository.get_session("session-1")
+    assert before_switch is not None
+    assert before_switch.active_persona_id == "archivist"
+
+    first = client.post("/sessions/session-1/turns", json={"message": "Hello there."})
+    assert first.status_code == 200
+
+    switch = client.post(
+        "/sessions/session-1/turns",
+        json={"message": "Who are you really?", "active_persona_id": "warden"},
+    )
+    assert switch.status_code == 200
+    after_switch = services.session_repository.get_session("session-1")
+    assert after_switch is not None
+    assert after_switch.active_persona_id == "warden"
+
+    response = client.delete("/sessions/session-1/turns/last")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    reloaded = services.session_repository.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "archivist"
+
+
+def test_delete_last_turn_without_switch_leaves_active_persona_untouched(
+    tmp_path: Path,
+) -> None:
+    # Sibling to test_delete_last_turn_restores_pre_override_persona: a reroll of a
+    # turn that never requested a persona override must be a no-op for
+    # active_persona_id, even when a remaining prior turn shares that same persona.
+    services, provider, _ = _build_services(tmp_path)
+    provider.responses.append("Only archivists and locksmiths speak of that door.")
+    app.dependency_overrides[get_turn_services] = lambda: services
+    client = TestClient(app)
+
+    first = client.post("/sessions/session-1/turns", json={"message": "Hello there."})
+    assert first.status_code == 200
+    second = client.post("/sessions/session-1/turns", json={"message": "And then?"})
+    assert second.status_code == 200
+    before_delete = services.session_repository.get_session("session-1")
+    assert before_delete is not None
+    assert before_delete.active_persona_id == "archivist"
+
+    response = client.delete("/sessions/session-1/turns/last")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    reloaded = services.session_repository.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "archivist"
+
+
+def test_delete_last_turn_does_not_revert_an_explicit_scene_switch(tmp_path: Path) -> None:
+    # Scoping guard for #66: unlike persona, a scene never changes as a per-turn
+    # side effect -- TurnInput has no scene field, and active_scene_id only ever
+    # changes via the explicit POST /sessions/{id}/scene endpoint. A scene switch
+    # made after the last turn is a deliberate, independent action and must
+    # SURVIVE a reroll of that turn, not be undone by one.
+    services, _, _ = _build_services(tmp_path)
+    app.dependency_overrides[get_turn_services] = lambda: services
+    app.dependency_overrides[get_read_services] = lambda: services
+    client = TestClient(app)
+
+    create = client.post("/sessions/session-1/turns", json={"message": "Hello there."})
+    assert create.status_code == 200
+
+    scene_switch = client.post("/sessions/session-1/scene", json={"scene_id": "east-wing"})
+    assert scene_switch.status_code == 200
+
+    response = client.delete("/sessions/session-1/turns/last")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    reloaded = services.session_repository.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_scene_id == "east-wing"
 
 
 def test_api_get_turn_detail_returns_404_for_unknown_turn_index(tmp_path: Path) -> None:

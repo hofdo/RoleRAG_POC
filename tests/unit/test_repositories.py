@@ -18,6 +18,7 @@ from app.persistence.repositories import (
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
+    restore_persona_after_turn_delete,
 )
 from app.persistence.sqlite import connect_sqlite, initialize_database, serialize_datetime
 
@@ -797,3 +798,199 @@ def test_session_provider_round_trips_and_defaults_to_local(tmp_path: Path) -> N
         "cloud-session": ModelProviderName.CLOUD,
         "local-session": ModelProviderName.LOCAL,
     }
+
+
+def _new_session_repos(tmp_path: Path) -> tuple[SQLiteSessionRepository, SQLiteTurnRepository]:
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    sessions = SQLiteSessionRepository(connection)
+    turns = SQLiteTurnRepository(connection)
+    sessions.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    return sessions, turns
+
+
+def test_restore_persona_after_turn_delete_reverts_a_committed_switch(tmp_path: Path) -> None:
+    # Mirrors what TurnOrchestrator.run_turn does on a successful persona-switching
+    # turn: persist the turn under the new persona, then commit active_persona_id.
+    # A preceding non-switching turn establishes "archivist" as the value a reroll
+    # of the switching turn must restore.
+    sessions, turns = _new_session_repos(tmp_path)
+    turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="Hello there.",
+        assistant_message="Greetings.",
+        route=_build_route(),
+    )
+    switched = turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="warden",
+        user_message="Who are you?",
+        assistant_message="I am the warden.",
+        route=_build_route(),
+    )
+    sessions.update_active_persona("session-1", "warden")
+    turns.delete_last_turn("session-1")
+
+    restore_persona_after_turn_delete(
+        session_repository=sessions,
+        turn_repository=turns,
+        session_id="session-1",
+        deleted_turn=switched,
+    )
+
+    reloaded = sessions.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "archivist"
+
+
+def test_restore_persona_after_turn_delete_restores_the_nearest_surviving_success_turn(
+    tmp_path: Path,
+) -> None:
+    # Turn 1 switches archivist -> warden (SUCCESS). Turn 2 switches warden -> regent
+    # but ends CONTROLLED_FAILURE, so it never commits. Turn 3 switches warden ->
+    # regent and succeeds. Deleting turn 3 must restore "warden" (turn 1's persona),
+    # not "archivist" (session creation) and not skip past the failed turn 2.
+    sessions, turns = _new_session_repos(tmp_path)
+    turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="warden",
+        user_message="Turn 1",
+        assistant_message="Reply 1",
+        route=_build_route(),
+    )
+    sessions.update_active_persona("session-1", "warden")
+    turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="regent",
+        user_message="Turn 2",
+        assistant_message="The system could not produce a response.",
+        route=_build_route(),
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+    last = turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="regent",
+        user_message="Turn 3",
+        assistant_message="Reply 3",
+        route=_build_route(),
+    )
+    sessions.update_active_persona("session-1", "regent")
+    turns.delete_last_turn("session-1")
+
+    restore_persona_after_turn_delete(
+        session_repository=sessions,
+        turn_repository=turns,
+        session_id="session-1",
+        deleted_turn=last,
+    )
+
+    reloaded = sessions.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "warden"
+
+
+def test_restore_persona_after_turn_delete_is_a_noop_for_controlled_failure(
+    tmp_path: Path,
+) -> None:
+    # A CONTROLLED_FAILURE turn never commits a persona switch (see
+    # TurnOrchestrator._persist_controlled_failure), so deleting one must never
+    # touch active_persona_id even if the failed turn's own persona_id differs.
+    sessions, turns = _new_session_repos(tmp_path)
+    failed = turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="warden",
+        user_message="Turn 1",
+        assistant_message="The system could not produce a response.",
+        route=_build_route(),
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+    turns.delete_last_turn("session-1")
+
+    restore_persona_after_turn_delete(
+        session_repository=sessions,
+        turn_repository=turns,
+        session_id="session-1",
+        deleted_turn=failed,
+    )
+
+    reloaded = sessions.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "archivist"
+
+
+def test_restore_persona_after_turn_delete_leaves_unrecoverable_creation_persona_alone(
+    tmp_path: Path,
+) -> None:
+    # Deleting the very first turn of a session that switched persona on turn 1
+    # leaves no remaining SUCCESS turn to recover a prior value from, and the
+    # sessions row only tracks the CURRENT active_persona_id -- the session's
+    # creation-time persona is not stored anywhere once overwritten. Documented
+    # limitation (docs/BACKLOG.md #66): active_persona_id is left as-is rather
+    # than guessed at.
+    sessions, turns = _new_session_repos(tmp_path)
+    only_turn = turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="warden",
+        user_message="Turn 1",
+        assistant_message="Reply 1",
+        route=_build_route(),
+    )
+    sessions.update_active_persona("session-1", "warden")
+    turns.delete_last_turn("session-1")
+
+    restore_persona_after_turn_delete(
+        session_repository=sessions,
+        turn_repository=turns,
+        session_id="session-1",
+        deleted_turn=only_turn,
+    )
+
+    reloaded = sessions.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "warden"
+
+
+def test_restore_persona_after_turn_delete_does_not_clobber_an_already_changed_value(
+    tmp_path: Path,
+) -> None:
+    # If active_persona_id no longer matches what the deleted turn committed (e.g.
+    # something else already changed it), the helper must not overwrite it.
+    sessions, turns = _new_session_repos(tmp_path)
+    switched = turns.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="warden",
+        user_message="Turn 1",
+        assistant_message="Reply 1",
+        route=_build_route(),
+    )
+    sessions.update_active_persona("session-1", "warden")
+    turns.delete_last_turn("session-1")
+    sessions.update_active_persona("session-1", "regent")
+
+    restore_persona_after_turn_delete(
+        session_repository=sessions,
+        turn_repository=turns,
+        session_id="session-1",
+        deleted_turn=switched,
+    )
+
+    reloaded = sessions.get_session("session-1")
+    assert reloaded is not None
+    assert reloaded.active_persona_id == "regent"

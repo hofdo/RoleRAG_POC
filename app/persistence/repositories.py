@@ -68,6 +68,57 @@ class TurnRepository(Protocol):
     def delete_last_turn(self, session_id: str) -> StoredTurn | None: ...
 
 
+def restore_persona_after_turn_delete(
+    *,
+    session_repository: SessionRepository,
+    turn_repository: TurnRepository,
+    session_id: str,
+    deleted_turn: StoredTurn,
+) -> None:
+    """Undo the durable ``active_persona_id`` commit a deleted turn made, if any.
+
+    ``TurnOrchestrator.run_turn`` commits a per-turn persona override to the session
+    row only AFTER the turn persists with outcome SUCCESS (see
+    ``app/orchestration/turn_orchestrator.py``); a CONTROLLED_FAILURE turn never
+    commits one, by design (a failed turn the player never saw succeed must not
+    move session state). Consequently, right after any SUCCESS turn completes,
+    ``sessions.active_persona_id`` always equals that turn's own ``persona_id`` --
+    whether or not that turn requested a switch, because a non-switching turn's
+    persona_id already equalled the prior active_persona_id. Right after a
+    CONTROLLED_FAILURE turn, active_persona_id is untouched (left exactly as it
+    was before that turn ran).
+
+    So deleting the most recent turn (reroll) must restore active_persona_id to
+    whatever it held immediately before the deleted turn ran:
+
+    - If the deleted turn was not SUCCESS, it never committed a persona change;
+      no-op.
+    - If it was SUCCESS, the value to restore is the persona_id of the nearest
+      *remaining* SUCCESS turn (CONTROLLED_FAILURE turns never move the pointer,
+      so they are skipped when walking backward).
+    - If no SUCCESS turn remains, the deleted turn was the first to ever move the
+      pointer since session creation. The sessions row only tracks the CURRENT
+      active_persona_id, not the creation-time value, so once that first switch
+      committed the original persona is no longer recoverable from stored state.
+      Documented limitation (see docs/BACKLOG.md #66): active_persona_id is left
+      as-is in this edge case rather than guessed at.
+    """
+    if deleted_turn.outcome != TurnOutcome.SUCCESS:
+        return
+    session = session_repository.get_session(session_id)
+    if session is None or session.active_persona_id != deleted_turn.persona_id:
+        # Session gone, or active_persona_id no longer matches what the deleted
+        # turn committed (e.g. it was already restored, or something else moved
+        # it since) -- don't clobber an unrelated value.
+        return
+    for turn in reversed(turn_repository.list_all_turns(session_id)):
+        if turn.outcome == TurnOutcome.SUCCESS:
+            if turn.persona_id != session.active_persona_id:
+                session_repository.update_active_persona(session_id, turn.persona_id)
+            return
+    # No SUCCESS turn remains: nothing recoverable to restore to (see docstring).
+
+
 class MemoryRepository(Protocol):
     def append_memories(
         self,

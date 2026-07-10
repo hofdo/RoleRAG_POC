@@ -361,13 +361,29 @@ Ordered by value. Effort S/M/L.
   chunks into a full-stack CLOUD-session turn and asserts neither string reaches any recorded
   cloud request (actor, critic, or memory). Gate green.
 
-- [ ] **#66** *(bug, S)* **Reroll leaves a deleted turn's persona/scene switch committed.**
+- [x] **#66** *(bug, S)* **Reroll leaves a deleted turn's persona/scene switch committed.**
   `DELETE /sessions/{id}/turns/last` reverses the turn row, its memories (timestamp provenance),
   and its vectors — but not `sessions.active_persona_id`/`active_scene_id` committed by that
   turn's post-persistence switch (`turn_orchestrator.run_turn` persona-switch commit). Deleting
   the turn strands the session on a persona/scene the surviving history never switched to. Fix in
   the reroll path + integration test; while there, consider wrapping the three separately-committed
   delete steps in one transaction (a crash between them currently orphans memory rows).
+  **Shipped:** scoped to persona only — scenes never change as a per-turn side effect
+  (`TurnInput` has no scene field; `active_scene_id` only moves via the explicit
+  `POST /sessions/{id}/scene` endpoint), so a scene switch made after the deleted turn is a
+  deliberate, independent action and correctly survives a reroll; a test now pins that. Added
+  `restore_persona_after_turn_delete` (`app/persistence/repositories.py`), called from
+  `delete_last_turn` in `app/api/routes.py`: a CONTROLLED_FAILURE deleted turn never committed a
+  persona change (no-op); a SUCCESS deleted turn restores the persona of the nearest remaining
+  SUCCESS turn (CONTROLLED_FAILURE turns never move the pointer, so they're skipped); if no
+  SUCCESS turn remains (the deleted turn was the first to ever switch persona since session
+  creation), the pre-switch value isn't recoverable — `sessions` only stores the *current*
+  `active_persona_id`, not the creation-time one, so it's left as-is (documented limitation).
+  Deferred the three-way-transaction idea: `SQLiteTurnRepository`/`SQLiteMemoryRepository` each
+  auto-commit per call on a shared connection, so wrapping turn-delete + memory-delete atomically
+  would mean adding no-commit variants (or a cross-repository transaction helper) to both
+  Protocols — more invasive than this fix warrants; left for a follow-up if the crash-window risk
+  is ever judged worth it.
 
 - [ ] **#67** *(bug, S)* **CLI orchestrator wiring omits three collaborators the API wires.**
   #48 fixed *config* parity, but `cli._build_services` still constructs the `TurnOrchestrator`

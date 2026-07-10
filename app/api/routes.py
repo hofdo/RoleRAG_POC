@@ -73,6 +73,7 @@ from app.persistence import (
     DataFileNotFoundError,
     DataValidationError,
     SessionNotFoundError,
+    restore_persona_after_turn_delete,
 )
 
 router = APIRouter()
@@ -579,6 +580,20 @@ async def delete_last_turn(
             code="no_turns",
             message="Session has no turns to delete.",
         )
+    # Undo the durable active_persona_id commit the deleted turn made, if any --
+    # see restore_persona_after_turn_delete for the full commit-semantics
+    # rationale. Scene is deliberately NOT rolled back here: unlike persona,
+    # active_scene_id is never mutated as a per-turn side effect (there is no
+    # scene equivalent of TurnInput.active_persona_id) -- it only changes via the
+    # explicit POST /sessions/{id}/scene endpoint, so a scene switch made after
+    # the deleted turn is a deliberate, independent action that must survive a
+    # reroll, not get undone by one.
+    restore_persona_after_turn_delete(
+        session_repository=services.session_repository,
+        turn_repository=services.turn_repository,
+        session_id=session_id,
+        deleted_turn=turn,
+    )
     deleted_memory_ids: list[str] = []
     if services.memory_repository is not None and turn.created_at is not None:
         # ponytail: provenance by timestamp (memories are written after the turn is
