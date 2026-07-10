@@ -300,8 +300,16 @@ class SQLiteTurnRepository:
         route: ModelRoute,
         outcome: TurnOutcome = TurnOutcome.SUCCESS,
     ) -> StoredTurn:
-        turn_index = self.count_turns(session_id) + 1
         created_at = utc_now()
+        # turn_index is assigned atomically inside the INSERT itself (a correlated
+        # subselect over the same table), not via a separate count-then-write step.
+        # Two concurrent writers on the same session_id both execute this single
+        # statement; SQLite serializes them on the write lock (WAL + busy_timeout,
+        # see app/persistence/sqlite.py), so the second writer's subselect always
+        # observes the first writer's committed row and gets the next index -- no
+        # UNIQUE(session_id, turn_index) collision is possible. RETURNING reports
+        # back the index actually assigned, which may differ from a value computed
+        # ahead of time under concurrency.
         cursor = self.connection.execute(
             """
             INSERT INTO turns (
@@ -319,11 +327,16 @@ class SQLiteTurnRepository:
                 route_requires_user_confirmation,
                 created_at,
                 outcome
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                ?,
+                (SELECT COALESCE(MAX(turn_index), 0) + 1 FROM turns WHERE session_id = ?),
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            RETURNING turn_index, id
             """,
             (
                 session_id,
-                turn_index,
+                session_id,
                 scene_id,
                 persona_id,
                 user_message,
@@ -340,8 +353,12 @@ class SQLiteTurnRepository:
                 outcome.value,
             ),
         )
+        returned = cursor.fetchone()
         self.connection.commit()
-        row_id = cursor.lastrowid
+        if returned is None:
+            raise RuntimeError("SQLite did not return the persisted turn's row id/index")
+        turn_index = int(returned["turn_index"])
+        row_id = returned["id"]
         if row_id is None:
             raise RuntimeError("SQLite did not return a row id for the persisted turn")
         return StoredTurn(

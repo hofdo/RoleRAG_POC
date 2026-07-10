@@ -440,7 +440,7 @@ Ordered by value. Effort S/M/L.
 
 ### Testing
 
-- [ ] **#70** *(testing, S)* **The #64 WAL test is single-process; the real CLI+API race is
+- [x] **#70** *(testing, S)* **The #64 WAL test is single-process; the real CLI+API race is
   untested.** Both #64 tests run two connections in one interpreter — no second OS process
   despite the commit title. The actual exposure is `append_turn`'s read-then-write
   `turn_index = count_turns + 1`, which two concurrent writers can both compute; the
@@ -448,7 +448,21 @@ Ordered by value. Effort S/M/L.
   but nothing tests or documents that. Either add a true cross-process test + an atomic
   `INSERT … SELECT MAX(turn_index)+1`, or record the single-writer-per-session assumption as a
   documented limit. Low urgency for single-user scope; filed so the "proven cross-process" claim
-  isn't over-read.
+  isn't over-read. **Shipped:** `SQLiteTurnRepository.append_turn`
+  (`app/persistence/repositories.py`) now assigns `turn_index` inside the `INSERT` itself, via a
+  correlated subselect (`SELECT COALESCE(MAX(turn_index), 0) + 1 FROM turns WHERE session_id = ?`)
+  plus `RETURNING turn_index, id`, instead of a separate `count_turns()` read before the write —
+  concurrent writers on one session now serialize on SQLite's write lock and each gets a distinct,
+  contiguous index instead of racing to compute the same one. `count_turns` itself is unchanged
+  (still used by the CLI, diagnostics, and evals). Added
+  `tests/unit/test_sqlite.py::test_append_turn_assigns_contiguous_unique_indices_across_real_processes`,
+  which spawns a genuine second OS process (`subprocess` running a `python -c` worker script) that
+  races the pytest process to append turns to the same session in the same on-disk database file,
+  synchronized via a filesystem ready/go handshake (no fixed sleeps); asserts zero errors on either
+  side and a contiguous, duplicate-free `1..N` index sequence afterward. The existing #64 tests
+  (`test_wal_reader_is_not_blocked_by_an_open_writer`,
+  `test_second_writer_waits_on_busy_timeout_instead_of_locking`) remain as-is — they still validate
+  WAL/busy_timeout behavior correctly, just within one process; they were not renamed or reframed.
 
 *Fixed directly with this review (no ID):* stale "Angular 19" references swept to Angular 21
 (README, docs/02, docs/09, docs/SIDE_PROJECTS, frontend/README); CHANGELOG gained an
