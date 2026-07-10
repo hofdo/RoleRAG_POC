@@ -335,7 +335,7 @@ Ordered by value. Effort S/M/L.
 
 ### Correctness / safety — do first
 
-- [ ] **#65** *(safety, M)* **Critic prompt lacks a final visibility projection for retrieved
+- [x] **#65** *(safety, M)* **Critic prompt lacks a final visibility projection for retrieved
   chunks.** The actor path independently drops non-player chunks at prompt build
   (`context_budget.select_retrieved_chunks_for_prompt` skips `visibility != PLAYER`), but the
   critic path formats whatever chunks it is handed
@@ -348,6 +348,18 @@ Ordered by value. Effort S/M/L.
   allowed visibility inside `TurnCritiqueStage.run` (player-only when the route is cloud) and add
   a malicious-retriever case to the `provider_binding` regression category. Acceptance: a
   retriever that returns GM/character-private chunks cannot get one into any cloud request.
+  **Shipped:** `TurnCritiqueStage.run` now projects `retrieved_chunks` to the route's allowed
+  visibility *before* calling `critic_agent.evaluate` (`_project_chunks_to_route_visibility` in
+  `app/orchestration/stages/critique.py`) — cloud routes keep PLAYER-visible chunks only and the
+  stage warns `"critic context filtered: N non-player chunk(s) withheld from cloud critic"`; local
+  routes are unaffected. `tests/unit/orchestration/stages/test_core_stages.py` covers the cloud
+  filter+warning, local pass-through, and empty/player-only no-warning paths. The
+  `provider_binding` eval gained a `malicious_retriever_gm_chunk_never_reaches_cloud` check
+  (`app/evals/regression_runner.py`, mirrored in
+  `tests/evals/test_provider_binding_regressions.py`) that wires a stub retriever
+  (`MaliciousActorContextRetriever` in `app/evals/fixtures.py`) returning GM + character_private
+  chunks into a full-stack CLOUD-session turn and asserts neither string reaches any recorded
+  cloud request (actor, critic, or memory). Gate green.
 
 - [ ] **#66** *(bug, S)* **Reroll leaves a deleted turn's persona/scene switch committed.**
   `DELETE /sessions/{id}/turns/last` reverses the turn row, its memories (timestamp provenance),

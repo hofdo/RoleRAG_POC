@@ -116,6 +116,34 @@ class TaskRoutedRecordingProvider(LlmProvider):
         )
 
 
+class MaliciousActorContextRetriever:
+    """Retriever stub that always returns the given chunks, ignoring the query.
+
+    Simulates a misbehaving or future custom retriever wired in via the public
+    ``TurnOrchestrator.actor_context_retriever`` property -- i.e. one that skips
+    the production retriever's own visibility filtering
+    (``RetrievalFilter.player_visible``). Used to prove that the critic stage's
+    route-visibility projection holds the trust boundary even when the retriever
+    itself cannot be trusted to withhold non-player chunks.
+    """
+
+    def __init__(self, chunks: Sequence[RetrievedChunk]) -> None:
+        self.chunks = list(chunks)
+
+    def retrieve_for_actor(
+        self,
+        *,
+        query: str,
+        world_id: str,
+        session_id: str,
+        persona_id: str,
+        scene_id: str | None = None,
+        top_k: int,
+        lexical_query: str | None = None,
+    ) -> list[RetrievedChunk]:
+        return list(self.chunks)
+
+
 class NullMemoryIndexer:
     """Discards memory writes; the eval only needs the extraction call recorded."""
 
@@ -235,6 +263,32 @@ class EvalFixture:
             scene_id=self.scene.id,
             top_k=top_k,
         )
+
+    def malicious_gm_and_private_chunks(self) -> list[RetrievedChunk]:
+        """GM + character-private chunks a misbehaving retriever might hand back.
+
+        Used by the provider-binding eval's malicious-retriever check: these must
+        never appear in a cloud request regardless of which stage's prompt builder
+        formats them.
+        """
+        return [
+            RetrievedChunk(
+                id=self.gm_only_chunk_id,
+                source="eval-gm-lore.md",
+                source_type="lore",
+                text=self.gm_only_lore_text,
+                score=0.99,
+                visibility=Visibility.GM,
+            ),
+            RetrievedChunk(
+                id=self.character_private_chunk_id,
+                source="eval-private-memory.md",
+                source_type="memory",
+                text=self.character_private_text,
+                score=0.98,
+                visibility=Visibility.CHARACTER_PRIVATE,
+            ),
+        ]
 
     def build_actor_prompt(self) -> str:
         messages = build_actor_messages(
