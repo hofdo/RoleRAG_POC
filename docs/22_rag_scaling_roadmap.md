@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-09 @ 46c8dca
+> Reviewed: 2026-07-10 @ 24d4aab
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -179,6 +179,11 @@ leg (dense/sparse) surfaced each candidate (RAG Inspector addition). Effort L. �
   loosening the existing one.
 
 ### P1.2 Embedding model upgrade path (multilingual)
+
+> **Runbook shipped 2026-07-10** — change item (1) lives in
+> [docs/23](23_embedding_migration_runbook.md) (reset-index → re-ingest → reindex-memories,
+> fingerprint guards, failure modes, rollback). Change items (2) benchmark and (3) default
+> swap remain gated on the P0.4 corpus.
 
 **Problem.** `all-MiniLM-L6-v2` is English-only and the weakest quality lever; scenarios
 may be authored/played in German. Swaps are configurationally trivial (`EMBEDDING_MODEL`)

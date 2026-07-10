@@ -1,6 +1,6 @@
 # RoleRAG Documentation
 
-> Reviewed: 2026-07-07 @ 7888ee7
+> Reviewed: 2026-07-10 @ 24d4aab
 
 Navigation hub for the RoleRAG docs. New here? Start with the root
 [README](../README.md) (setup, Docker, CLI/API usage), then use the diagrams and
@@ -113,6 +113,7 @@ flowchart TD
 | [20_playing_rolerag](20_playing_rolerag.md) | Player guide: the `/app/play` surface, session setup + provider choice, reroll, scene/persona switch, memory/canon panels, controlled failures in play, troubleshooting FAQ |
 | [21_fable_handoff_reasoning](21_fable_handoff_reasoning.md) | Predecessor-agent handoff (2026-07-07): reasoning chains behind the architecture, analysis method, decision record, working agreements for successor agents |
 | [22_rag_scaling_roadmap](22_rag_scaling_roadmap.md) | Verified RAG-core roadmap for larger scenarios on ~27B local models: token budget, eval assets, hybrid retrieval, chunking, long-campaign presets |
+| [23_embedding_migration_runbook](23_embedding_migration_runbook.md) | How to swap `EMBEDDING_MODEL` safely: reset-index → re-ingest → reindex-memories per session, fingerprint guards, failure modes, rollback |
 
 ## Planning & roadmap
 
