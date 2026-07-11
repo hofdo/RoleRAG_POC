@@ -35,7 +35,10 @@ no longer exists. Order was value + independence, decisions last; each item was 
   `app.composition.auto_ingest_scenario_lore` helper (both `app.cli._auto_ingest_scenario_lore`
   and `app.api.routes.create_session` call it) -- request field `skip_lore_ingest: bool = false`
   (additive), failures degrade to `CreateSessionResponse.warnings: list[str]` (additive) instead
-  of failing session creation, idempotent (`ingest_document` replaces a source's chunks by path)
+  of failing session creation, idempotent (`ingest_document` replaces a source's chunks by path).
+  Known/acceptable for personal use: like the CLI's `start-session`, API session creation loads
+  the embedding model and embeds scenario lore inline on first use, so the first `POST /sessions`
+  on a cold cache can be slow.
 - [~] **#19** structured `TurnResult.errors` — **DEFERRED to decision-batch**: `warnings: list[str]`
   spans 78 sites + 4 API schemas + persistence; contract-breaking + taxonomy decision; YAGNI for a
   single-user POC until a UI consumer needs it

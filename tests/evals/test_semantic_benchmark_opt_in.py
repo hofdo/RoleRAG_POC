@@ -8,7 +8,7 @@ was authored in blocks FastEmbed downloads outright, and the owner's machine is
 where this tier is meant to run:
 
     ROLERAG_SEMANTIC_MODEL=sentence-transformers/all-MiniLM-L6-v2 \\
-        pytest -m semantic tests/evals/test_semantic_benchmark.py
+        pytest -m semantic tests/evals/test_semantic_benchmark_opt_in.py
 
 (equivalently: `rolerag semantic-benchmark --model <name>` for the human-readable
 table -- this test module asserts machine-checkable floors on the same numbers.)
@@ -54,6 +54,11 @@ pytestmark = [
 # without investigation.
 _MIN_RECALL_AT_10 = 0.3
 _MIN_NDCG_AT_10 = 0.2
+# Lower than the overall floor -- the default `all-MiniLM-L6-v2` baseline is
+# English-only (docs/22 P1.2), so German queries are expected to score weaker. Still a
+# real, failable floor (not a vacuous >= 0.0): generous for a MiniLM-class model on
+# graded relevance, provisional exactly like the floors above pending the real-model run.
+_MIN_GERMAN_RECALL_AT_10 = 0.30
 
 
 @pytest.fixture(scope="module")
@@ -84,7 +89,7 @@ def test_german_subset_recall_at_10_clears_a_lower_provisional_floor(
     the German subset floor is set lower deliberately -- a multilingual candidate
     (P1.2) should clear the same floor as the overall set; this floor exists so a
     monolingual baseline run doesn't fail the whole tier on an expected weak spot."""
-    assert report.reranked.german.recall_at_10 >= 0.0
+    assert report.reranked.german.recall_at_10 >= _MIN_GERMAN_RECALL_AT_10
 
 
 def test_reranked_path_is_no_worse_than_raw_dense_on_aggregate_recall(
