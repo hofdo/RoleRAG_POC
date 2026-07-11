@@ -1,6 +1,6 @@
 # 17 — Content Authoring Format Reference
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-11 @ 4965a22
 
 ## Purpose
 
@@ -153,13 +153,16 @@ the `canon_lore` vector collection ([app/rag/ingestion.py](../app/rag/ingestion.
 | `tags` | Retrieval/boost tags. |
 | `world_id` | Scopes the chunks to a world. |
 
-The CLI `start-session` command best-effort auto-ingests the scenario's manifest lore on
-session creation ([app/cli.py](../app/cli.py)). It is **idempotent** (re-running re-indexes
+Both the CLI `start-session` command and the API `POST /sessions` endpoint (and therefore
+the SPA) best-effort auto-ingest the scenario's manifest lore on session creation, through
+the shared `auto_ingest_scenario_lore` helper
+([app/composition.py](../app/composition.py)). It is **idempotent** (re-running re-indexes
 the same lore without duplicating it) and **fail-open** (an unreachable vector store or
-missing embedding backend only warns; the session is still created). Pass
-`--skip-lore-ingest` to opt out. API/SPA session creation does **not** auto-ingest — run
-the `ingest-scenario-lore` CLI command (or `ingest` for a single document) to index lore
-for those sessions.
+missing embedding backend never blocks session creation): the CLI prints a yellow warning,
+the API instead returns it in `CreateSessionResponse.warnings`. Opt out with the CLI's
+`--skip-lore-ingest` flag or the API's `skip_lore_ingest: true` request field. The
+`ingest-scenario-lore` CLI command (or `ingest` for a single document) remains available
+for re-indexing without starting a session, and fails loud instead of warning.
 
 ## The `bride-for-sarnhold` containment probe
 

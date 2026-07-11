@@ -3,9 +3,11 @@
 Wraps the composition root (``app.composition``) and the ``TurnOrchestrator`` to
 offer the full offline workflow: content validation and scaffolding, lore
 ingestion, session start/list/export/import, running and inspecting turns,
-memory inspection, index/db resets, and the embedding A/B harness. Unlike the
-API/SPA path, ``start-session`` best-effort auto-ingests the scenario's manifest
-lore (idempotent, fail-open, ``--skip-lore-ingest`` to opt out). Reads
+memory inspection, index/db resets, and the embedding A/B harness.
+``start-session`` best-effort auto-ingests the scenario's manifest lore via
+``app.composition.auto_ingest_scenario_lore`` (idempotent, fail-open,
+``--skip-lore-ingest`` to opt out) -- the same shared helper the API's
+``POST /sessions`` uses, so both surfaces behave identically. Reads
 configuration via ``app.config.get_settings``.
 """
 
@@ -24,6 +26,7 @@ import typer
 from app import __version__
 from app.composition import (
     AppServices,
+    auto_ingest_scenario_lore,
     build_actor_context_retriever,
     build_embedding_provider,
     build_services,
@@ -90,38 +93,23 @@ _build_actor_context_retriever = build_actor_context_retriever
 
 
 def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
-    """Best-effort: index the scenario's lore so retrieval works without a separate ingest step.
-
-    Never blocks session creation. A scenario with no manifest is silent; an unreachable vector
-    store or missing embedding backend only warns (run ingest-scenario-lore later). Idempotent,
-    so re-running start-session re-indexes the same lore without duplicating it.
+    """Typer-facing wrapper around ``app.composition.auto_ingest_scenario_lore``: converts the
+    shared best-effort outcome into colored CLI feedback. See that function's docstring for the
+    exact skip/idempotency/failure semantics -- identical to the API's ``POST /sessions`` path.
     """
-    if not (content_root / "documents" / "manifest.json").exists():
-        return  # no lore manifest -> nothing to index; skip building embedding/vector providers
-    try:
-        results = ingest_lore_manifest(
-            content_root,
-            embedding_provider=_build_embedding_provider(settings),
-            vector_store=_build_vector_store(settings),
-            chunking_config=ChunkingConfig(
-                chunk_size_chars=settings.rag_chunk_size_chars,
-                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
-            ),
-            model_key=settings.embedding_model,
-        )
-    except Exception as exc:  # degrade gracefully: a session must still be creatable offline
-        # Includes a manifest that references a missing document -- warn rather than swallow,
-        # so a typo'd lore path does not silently leave retrieval empty. (The no-manifest case
-        # already returned above.)
+    outcome = auto_ingest_scenario_lore(settings, content_root)
+    if not outcome.attempted:
+        return  # no lore manifest -> nothing to index
+    if outcome.warning is not None:
         typer.secho(
-            f"warning: scenario lore auto-ingest skipped: {exc}",
+            f"warning: {outcome.warning}",
             fg=typer.colors.YELLOW,
             err=True,
         )
         return
-    total = sum(result.chunk_count for result in results)
     typer.secho(
-        f"auto-ingested {total} lore chunk(s) from {len(results)} document(s)",
+        f"auto-ingested {outcome.chunk_count} lore chunk(s) from {outcome.document_count} "
+        "document(s)",
         fg=typer.colors.GREEN,
         err=True,
     )

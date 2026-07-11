@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-11 @ 7d820d5
+> Reviewed: 2026-07-11 @ a20bfc5
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -30,8 +30,12 @@ no longer exists. Order was value + independence, decisions last; each item was 
 - [x] **#17** critic error → fail closed (CONTROLLED_FAILURE) instead of serving unvalidated text
 - [~] **#9** ~~memory-extraction cloud retry~~ — **DROPPED**: conflicts with the deliberate
   `memory_extraction_stays_local` / `critic_stays_local` invariant; deterministic fallback already covers it
-- [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`;
-  API create_session left as a follow-up)
+- [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`).
+  **Follow-up shipped**: `POST /sessions` now mirrors it via the shared
+  `app.composition.auto_ingest_scenario_lore` helper (both `app.cli._auto_ingest_scenario_lore`
+  and `app.api.routes.create_session` call it) -- request field `skip_lore_ingest: bool = false`
+  (additive), failures degrade to `CreateSessionResponse.warnings: list[str]` (additive) instead
+  of failing session creation, idempotent (`ingest_document` replaces a source's chunks by path)
 - [~] **#19** structured `TurnResult.errors` — **DEFERRED to decision-batch**: `warnings: list[str]`
   spans 78 sites + 4 API schemas + persistence; contract-breaking + taxonomy decision; YAGNI for a
   single-user POC until a UI consumer needs it

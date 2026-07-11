@@ -18,6 +18,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Generator
 from contextlib import suppress
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
@@ -55,7 +56,12 @@ from app.api.schemas import (
     to_retrieval_diagnostics_response,
 )
 from app.api.sse import build_turn_stream_frames, serialize_error_frame, serialize_stage_frame
-from app.composition import AppServices, build_file_loader, build_services
+from app.composition import (
+    AppServices,
+    auto_ingest_scenario_lore,
+    build_file_loader,
+    build_services,
+)
 from app.config import Settings, get_settings, is_usable_cloud_api_key
 from app.diagnostics.eval_runs import load_eval_run, load_eval_runs
 from app.domain import (
@@ -256,12 +262,21 @@ def create_session(
             code="invalid_session_request",
             message=_safe_request_error_message(exc),
         ) from exc
+    # Mirrors the CLI's start-session auto-ingest (#16 follow-up): best-effort, never fails
+    # session creation -- a failure degrades to a response warning instead (see
+    # app.composition.auto_ingest_scenario_lore for skip/idempotency/failure semantics).
+    warnings: list[str] = []
+    if not request.skip_lore_ingest:
+        outcome = auto_ingest_scenario_lore(settings, Path(session.content_root))
+        if outcome.warning is not None:
+            warnings.append(outcome.warning)
     return CreateSessionResponse(
         session_id=session.id,
         world_id=session.world_id,
         active_scene_id=session.active_scene_id,
         active_persona_id=session.active_persona_id,
         provider=session.provider.value,
+        warnings=warnings,
     )
 
 

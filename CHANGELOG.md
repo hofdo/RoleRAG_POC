@@ -29,6 +29,12 @@ records; this file is the quick delta between versions.
   and a post-generation actual-usage warning when a turn's prompt approaches the configured context
   window; retrieved-chunk and recent-dialogue trimming now cuts at word boundaries instead of
   mid-word (f977ba8).
+- **API auto-ingest scenario lore on `POST /sessions`** (#16 follow-up): the API (and therefore
+  the SPA) now mirrors the CLI's `start-session` auto-ingest instead of requiring a separate
+  `ingest-scenario-lore` call. Both surfaces share one `app.composition.auto_ingest_scenario_lore`
+  helper — idempotent, fail-open; a failed ingest degrades to a new
+  `CreateSessionResponse.warnings: list[str]` instead of failing session creation. New additive
+  request field `skip_lore_ingest: bool = false` (CLI parity: `--skip-lore-ingest`).
 
 ### Changed
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -11,7 +14,7 @@ from app.agents.critic_agent import CriticAgent
 from app.api.routes import get_read_services
 from app.composition import AppServices
 from app.config import Settings, get_settings
-from app.domain import PersonaCard, SceneState, SessionState
+from app.domain import PersonaCard, SceneState, SessionState, Visibility
 from app.llm.provider import LlmProvider
 from app.llm.router import CloudMode, ModelProviderName, ModelRoute
 from app.main import app
@@ -19,6 +22,7 @@ from app.memory import RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import DemoWorldRecord, SQLiteSessionRepository, SQLiteTurnRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
+from app.rag.models import RagChunk, RagCollection
 
 
 class UnusedProvider(LlmProvider):
@@ -152,8 +156,219 @@ def _write_scenario_pack(root: Path) -> None:
     )
 
 
+def _write_scenario_pack_with_lore(root: Path) -> None:
+    # A pack with a documents/manifest.json (unlike _write_scenario_pack), so
+    # auto_ingest_scenario_lore has something to index -- see docs/16's #16 follow-up
+    # (API POST /sessions mirrors the CLI's start-session auto-ingest).
+    _write_scenario_pack(root)
+    (root / "documents").mkdir()
+    (root / "documents" / "lore.md").write_text(
+        "# Custom Lore\n\nA custom banner hangs in the hall.",
+        encoding="utf-8",
+    )
+    (root / "documents" / "manifest.json").write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {
+                        "path": "lore.md",
+                        "visibility": Visibility.PLAYER.value,
+                        "source_type": "lore",
+                        "tags": ["custom"],
+                        "world_id": "custom_world",
+                        "scene_id": "custom-opening",
+                        "persona_id": "custom-narrator",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+class _FakeEmbeddingProvider:
+    dimension = 2
+
+    def embed_text(self, text: str) -> list[float]:
+        return [1.0, float(len(text))]
+
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[1.0, float(len(text))] for text in texts]
+
+
+class _RecordingVectorStore:
+    def __init__(self) -> None:
+        self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = (
+            []
+        )
+
+    def ensure_collection(
+        self,
+        collection: RagCollection,
+        vector_size: int,
+        *,
+        model_key: str | None = None,
+    ) -> None:
+        pass
+
+    def replace_source(
+        self,
+        collection: RagCollection,
+        source: str,
+        chunks: Sequence[RagChunk],
+        vectors: Sequence[Sequence[float]],
+    ) -> None:
+        self.replace_calls.append(
+            (collection, source, list(chunks), [list(vector) for vector in vectors])
+        )
+
+
+class _BrokenVectorStore:
+    """Simulates an unreachable Qdrant: any ingest attempt raises."""
+
+    def ensure_collection(
+        self,
+        collection: RagCollection,
+        vector_size: int,
+        *,
+        model_key: str | None = None,
+    ) -> None:
+        raise ConnectionError("qdrant unreachable")
+
+
 def test_fastapi_app_imports_successfully() -> None:
     assert app.title == "rolerag-poc"
+
+
+def test_post_sessions_auto_ingests_scenario_lore(tmp_path: Path) -> None:
+    # POST /sessions now mirrors the CLI's start-session auto-ingest (#16 follow-up): the
+    # scenario's lore is indexed without a separate ingest-scenario-lore call.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack_with_lore(pack_root)
+    database_path = tmp_path / "api-auto-ingest.db"
+    vector_store = _RecordingVectorStore()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    with (
+        patch("app.composition.build_embedding_provider", return_value=_FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
+    ):
+        response = client.post(
+            "/sessions",
+            json={
+                "world_id": "custom_world",
+                "scene_id": "custom-opening",
+                "player_name": "Player",
+                "active_persona_id": "custom-narrator",
+            },
+        )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["warnings"] == []
+    assert len(vector_store.replace_calls) == 1
+    _, source, _, _ = vector_store.replace_calls[0]
+    assert source.endswith("documents/lore.md")
+
+
+def test_post_sessions_skip_lore_ingest_flag_skips_auto_ingest(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack_with_lore(pack_root)
+    database_path = tmp_path / "api-skip-ingest.db"
+    vector_store = _RecordingVectorStore()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    with (
+        patch("app.composition.build_embedding_provider", return_value=_FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
+    ):
+        response = client.post(
+            "/sessions",
+            json={
+                "world_id": "custom_world",
+                "scene_id": "custom-opening",
+                "player_name": "Player",
+                "active_persona_id": "custom-narrator",
+                "skip_lore_ingest": True,
+            },
+        )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["warnings"] == []
+    assert vector_store.replace_calls == []
+
+
+def test_post_sessions_lore_ingest_failure_degrades_to_warning(tmp_path: Path) -> None:
+    # An unreachable vector store must not fail session creation -- it degrades to a
+    # response warning, matching the CLI's warning-only auto-ingest failure behavior.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack_with_lore(pack_root)
+    database_path = tmp_path / "api-broken-ingest.db"
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    with (
+        patch("app.composition.build_embedding_provider", return_value=_FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=_BrokenVectorStore()),
+    ):
+        response = client.post(
+            "/sessions",
+            json={
+                "world_id": "custom_world",
+                "scene_id": "custom-opening",
+                "player_name": "Player",
+                "active_persona_id": "custom-narrator",
+            },
+        )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    warnings = response.json()["warnings"]
+    assert len(warnings) == 1
+    assert warnings[0].startswith("scenario lore auto-ingest skipped:")
+
+
+def test_post_sessions_without_lore_manifest_skips_ingest_gracefully(tmp_path: Path) -> None:
+    # No documents/manifest.json in the pack (unlike _write_scenario_pack_with_lore) --
+    # auto-ingest must skip silently without even attempting to build retrieval
+    # collaborators. No embedding/vector-store fakes are patched here on purpose: if the
+    # implementation tried to use the real (unconfigured) providers, this test would be the
+    # one to catch it hanging or erroring instead of skipping cleanly.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    database_path = tmp_path / "api-no-manifest.db"
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        database_path=str(database_path),
+        content_root=pack_root,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions",
+        json={
+            "world_id": "custom_world",
+            "scene_id": "custom-opening",
+            "player_name": "Player",
+            "active_persona_id": "custom-narrator",
+        },
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 201
+    assert response.json()["warnings"] == []
 
 
 def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -> None:
@@ -167,6 +382,11 @@ def test_post_sessions_creates_session_and_returns_safe_fields(tmp_path: Path) -
             "scene_id": "rose-gallery",
             "player_name": "Player",
             "active_persona_id": "archivist",
+            # This test doesn't exercise lore auto-ingest (#16 follow-up) and doesn't override
+            # get_settings, so content_root defaults to the real "data" scenario pack -- skip
+            # so the deterministic test suite never touches a real embedding/vector-store
+            # backend (see test_post_sessions_auto_ingests_scenario_lore for that coverage).
+            "skip_lore_ingest": True,
         },
     )
 
@@ -192,6 +412,7 @@ def test_post_sessions_defaults_to_local_provider(tmp_path: Path) -> None:
             "scene_id": "rose-gallery",
             "player_name": "Player",
             "active_persona_id": "archivist",
+            "skip_lore_ingest": True,  # unrelated to lore ingest; see comment above
         },
     )
 
@@ -270,6 +491,7 @@ def test_create_cloud_session_succeeds_when_configured(tmp_path: Path) -> None:
             "player_name": "Player",
             "active_persona_id": "archivist",
             "provider": "cloud",
+            "skip_lore_ingest": True,  # cloud-mode gating, not lore ingest; see comment above
         },
     )
 
@@ -298,6 +520,7 @@ def test_create_cloud_session_allowed_when_cloud_mode_ask(tmp_path: Path) -> Non
             "player_name": "Player",
             "active_persona_id": "archivist",
             "provider": "cloud",
+            "skip_lore_ingest": True,  # cloud-mode gating, not lore ingest; see comment above
         },
     )
 
@@ -688,6 +911,10 @@ def test_post_sessions_uses_default_process_content_root(tmp_path: Path) -> None
             "scene_id": "rose-gallery",
             "player_name": "Player",
             "active_persona_id": "archivist",
+            # This test is about content_root persistence, not lore ingest -- the real
+            # "data" scenario pack has a manifest, so skip to keep the suite deterministic
+            # (see test_post_sessions_auto_ingests_scenario_lore for that coverage).
+            "skip_lore_ingest": True,
         },
     )
 

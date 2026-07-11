@@ -518,14 +518,18 @@ def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
 
 def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
     # start-session indexes the scenario's lore automatically, so the player does not have to
-    # remember a separate ingest-scenario-lore step before the first turn.
+    # remember a separate ingest-scenario-lore step before the first turn. The auto-ingest now
+    # routes through app.composition.auto_ingest_scenario_lore (shared with the API's
+    # POST /sessions), so the fakes patch the composition-level builders, not the CLI-local
+    # aliases (those remain patch targets only for CLI commands that build providers directly,
+    # e.g. retrieve-debug).
     pack_root = tmp_path / "pack"
     _write_scenario_pack(pack_root)
     vector_store = RecordingVectorStore()
 
     with (
-        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
-        patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.composition.build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
     ):
         result = runner.invoke(
             app,
