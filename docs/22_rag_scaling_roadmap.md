@@ -1,6 +1,23 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-11 @ 3568956
+> Reviewed: 2026-07-11 @ 4f6822b
+>
+> **Update 2026-07-11 (P0.4, offline half).** Graded-relevance corpus + recall@k/nDCG
+> benchmark harness shipped (see the
+> [P0.4 subsection](#p04-eval-assets-before-retrieval-upgrades-the-measurement-gate)):
+> `app/evals/semantic_corpus.py` (~85 chunks across the three collection shapes, five
+> same-proper-noun distractor clusters, a German query subset), `app/evals/retrieval_metrics.py`
+> (recall@k incl. a strict judgment==2 variant, nDCG@k, MRR — pure functions, hand-computed
+> unit tests), `app/diagnostics/semantic_benchmark.py` (indexes the corpus and scores every
+> query through the production `ActorContextRetriever` path plus a raw dense-only baseline),
+> and CLI `rolerag semantic-benchmark --model <fastembed-name>|--keyword [--json]`. An opt-in
+> `-m semantic` pytest tier (`tests/evals/test_semantic_benchmark_opt_in.py`) asserts
+> provisional floors against a real FastEmbed model, gated behind `ROLERAG_SEMANTIC_MODEL` so
+> the default gate never downloads one. **Pending:** the real-model benchmark run itself (real
+> FastEmbed downloads are blocked in the authoring environment; single command for the owner's
+> machine: `rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2`), floor
+> calibration from that run, and transcript-derived queries (needs real play exports via
+> `export-session`) — all noted in the P0.4 section below.
 >
 > **Update 2026-07-11.** Added late-recall `StoryEvent`s to the live checkpoint (see the
 > *Eval methodology* bullet under
@@ -126,11 +143,64 @@ Effort S. — [x]
 
 ### P0.4 Eval assets before retrieval upgrades (the measurement gate)
 
+> **Shipped 2026-07-11 (this commit) — offline half.** Item 1 (graded corpus), item 2
+> (recall@k/nDCG extension), and item 3 (optional `-m semantic` tier) landed; item 4's
+> transcript-derived queries remain open (needs real play exports). Corpus:
+> `app/evals/semantic_corpus.py` — a single fictional scenario ("Ashen Hold" on the "Ember
+> March", tonally close to `bride-for-sarnhold` but original content so nothing collides with
+> real scenario data) with 84 chunks: 36 `canon_lore` (incl. a 10-chunk German subset authored
+> as Scholar Albrecht's archive), 24 `session_memory` forming an in-session mystery arc, and 24
+> `persona_memory` across four NPCs. 36 queries carry 0/1/2 graded judgments (0 implicit —
+> absence from the mapping), including a 9-query German subset and **five** same-proper-noun
+> distractor clusters (Captain Meravelle, Quartermaster Udo, Orin, the Amber Ring, Thornwell
+> Bridge — three facts each, one query isolates each fact) so an embedding that matches only the
+> proper noun without discriminating *which* fact answers the query loses recall/nDCG even
+> though it would look perfect on the old 9-item pool. Every chunk carries the real payload
+> fields production filters key on (`visibility=player` always; exactly one of
+> `world_id`/`session_id`/`persona_id` per collection shape). Metrics:
+> `app/evals/retrieval_metrics.py` — `recall_at_k` (binary, judgment>=1, plus a strict
+> `relevance_floor=2` variant), `ndcg_at_k` (standard log2-discounted DCG/IDCG over the graded
+> judgments), `mrr` — pure functions with no embedding dependency, hand-computed unit tests
+> (`tests/unit/test_retrieval_metrics.py`). Harness: `app/diagnostics/semantic_benchmark.py`
+> (sibling to `embedding_ab.py`) indexes the corpus into an `InMemoryVectorStore` under a given
+> embedding provider and scores every query through **two** paths: the production
+> `ActorContextRetriever.retrieve_for_actor_with_diagnostics` (dual-query, per-collection
+> oversampling, the full additive boost rerank — this doc's own "prefer measuring through
+> ActorContextRetriever" guidance, since that is what a real turn actually returns) and a raw
+> single-query dense-only merge (cheap to compute from the same index; isolates how much of the
+> reranked score is the embedding model itself vs. the deterministic boost layer, useful when
+> comparing candidate models for P1.2 since the boost layer is identical across all of them).
+> Reports recall@5, recall@10, strict recall@5, nDCG@10, and MRR, aggregated overall and over
+> the German subset separately, per path. CLI: `rolerag semantic-benchmark --model
+> <fastembed-name> [--model ...] [--keyword] [--top-k N] [--json]` — this is the single command
+> for a real embedding-model run. Opt-in tier: `tests/evals/test_semantic_benchmark_opt_in.py`
+> (file name deviates from the plan's suggested `test_semantic_benchmark.py` — mypy's module
+> resolution collides on identical basenames across `tests/unit/` and `tests/evals/` with no
+> `__init__.py` in either, the same reason `test_retrieval_miss_eval.py` isn't named
+> `test_retrieval_miss.py`), marker `semantic` (registered in `pyproject.toml`), gated behind
+> `ROLERAG_SEMANTIC_MODEL=<fastembed-name>` (unset by default, so the deterministic gate never
+> attempts a download) — when run against a real model it asserts **provisional, deliberately
+> generous** floors (recall@10 >= 0.3, nDCG@10 >= 0.2) that must be calibrated on the first real
+> run, not trusted as a quality bar yet. Deterministic coverage: metric-math unit tests, corpus
+> integrity tests (`tests/unit/test_semantic_corpus.py` — unique ids, every judgment resolves to
+> a real chunk, German subset non-empty, distractor clusters verified by string-matching the
+> shared proper noun across pairwise-distinct facts and confirming no single query conflates two
+> facts from the same cluster), and an end-to-end benchmark smoke run with the deterministic
+> keyword provider (`tests/unit/test_semantic_benchmark.py` — proves the harness plumbing works;
+> keyword-provider scores are explicitly documented as not semantically meaningful). Full gate
+> green (737 pytest tests, +35 over the pre-P0.4 baseline; only the 4 opt-in `semantic` tests
+> skip, nothing downloads; regression runner unchanged at 85 checks). **Pending (the "online
+> half" and beyond):** the real-model benchmark run itself — FastEmbed downloads are blocked in
+> the authoring environment (proxy 403), so no real numbers exist yet; floor calibration in the
+> opt-in tier once that run lands; item 4's transcript-derived query subset (needs real play
+> exports via `export-session`), explicitly out of scope for this commit.
+
 **Problem.** The deterministic harness uses keyword embeddings + `InMemoryVectorStore` — it
 pins engine logic, **not semantic quality**; `embedding-ab` ranks a small seeded event set
 (BACKLOG #10 ended "candidates tied" — on fixtures too small to discriminate). No
-graded-relevance corpus, no distractor-heavy fixtures, no German queries. Every improvement
-below is unmeasurable today.
+graded-relevance corpus, no distractor-heavy fixtures, no German queries existed until this
+commit's corpus shipped — every improvement below was unmeasurable before it, and remains
+unmeasured (not unmeasurable) until the owner runs a real embedding model through it.
 
 **Change.**
 1. Build a fixture scenario pack ~10× `bride-for-sarnhold` (LLM-generated lore is fine)
@@ -146,7 +216,10 @@ below is unmeasurable today.
 
 **Validate.** Self-validating — this *is* the validator. Effort M–L (hand-grading
 relevance judgments is the long pole; today's `embedding-ab` pool is only 9 items —
-5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). — [ ]
+5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). —
+[~] offline half shipped (corpus, metrics, harness, CLI, `-m semantic` marker — see the
+shipped note above); still open: the real-model run itself, floor calibration from it, and
+item 4's transcript-derived queries.
 
 ---
 

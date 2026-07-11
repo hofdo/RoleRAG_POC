@@ -46,6 +46,9 @@ include = ["app*"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+markers = [
+    "semantic: real-embedding semantic benchmark tier (docs/22 P0.4). Opt-in only -- skipped by default via a module-level skipif (set ROLERAG_SEMANTIC_MODEL to a FastEmbed model name to run it; the default gate never downloads a model). Select explicitly with `-m semantic` once the env var is set.",
+]
 
 # Coverage is report-only (a visibility signal, not a gate). Run it with
 # `pytest --cov=app --cov-report=term-missing` or `make coverage`. The `sysmon` core

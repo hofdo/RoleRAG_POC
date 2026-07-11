@@ -19,7 +19,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, cast
 
 import typer
 
@@ -70,6 +70,9 @@ from app.rag import (
     ingest_document,
     ingest_lore_manifest,
 )
+
+if TYPE_CHECKING:
+    from app.diagnostics.semantic_benchmark import SemanticBenchmarkReport
 
 app = typer.Typer(help="RoleRAG CLI")
 
@@ -618,6 +621,137 @@ def _render_embedding_ab_table(
                 str(miss_count),
             ]
         )
+    widths = [
+        max(len(headers[col]), *(len(line[col]) for line in body)) if body else len(headers[col])
+        for col in range(len(headers))
+    ]
+
+    def format_row(cells: Sequence[str]) -> str:
+        return "| " + " | ".join(c.ljust(widths[col]) for col, c in enumerate(cells)) + " |"
+
+    lines = [
+        format_row(headers),
+        "| " + " | ".join("-" * widths[col] for col in range(len(headers))) + " |",
+        *(format_row(line) for line in body),
+    ]
+    return "\n".join(lines)
+
+
+@app.command("semantic-benchmark")
+def semantic_benchmark(
+    model: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="FastEmbed model name to benchmark (repeatable). "
+            "Models download on first use.",
+        ),
+    ] = None,
+    keyword: Annotated[
+        bool,
+        typer.Option(
+            "--keyword",
+            help="Also benchmark the deterministic keyword embedding provider (no "
+            "downloads). Plumbing check only -- scores are not semantically meaningful.",
+        ),
+    ] = False,
+    top_k: Annotated[
+        int,
+        typer.Option(help="Candidate depth for recall@10/nDCG@10 (must be >= 10)."),
+    ] = 10,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON instead of the table."),
+    ] = False,
+) -> None:
+    """Score real (or keyword) embeddings on the graded semantic corpus (docs/22 P0.4).
+
+    For each --model (a real FastEmbed model, auto-downloaded on first use) and/or
+    --keyword (the deterministic provider, no downloads), indexes the ~85-chunk
+    graded corpus (`app.evals.semantic_corpus`) through the production retrieval
+    path and reports recall@5, recall@10, strict recall@5 (directly-relevant
+    judgments only), nDCG@10, and MRR -- overall and over the German query subset
+    -- for both the reranked production path and a raw dense-only baseline. This
+    is the single command for a real embedding-model benchmark run, e.g.:
+
+        rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2
+    """
+    from dataclasses import asdict
+
+    from app.diagnostics.semantic_benchmark import run_semantic_benchmark
+    from app.evals.semantic_corpus import SemanticCorpusKeywordEmbeddingProvider
+    from app.rag.embeddings import EmbeddingProvider, FastEmbedEmbeddingProvider
+
+    model_names = model or []
+    if not model_names and not keyword:
+        typer.secho(
+            "Provide at least one --model <fastembed-name> and/or --keyword.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if top_k < 10:
+        typer.secho("--top-k must be >= 10 (recall@10/nDCG@10 need it).", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    providers: list[tuple[str, EmbeddingProvider]] = []
+    if keyword:
+        providers.append(("keyword", SemanticCorpusKeywordEmbeddingProvider()))
+    providers.extend(
+        (model_name, FastEmbedEmbeddingProvider(model_name=model_name))
+        for model_name in model_names
+    )
+
+    reports: list[SemanticBenchmarkReport] = []
+    for label, provider in providers:
+        try:
+            reports.append(
+                run_semantic_benchmark(
+                    embedding_provider=provider, provider_label=label, top_k=top_k
+                )
+            )
+        except ImportError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(
+            json.dumps([asdict(report) for report in reports], indent=2, sort_keys=True)
+        )
+    else:
+        typer.echo(_render_semantic_benchmark_table(reports))
+
+
+def _render_semantic_benchmark_table(reports: Sequence[SemanticBenchmarkReport]) -> str:
+    headers = [
+        "model",
+        "path",
+        "subset",
+        "n",
+        "recall@5",
+        "recall@10",
+        "recall@5(strict)",
+        "ndcg@10",
+        "mrr",
+    ]
+    body: list[list[str]] = []
+    for report in reports:
+        for path_label, path_report in (("reranked", report.reranked), ("raw", report.raw)):
+            for subset_label, aggregate in (
+                ("overall", path_report.overall),
+                ("german", path_report.german),
+            ):
+                body.append(
+                    [
+                        report.provider_label,
+                        path_label,
+                        subset_label,
+                        str(aggregate.query_count),
+                        f"{aggregate.recall_at_5:.3f}",
+                        f"{aggregate.recall_at_10:.3f}",
+                        f"{aggregate.recall_at_5_strict:.3f}",
+                        f"{aggregate.ndcg_at_10:.3f}",
+                        f"{aggregate.mrr:.3f}",
+                    ]
+                )
     widths = [
         max(len(headers[col]), *(len(line[col]) for line in body)) if body else len(headers[col])
         for col in range(len(headers))
