@@ -1,6 +1,6 @@
 # 05 — Current RAG and Memory Design
 
-> Reviewed: 2026-07-11 @ 4965a22
+> Reviewed: 2026-07-11 @ a20bfc5
 
 ## Purpose
 

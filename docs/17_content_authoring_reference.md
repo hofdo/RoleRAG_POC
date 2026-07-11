@@ -1,6 +1,6 @@
 # 17 — Content Authoring Format Reference
 
-> Reviewed: 2026-07-11 @ 4965a22
+> Reviewed: 2026-07-11 @ a20bfc5
 
 ## Purpose
 

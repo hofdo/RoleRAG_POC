@@ -1,6 +1,6 @@
 # 10 — Next Steps After 1.0
 
-> Reviewed: 2026-07-11 @ a06695a
+> Reviewed: 2026-07-11 @ d6b50f6
 
 > **Updated 2026-07-04** — two efforts shipped after this list was written:
 > play-experience v1.2 (2026-07-01/02,
