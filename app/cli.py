@@ -3,9 +3,11 @@
 Wraps the composition root (``app.composition``) and the ``TurnOrchestrator`` to
 offer the full offline workflow: content validation and scaffolding, lore
 ingestion, session start/list/export/import, running and inspecting turns,
-memory inspection, index/db resets, and the embedding A/B harness. Unlike the
-API/SPA path, ``start-session`` best-effort auto-ingests the scenario's manifest
-lore (idempotent, fail-open, ``--skip-lore-ingest`` to opt out). Reads
+memory inspection, index/db resets, and the embedding A/B harness.
+``start-session`` best-effort auto-ingests the scenario's manifest lore via
+``app.composition.auto_ingest_scenario_lore`` (idempotent, fail-open,
+``--skip-lore-ingest`` to opt out) -- the same shared helper the API's
+``POST /sessions`` uses, so both surfaces behave identically. Reads
 configuration via ``app.config.get_settings``.
 """
 
@@ -17,13 +19,14 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, cast
 
 import typer
 
 from app import __version__
 from app.composition import (
     AppServices,
+    auto_ingest_scenario_lore,
     build_actor_context_retriever,
     build_embedding_provider,
     build_services,
@@ -68,6 +71,9 @@ from app.rag import (
     ingest_lore_manifest,
 )
 
+if TYPE_CHECKING:
+    from app.diagnostics.semantic_benchmark import SemanticBenchmarkReport
+
 app = typer.Typer(help="RoleRAG CLI")
 
 
@@ -90,38 +96,23 @@ _build_actor_context_retriever = build_actor_context_retriever
 
 
 def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
-    """Best-effort: index the scenario's lore so retrieval works without a separate ingest step.
-
-    Never blocks session creation. A scenario with no manifest is silent; an unreachable vector
-    store or missing embedding backend only warns (run ingest-scenario-lore later). Idempotent,
-    so re-running start-session re-indexes the same lore without duplicating it.
+    """Typer-facing wrapper around ``app.composition.auto_ingest_scenario_lore``: converts the
+    shared best-effort outcome into colored CLI feedback. See that function's docstring for the
+    exact skip/idempotency/failure semantics -- identical to the API's ``POST /sessions`` path.
     """
-    if not (content_root / "documents" / "manifest.json").exists():
-        return  # no lore manifest -> nothing to index; skip building embedding/vector providers
-    try:
-        results = ingest_lore_manifest(
-            content_root,
-            embedding_provider=_build_embedding_provider(settings),
-            vector_store=_build_vector_store(settings),
-            chunking_config=ChunkingConfig(
-                chunk_size_chars=settings.rag_chunk_size_chars,
-                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
-            ),
-            model_key=settings.embedding_model,
-        )
-    except Exception as exc:  # degrade gracefully: a session must still be creatable offline
-        # Includes a manifest that references a missing document -- warn rather than swallow,
-        # so a typo'd lore path does not silently leave retrieval empty. (The no-manifest case
-        # already returned above.)
+    outcome = auto_ingest_scenario_lore(settings, content_root)
+    if not outcome.attempted:
+        return  # no lore manifest -> nothing to index
+    if outcome.warning is not None:
         typer.secho(
-            f"warning: scenario lore auto-ingest skipped: {exc}",
+            f"warning: {outcome.warning}",
             fg=typer.colors.YELLOW,
             err=True,
         )
         return
-    total = sum(result.chunk_count for result in results)
     typer.secho(
-        f"auto-ingested {total} lore chunk(s) from {len(results)} document(s)",
+        f"auto-ingested {outcome.chunk_count} lore chunk(s) from {outcome.document_count} "
+        "document(s)",
         fg=typer.colors.GREEN,
         err=True,
     )
@@ -630,6 +621,137 @@ def _render_embedding_ab_table(
                 str(miss_count),
             ]
         )
+    widths = [
+        max(len(headers[col]), *(len(line[col]) for line in body)) if body else len(headers[col])
+        for col in range(len(headers))
+    ]
+
+    def format_row(cells: Sequence[str]) -> str:
+        return "| " + " | ".join(c.ljust(widths[col]) for col, c in enumerate(cells)) + " |"
+
+    lines = [
+        format_row(headers),
+        "| " + " | ".join("-" * widths[col] for col in range(len(headers))) + " |",
+        *(format_row(line) for line in body),
+    ]
+    return "\n".join(lines)
+
+
+@app.command("semantic-benchmark")
+def semantic_benchmark(
+    model: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="FastEmbed model name to benchmark (repeatable). "
+            "Models download on first use.",
+        ),
+    ] = None,
+    keyword: Annotated[
+        bool,
+        typer.Option(
+            "--keyword",
+            help="Also benchmark the deterministic keyword embedding provider (no "
+            "downloads). Plumbing check only -- scores are not semantically meaningful.",
+        ),
+    ] = False,
+    top_k: Annotated[
+        int,
+        typer.Option(help="Candidate depth for recall@10/nDCG@10 (must be >= 10)."),
+    ] = 10,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON instead of the table."),
+    ] = False,
+) -> None:
+    """Score real (or keyword) embeddings on the graded semantic corpus (docs/22 P0.4).
+
+    For each --model (a real FastEmbed model, auto-downloaded on first use) and/or
+    --keyword (the deterministic provider, no downloads), indexes the ~85-chunk
+    graded corpus (`app.evals.semantic_corpus`) through the production retrieval
+    path and reports recall@5, recall@10, strict recall@5 (directly-relevant
+    judgments only), nDCG@10, and MRR -- overall and over the German query subset
+    -- for both the reranked production path and a raw dense-only baseline. This
+    is the single command for a real embedding-model benchmark run, e.g.:
+
+        rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2
+    """
+    from dataclasses import asdict
+
+    from app.diagnostics.semantic_benchmark import run_semantic_benchmark
+    from app.evals.semantic_corpus import SemanticCorpusKeywordEmbeddingProvider
+    from app.rag.embeddings import EmbeddingProvider, FastEmbedEmbeddingProvider
+
+    model_names = model or []
+    if not model_names and not keyword:
+        typer.secho(
+            "Provide at least one --model <fastembed-name> and/or --keyword.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    if top_k < 10:
+        typer.secho("--top-k must be >= 10 (recall@10/nDCG@10 need it).", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    providers: list[tuple[str, EmbeddingProvider]] = []
+    if keyword:
+        providers.append(("keyword", SemanticCorpusKeywordEmbeddingProvider()))
+    providers.extend(
+        (model_name, FastEmbedEmbeddingProvider(model_name=model_name))
+        for model_name in model_names
+    )
+
+    reports: list[SemanticBenchmarkReport] = []
+    for label, provider in providers:
+        try:
+            reports.append(
+                run_semantic_benchmark(
+                    embedding_provider=provider, provider_label=label, top_k=top_k
+                )
+            )
+        except ImportError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(
+            json.dumps([asdict(report) for report in reports], indent=2, sort_keys=True)
+        )
+    else:
+        typer.echo(_render_semantic_benchmark_table(reports))
+
+
+def _render_semantic_benchmark_table(reports: Sequence[SemanticBenchmarkReport]) -> str:
+    headers = [
+        "model",
+        "path",
+        "subset",
+        "n",
+        "recall@5",
+        "recall@10",
+        "recall@5(strict)",
+        "ndcg@10",
+        "mrr",
+    ]
+    body: list[list[str]] = []
+    for report in reports:
+        for path_label, path_report in (("reranked", report.reranked), ("raw", report.raw)):
+            for subset_label, aggregate in (
+                ("overall", path_report.overall),
+                ("german", path_report.german),
+            ):
+                body.append(
+                    [
+                        report.provider_label,
+                        path_label,
+                        subset_label,
+                        str(aggregate.query_count),
+                        f"{aggregate.recall_at_5:.3f}",
+                        f"{aggregate.recall_at_10:.3f}",
+                        f"{aggregate.recall_at_5_strict:.3f}",
+                        f"{aggregate.ndcg_at_10:.3f}",
+                        f"{aggregate.mrr:.3f}",
+                    ]
+                )
     widths = [
         max(len(headers[col]), *(len(line[col]) for line in body)) if body else len(headers[col])
         for col in range(len(headers))

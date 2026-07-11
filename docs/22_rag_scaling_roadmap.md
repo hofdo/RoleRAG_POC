@@ -1,6 +1,28 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-10 @ 24d4aab
+> Reviewed: 2026-07-11 @ 4f6822b
+>
+> **Update 2026-07-11 (P0.4, offline half).** Graded-relevance corpus + recall@k/nDCG
+> benchmark harness shipped (see the
+> [P0.4 subsection](#p04-eval-assets-before-retrieval-upgrades-the-measurement-gate)):
+> `app/evals/semantic_corpus.py` (~85 chunks across the three collection shapes, five
+> same-proper-noun distractor clusters, a German query subset), `app/evals/retrieval_metrics.py`
+> (recall@k incl. a strict judgment==2 variant, nDCG@k, MRR — pure functions, hand-computed
+> unit tests), `app/diagnostics/semantic_benchmark.py` (indexes the corpus and scores every
+> query through the production `ActorContextRetriever` path plus a raw dense-only baseline),
+> and CLI `rolerag semantic-benchmark --model <fastembed-name>|--keyword [--json]`. An opt-in
+> `-m semantic` pytest tier (`tests/evals/test_semantic_benchmark_opt_in.py`) asserts
+> provisional floors against a real FastEmbed model, gated behind `ROLERAG_SEMANTIC_MODEL` so
+> the default gate never downloads one. **Pending:** the real-model benchmark run itself (real
+> FastEmbed downloads are blocked in the authoring environment; single command for the owner's
+> machine: `rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2`), floor
+> calibration from that run, and transcript-derived queries (needs real play exports via
+> `export-session`) — all noted in the P0.4 section below.
+>
+> **Update 2026-07-11.** Added late-recall `StoryEvent`s to the live checkpoint (see the
+> *Eval methodology* bullet under
+> [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building))
+> so a 100-turn live-smoke run asserts recall past turn 50, including a long-gap probe.
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -106,6 +128,14 @@ prefill. Effort S. — [ ]
 > (under-cap identity, sentence-boundary trim, word-boundary fallback, pathological no-boundary
 > hard-cut, marker presence, tiny-cap edge case). Full deterministic gate + regression runner
 > pass unchanged — ranking evals are unaffected because trim happens after selection.
+>
+> **Fix note (2026-07-11, cross-review P1).** The sentence boundary won unconditionally
+> whenever *any* `.`/`!`/`?` existed in the cap window, even a few characters in (e.g. an
+> abbreviation like "Mr."), collapsing the whole chunk to noise while still spending a
+> prompt slot. Both `_truncate_text` and `_clip_line` now require a boundary to retain at
+> least half the budget before it wins (checked for both the sentence and word tiers),
+> falling to a full hard-cut otherwise. Unit-tested: early-terminator repro, exact-half
+> boundary, below-half boundary.
 
 **Problem.** `_truncate_text` cuts retrieved chunks mid-sentence at 800 chars with `"..."`
 ([app/orchestration/context_budget.py:36-41](../app/orchestration/context_budget.py)) —
@@ -121,11 +151,64 @@ Effort S. — [x]
 
 ### P0.4 Eval assets before retrieval upgrades (the measurement gate)
 
+> **Shipped 2026-07-11 (this commit) — offline half.** Item 1 (graded corpus), item 2
+> (recall@k/nDCG extension), and item 3 (optional `-m semantic` tier) landed; item 4's
+> transcript-derived queries remain open (needs real play exports). Corpus:
+> `app/evals/semantic_corpus.py` — a single fictional scenario ("Ashen Hold" on the "Ember
+> March", tonally close to `bride-for-sarnhold` but original content so nothing collides with
+> real scenario data) with 84 chunks: 36 `canon_lore` (incl. a 10-chunk German subset authored
+> as Scholar Albrecht's archive), 24 `session_memory` forming an in-session mystery arc, and 24
+> `persona_memory` across four NPCs. 36 queries carry 0/1/2 graded judgments (0 implicit —
+> absence from the mapping), including a 9-query German subset and **five** same-proper-noun
+> distractor clusters (Captain Meravelle, Quartermaster Udo, Orin, the Amber Ring, Thornwell
+> Bridge — three facts each, one query isolates each fact) so an embedding that matches only the
+> proper noun without discriminating *which* fact answers the query loses recall/nDCG even
+> though it would look perfect on the old 9-item pool. Every chunk carries the real payload
+> fields production filters key on (`visibility=player` always; exactly one of
+> `world_id`/`session_id`/`persona_id` per collection shape). Metrics:
+> `app/evals/retrieval_metrics.py` — `recall_at_k` (binary, judgment>=1, plus a strict
+> `relevance_floor=2` variant), `ndcg_at_k` (standard log2-discounted DCG/IDCG over the graded
+> judgments), `mrr` — pure functions with no embedding dependency, hand-computed unit tests
+> (`tests/unit/test_retrieval_metrics.py`). Harness: `app/diagnostics/semantic_benchmark.py`
+> (sibling to `embedding_ab.py`) indexes the corpus into an `InMemoryVectorStore` under a given
+> embedding provider and scores every query through **two** paths: the production
+> `ActorContextRetriever.retrieve_for_actor_with_diagnostics` (dual-query, per-collection
+> oversampling, the full additive boost rerank — this doc's own "prefer measuring through
+> ActorContextRetriever" guidance, since that is what a real turn actually returns) and a raw
+> single-query dense-only merge (cheap to compute from the same index; isolates how much of the
+> reranked score is the embedding model itself vs. the deterministic boost layer, useful when
+> comparing candidate models for P1.2 since the boost layer is identical across all of them).
+> Reports recall@5, recall@10, strict recall@5, nDCG@10, and MRR, aggregated overall and over
+> the German subset separately, per path. CLI: `rolerag semantic-benchmark --model
+> <fastembed-name> [--model ...] [--keyword] [--top-k N] [--json]` — this is the single command
+> for a real embedding-model run. Opt-in tier: `tests/evals/test_semantic_benchmark_opt_in.py`
+> (file name deviates from the plan's suggested `test_semantic_benchmark.py` — mypy's module
+> resolution collides on identical basenames across `tests/unit/` and `tests/evals/` with no
+> `__init__.py` in either, the same reason `test_retrieval_miss_eval.py` isn't named
+> `test_retrieval_miss.py`), marker `semantic` (registered in `pyproject.toml`), gated behind
+> `ROLERAG_SEMANTIC_MODEL=<fastembed-name>` (unset by default, so the deterministic gate never
+> attempts a download) — when run against a real model it asserts **provisional, deliberately
+> generous** floors (recall@10 >= 0.3, nDCG@10 >= 0.2) that must be calibrated on the first real
+> run, not trusted as a quality bar yet. Deterministic coverage: metric-math unit tests, corpus
+> integrity tests (`tests/unit/test_semantic_corpus.py` — unique ids, every judgment resolves to
+> a real chunk, German subset non-empty, distractor clusters verified by string-matching the
+> shared proper noun across pairwise-distinct facts and confirming no single query conflates two
+> facts from the same cluster), and an end-to-end benchmark smoke run with the deterministic
+> keyword provider (`tests/unit/test_semantic_benchmark.py` — proves the harness plumbing works;
+> keyword-provider scores are explicitly documented as not semantically meaningful). Full gate
+> green (737 pytest tests, +35 over the pre-P0.4 baseline; only the 4 opt-in `semantic` tests
+> skip, nothing downloads; regression runner unchanged at 85 checks). **Pending (the "online
+> half" and beyond):** the real-model benchmark run itself — FastEmbed downloads are blocked in
+> the authoring environment (proxy 403), so no real numbers exist yet; floor calibration in the
+> opt-in tier once that run lands; item 4's transcript-derived query subset (needs real play
+> exports via `export-session`), explicitly out of scope for this commit.
+
 **Problem.** The deterministic harness uses keyword embeddings + `InMemoryVectorStore` — it
 pins engine logic, **not semantic quality**; `embedding-ab` ranks a small seeded event set
 (BACKLOG #10 ended "candidates tied" — on fixtures too small to discriminate). No
-graded-relevance corpus, no distractor-heavy fixtures, no German queries. Every improvement
-below is unmeasurable today.
+graded-relevance corpus, no distractor-heavy fixtures, no German queries existed until this
+commit's corpus shipped — every improvement below was unmeasurable before it, and remains
+unmeasured (not unmeasurable) until the owner runs a real embedding model through it.
 
 **Change.**
 1. Build a fixture scenario pack ~10× `bride-for-sarnhold` (LLM-generated lore is fine)
@@ -141,7 +224,10 @@ below is unmeasurable today.
 
 **Validate.** Self-validating — this *is* the validator. Effort M–L (hand-grading
 relevance judgments is the long pole; today's `embedding-ab` pool is only 9 items —
-5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). — [ ]
+5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). —
+[~] offline half shipped (corpus, metrics, harness, CLI, `-m semantic` marker — see the
+shipped note above); still open: the real-model run itself, floor calibration from it, and
+item 4's transcript-derived queries.
 
 ---
 
@@ -245,6 +331,16 @@ Effort M (runbook S, benchmark M; +S if prefixes needed). — [ ]
 > raise, drop-then-recreate clears, fingerprint adoption, sentinel-never-in-results,
 > read-is-read-only) plus a `doctor --check-qdrant` mismatch/pass test. Full deterministic gate
 > + regression runner pass unchanged.
+>
+> **Fix note (2026-07-11, cross-review P4).** The sentinel exclusion covered every search
+> path but not `app/diagnostics/live_checkpoint.py`'s unfiltered `_qdrant_count` helper: the
+> sentinel is a real point, so an unscoped `client.count()` (the canon-lore path) counted it
+> too, inflating `canon_lore_count` by 1 and letting the checkpoint's `>= 1 lore` gate pass on
+> a stamped-but-empty collection — diverging from `InMemoryVectorStore`, whose fingerprint is a
+> separate dict entry, never a counted point. `_qdrant_count` now applies the same `must_not`
+> exclusion `_build_qdrant_filter` uses on every search path. Unit-tested against an embedded
+> `QdrantClient(":memory:")`: stamped-empty counts 0, stamped+N counts N, session-scoped counts
+> still exclude the sentinel.
 
 **Problem (confirmed).** The only guard on the index is vector **size**
 ([vector_store.py:188-196](../app/rag/vector_store.py) Qdrant, `:72-76` in-memory); the
@@ -402,9 +498,14 @@ it with a note.
 - *Qdrant/vector store:* deleting a session with Qdrant unreachable can orphan
   still-retrievable `persona_memory` vectors (fail-open delete, nothing re-sweeps);
   `replace_source` is delete-then-upsert — a brief retrieval outage window per re-ingest.
-- *Eval methodology:* the live checkpoint's recall probes all land before turn ~50 — a
-  100-turn run asserts nothing about late recall (add late second-callback StoryEvents);
-  retrieval-miss floors measure absolute score rather than margin-over-best-distractor.
+- *Eval methodology:* **fixed 2026-07-11** — the live checkpoint's recall probes all landed
+  before turn ~50, so a 100-turn run asserted nothing about late recall. Three late
+  `StoryEvent`s are now wired into `app/diagnostics/live_checkpoint.py`
+  (`amber_ring_token` 55→65, `north_stair_rendezvous` 70→80, and a long-gap probe
+  `hollow_bookend_note` 17→95 — an old fact stated in the opening act, recalled 78 turns
+  later) covered by deterministic unit tests; live-run validation (does the local model
+  actually recall it) is still pending a `LIVE_TURN_COUNT=100` run on real hardware.
+  Retrieval-miss floors still measure absolute score rather than margin-over-best-distractor.
 - *Query construction:* `build_retrieval_query` puts the user message **last** after up to
   ~1.3K chars of framing ([retriever.py:145-168](../app/rag/retriever.py)) — near MiniLM's
   ~256-token input truncation the message can fall off the embedded text entirely (the
@@ -464,6 +565,23 @@ distinct-fact count in the actor prompt on live-smoke.
 > Consolidation itself still ships OFF by default (`MEMORY_CONSOLIDATION_THRESHOLD=0`); live
 > validation of non-zero `min_age`/`batch_cap` rides with the [P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence)
 > long live-smoke run per the measure-first workflow, not this change.
+>
+> **Fix note (2026-07-11, cross-review P2 + P3).** Two bugs surfaced once consolidation
+> actually rolls up a batch, both fixed without touching the min-age/batch-cap behavior
+> above. **P2:** `mark_memories_consolidated` tags originals but never deletes the SQLite
+> row, so `live_checkpoint.py`'s unfiltered `persisted_memory_count` diverged from the
+> Qdrant-indexed count on the first roll-up and would fail the checkpoint's SQLite/Qdrant
+> parity assertion on every `LIVE_TURN_COUNT=100` **P2.2** validation run thereafter —
+> `inspect_live_state` now excludes `CONSOLIDATED_TAG`-marked rows from that count. **P3:**
+> `_persist_consolidation` indexed the summary *before* marking the originals consolidated,
+> so an index failure (e.g. a P1.4 fingerprint mismatch) left the summary committed but the
+> same oldest-N backlog still eligible — re-tripping the threshold and minting a second
+> summary of the same memories on the very next turn, one orphan summary row per turn.
+> Reordered to SQLite-first (persist + mark + cache-invalidate) with indexing/unindexing now
+> best-effort afterward, degrading to a warning on failure (invariant #4: Qdrant is a
+> rebuildable derived index). Unit-tested: SQLite parity count excludes consolidated rows;
+> two consecutive consolidation passes with a forced index failure on the first prove no
+> second summary is minted.
 >
 > Confirms the "no age guard" candidate and adds a second coupled issue. (a) **No age floor:**
 `select_consolidatable` (`consolidation.py:49-66`) sorts oldest-first but has no minimum-age
@@ -539,6 +657,23 @@ language setting (S); optional German stemming (M). Additive/opt-in; gate on P0.
 > formula), duplicate-text/distinct-id chunks filling exactly one slot each, legitimately
 > distinct chunks left untouched, and the C1 exclusion interaction still holding. Full
 > deterministic gate + regression runner pass.
+>
+> **Fix note (2026-07-11, cross-review P5 + P6).** **P5:** the text-dedup key was checked
+> only on raw, pre-truncation chunk text, so two chunks diverging only past
+> `budget.max_retrieved_chunk_chars` (e.g. sharing an 850-char prefix under an 800-char cap)
+> passed as distinct and then rendered as byte-identical truncated prompt blocks.
+> `select_retrieved_chunks_for_prompt` now also dedups on the normalized *post-truncation*
+> text. **P6 (honesty only, no behavior change):** re-examined whether the `retrieved_chunks
+> - 1` over-fetch margin above is a genuine guarantee against under-fill. It isn't — it
+> covers the specific worst case it was sized for (every slot but one in the first
+> `retrieved_chunks` window is a duplicate of an earlier one), but heavy near-duplicate
+> pileup of a *single* fact (more copies than the margin) can still push genuinely distinct
+> chunks out of `rerank_chunks`'s truncated `top_k` window entirely — confirmed with a
+> reproduction (one fact under 9 ids outranking 4 distinct facts, `retrieved_chunks=5`,
+> margin=4 → only 1 selected). Tightened the `retrieval.py`/`context_budget.py` wording to
+> state that scope precisely instead of implying an unconditional guarantee; that residual
+> gap is a write-side/consolidation concern, not something a larger fixed margin closes, and
+> is deliberately not addressed here (no fetch-retry machinery added).
 
 Credit where due: the persona-memory dual-write and consolidation paths are already id-safe (the
 indexer keeps `id=memory.id`; originals are `CONSOLIDATED_TAG`-unindexed), so those are *not* a

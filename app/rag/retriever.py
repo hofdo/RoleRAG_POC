@@ -172,11 +172,14 @@ def build_retrieval_query(
 
 
 def _clip_line(text: str, max_chars: int = 300) -> str:
-    """Trim ``text`` to at most ``max_chars`` (docs/22 P0.3).
+    """Trim ``text`` to at most ``max_chars`` (docs/22 P0.3, retention-floor fix
+    2026-07-11).
 
     Prefers the last sentence boundary before the cap, then the last word
-    boundary, then a hard cut; always keeps the explicit ``"..."`` marker when
-    trimming occurs. Mirrors ``_truncate_text`` in
+    boundary, then a hard cut; a boundary only wins when it retains at least
+    half of the available budget (an early terminator/space otherwise collapses
+    the line to a few characters of noise). Always keeps the explicit ``"..."``
+    marker when trimming occurs. Mirrors ``_truncate_text`` in
     ``app.orchestration.context_budget``.
     """
     if len(text) <= max_chars:
@@ -189,11 +192,11 @@ def _clip_line(text: str, max_chars: int = 300) -> str:
     last_sentence_end = -1
     for match in _SENTENCE_BOUNDARY_RE.finditer(window):
         last_sentence_end = match.start() + 1
-    if last_sentence_end > 0:
+    if last_sentence_end > 0 and last_sentence_end * 2 >= budget:
         return f"{window[:last_sentence_end]}..."
 
     last_space = window.rfind(" ")
-    if last_space > 0:
+    if last_space > 0 and last_space * 2 >= budget:
         return f"{window[:last_space]}..."
 
     return f"{window}..."

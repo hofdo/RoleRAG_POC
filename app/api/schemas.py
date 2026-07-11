@@ -45,6 +45,9 @@ class CreateSessionRequest(BaseModel):
     player_name: str = Field(min_length=1, max_length=200)
     active_persona_id: str = Field(min_length=1, max_length=200)
     provider: str = Field(default="local", pattern="^(local|cloud)$")
+    # Additive (#16 follow-up): mirrors the CLI's `--skip-lore-ingest`. Default False preserves
+    # the new auto-ingest-on-create behavior for callers (the SPA included) that don't set it.
+    skip_lore_ingest: bool = False
 
 
 class CreateSessionResponse(BaseModel):
@@ -53,6 +56,10 @@ class CreateSessionResponse(BaseModel):
     active_scene_id: str
     active_persona_id: str
     provider: str
+    # Additive (#16 follow-up): best-effort scenario-lore auto-ingest failures degrade to a
+    # warning here instead of failing session creation (parity with the CLI's `start-session`,
+    # which prints the same warning). Empty when ingest was skipped or succeeded.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class UpdateSceneRequest(BaseModel):

@@ -1,6 +1,6 @@
 # 05 — Current RAG and Memory Design
 
-> Reviewed: 2026-07-07 @ 7888ee7
+> Reviewed: 2026-07-11 @ a20bfc5
 
 ## Purpose
 
@@ -59,9 +59,11 @@ Authoring note:
 - manifest metadata is used by validation and by explicit scenario-lore ingestion
 - lore documents are ingested explicitly through `python -m app.cli ingest` or
   `python -m app.cli ingest-scenario-lore --content-root <pack>`
-- CLI `start-session` additionally auto-ingests manifest-declared scenario lore
-  (idempotent, fail-open; opt out with `--skip-lore-ingest`); API and SPA session
-  creation does not auto-ingest
+- CLI `start-session` and API `POST /sessions` both auto-ingest manifest-declared scenario
+  lore on session creation (idempotent, fail-open; opt out with CLI `--skip-lore-ingest` /
+  API `skip_lore_ingest: true`) via the shared `app.composition.auto_ingest_scenario_lore`
+  helper; a failed API auto-ingest surfaces as `CreateSessionResponse.warnings` instead of
+  failing session creation (#16)
 
 Current limitation:
 
@@ -265,8 +267,6 @@ LLM behavior, semantic embedding quality, Qdrant quality, or generated prose qua
 ## Current Limitations
 
 - Qdrant remains a derived runtime index rather than an authoritative content store
-- API and SPA session creation does not auto-ingest lore into Qdrant (the CLI
-  `start-session` path does, fail-open)
 - production vector quality is not measured by the deterministic keyword eval fixtures
 
 ## Deferred Work

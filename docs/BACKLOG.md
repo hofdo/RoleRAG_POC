@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-11 @ 7d820d5
+> Reviewed: 2026-07-11 @ a20bfc5
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -30,8 +30,15 @@ no longer exists. Order was value + independence, decisions last; each item was 
 - [x] **#17** critic error → fail closed (CONTROLLED_FAILURE) instead of serving unvalidated text
 - [~] **#9** ~~memory-extraction cloud retry~~ — **DROPPED**: conflicts with the deliberate
   `memory_extraction_stays_local` / `critic_stays_local` invariant; deterministic fallback already covers it
-- [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`;
-  API create_session left as a follow-up)
+- [x] **#16** auto-ingest scenario lore on `start-session` (CLI; graceful + `--skip-lore-ingest`).
+  **Follow-up shipped**: `POST /sessions` now mirrors it via the shared
+  `app.composition.auto_ingest_scenario_lore` helper (both `app.cli._auto_ingest_scenario_lore`
+  and `app.api.routes.create_session` call it) -- request field `skip_lore_ingest: bool = false`
+  (additive), failures degrade to `CreateSessionResponse.warnings: list[str]` (additive) instead
+  of failing session creation, idempotent (`ingest_document` replaces a source's chunks by path).
+  Known/acceptable for personal use: like the CLI's `start-session`, API session creation loads
+  the embedding model and embeds scenario lore inline on first use, so the first `POST /sessions`
+  on a cold cache can be slow.
 - [~] **#19** structured `TurnResult.errors` — **DEFERRED to decision-batch**: `warnings: list[str]`
   spans 78 sites + 4 API schemas + persistence; contract-breaking + taxonomy decision; YAGNI for a
   single-user POC until a UI consumer needs it
@@ -512,6 +519,23 @@ Ordered by value. Effort S/M/L.
 *Fixed directly with this review (no ID):* stale "Angular 19" references swept to Angular 21
 (README, docs/02, docs/09, docs/SIDE_PROJECTS, frontend/README); CHANGELOG gained an
 `Unreleased` section covering the post-1.2.0 batch (#48–#64, Angular 21, RAG C1/N1, #60).
+
+### Found while closing the docs/10 coverage gaps (2026-07-11)
+
+- [ ] **#71** *(decision, S)* **Actor-stage provider-transport failures bypass controlled
+  failure.** `TurnOrchestrator.run_turn` catches only `EmptyProviderResponseError` /
+  `TruncatedProviderResponseError` around actor generation; a raw transport error
+  (`ProviderTimeoutError`/`ProviderUnavailableError`) propagates uncaught to the API/CLI caller —
+  the API maps it to 503/504, but **no CONTROLLED_FAILURE turn is persisted** and the player's
+  message is not recorded for that attempt. The same exception from the *critic* stage fails
+  closed into a persisted controlled-failure turn (invariant #4), because `TurnCritiqueStage.run`
+  catches broadly. The asymmetry is pinned (not fixed) by
+  `tests/integration/test_provider_unavailability.py`. Decide: (a) keep the 503/504 contract and
+  record it here as intended (transport failure = transient infrastructure error, retryable, so
+  no turn row belongs in history), or (b) catch transport errors in `run_turn` and persist a
+  controlled-failure turn like the critic path — which changes the API envelope for provider
+  outages and needs the SPA's error handling re-checked. Either way the tests document today's
+  behavior; flip them with the decision.
 
 ## Not doing (personal-use scope)
 

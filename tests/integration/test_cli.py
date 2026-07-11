@@ -518,14 +518,18 @@ def test_cli_start_session_persists_custom_content_root(tmp_path: Path) -> None:
 
 def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
     # start-session indexes the scenario's lore automatically, so the player does not have to
-    # remember a separate ingest-scenario-lore step before the first turn.
+    # remember a separate ingest-scenario-lore step before the first turn. The auto-ingest now
+    # routes through app.composition.auto_ingest_scenario_lore (shared with the API's
+    # POST /sessions), so the fakes patch the composition-level builders, not the CLI-local
+    # aliases (those remain patch targets only for CLI commands that build providers directly,
+    # e.g. retrieve-debug).
     pack_root = tmp_path / "pack"
     _write_scenario_pack(pack_root)
     vector_store = RecordingVectorStore()
 
     with (
-        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
-        patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.composition.build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
     ):
         result = runner.invoke(
             app,
@@ -602,6 +606,57 @@ def test_cli_turn_fails_clearly_for_missing_session(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "missing-session" in result.stdout
+
+
+def test_cli_turn_reports_friendly_error_and_persists_no_turn_when_local_provider_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """CLI counterpart to the API's 503 envelope
+    (test_post_turn_returns_503_envelope_when_local_provider_unavailable in
+    test_api_turns.py) and to the orchestrator-level finding pinned in
+    tests/integration/test_provider_unavailability.py: app.cli.turn's
+    `except (ProviderTimeoutError, ProviderUnavailableError)` clause reports a clean
+    error and exits 1 instead of a raw traceback. Because the exception propagates
+    out of TurnOrchestrator.run_turn uncaught (only EmptyProviderResponseError/
+    TruncatedProviderResponseError are caught there), no turn row is persisted for
+    the failed attempt -- pinned below via a direct repository check.
+    """
+    from app.llm.provider import ProviderUnavailableError
+
+    class UnavailableProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise ProviderUnavailableError(
+                provider="local", model=request.model, base_url="http://127.0.0.1:8080/v1"
+            )
+
+    with (
+        patch("app.composition.build_local_provider", return_value=UnavailableProvider()),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_file_loader", return_value=FakeLoader()),
+    ):
+        runner.invoke(
+            app,
+            ["start-session", "--session-id", "demo-session", "--skip-lore-ingest"],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+        result = runner.invoke(
+            app,
+            [
+                "turn",
+                "--message",
+                "What have you heard about the regent?",
+                "--session-id",
+                "demo-session",
+            ],
+            env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+        )
+
+    assert result.exit_code == 1
+    assert "unreachable" in result.output
+
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    assert SQLiteTurnRepository(connection).list_all_turns("demo-session") == []
 
 
 def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path) -> None:

@@ -8,18 +8,22 @@ from typing import Any
 import pytest
 
 from app.diagnostics.live_checkpoint import (
+    ROSE_GALLERY_MESSAGES,
     STORY_EVENTS,
     CheckpointError,
     EventAttribution,
     PersistenceInspection,
     build_event_attribution,
     conversation_messages,
+    events_for_turn_count,
     resolve_turn_count,
     run_checkpoint,
+    semantic_match,
     validate_warnings,
     write_reports,
 )
 from app.domain import MemoryEpisode, Visibility
+from app.rag.vector_store import QdrantVectorStore
 
 
 class FakeResponse:
@@ -154,6 +158,83 @@ def test_all_lengths_share_the_same_story_prefix() -> None:
         assert conversation_messages(count) == full[:count]
     assert "promise to return before dawn" in full[2]
     assert len(full) == 100
+
+
+def test_story_events_have_unique_callback_turns_within_bounds() -> None:
+    callback_turns = [event.callback_turn for event in STORY_EVENTS]
+    assert len(callback_turns) == len(set(callback_turns))
+    for event in STORY_EVENTS:
+        assert 1 <= event.definition_turn <= 100
+        assert 1 <= event.callback_turn <= 100
+        assert event.definition_turn < event.callback_turn
+
+
+def test_story_events_still_leave_exactly_100_scripted_messages() -> None:
+    assert len(ROSE_GALLERY_MESSAGES) == 100
+
+
+def test_story_event_definition_messages_satisfy_their_own_semantic_match() -> None:
+    # The scripted line that states the fact must contain every keyword group so a
+    # faithful summary of it can plausibly satisfy semantic_match at callback time.
+    for event in STORY_EVENTS:
+        definition_message = ROSE_GALLERY_MESSAGES[event.definition_turn - 1]
+        assert semantic_match(definition_message, event.term_groups), event.key
+
+
+def test_story_event_callback_messages_reference_at_least_one_term_group() -> None:
+    # Callback questions deliberately withhold most of the answer (they prompt recall
+    # rather than restate it), but should still gesture at the event via some term.
+    for event in STORY_EVENTS:
+        callback_message = ROSE_GALLERY_MESSAGES[event.callback_turn - 1].casefold()
+        assert any(
+            any(term.casefold() in callback_message for term in group)
+            for group in event.term_groups
+        ), event.key
+
+
+def test_at_least_one_story_event_is_a_long_gap_late_recall_probe() -> None:
+    # Acceptance criterion from docs/22: an old durable fact must still be retrievable
+    # near the end of a 100-turn run, not just shortly after it was stated.
+    gaps = [event.callback_turn - event.definition_turn for event in STORY_EVENTS]
+    assert max(gaps) >= 60
+
+
+# Keys of the five events that existed before this change, all with callback_turn <= 50.
+_ORIGINAL_FIVE_KEYS: set[str] = {
+    "before_dawn_promise",
+    "silver_compass",
+    "blue_seal_trust_rule",
+    "key_hiding_place",
+    "three_tap_signal",
+}
+
+
+@pytest.mark.parametrize(
+    ("turn_count", "expected_keys"),
+    [
+        (50, _ORIGINAL_FIVE_KEYS),
+        (64, _ORIGINAL_FIVE_KEYS),
+        (65, _ORIGINAL_FIVE_KEYS | {"amber_ring_token"}),
+        (79, _ORIGINAL_FIVE_KEYS | {"amber_ring_token"}),
+        (80, _ORIGINAL_FIVE_KEYS | {"amber_ring_token", "north_stair_rendezvous"}),
+        (94, _ORIGINAL_FIVE_KEYS | {"amber_ring_token", "north_stair_rendezvous"}),
+        (95, {event.key for event in STORY_EVENTS}),
+        (100, {event.key for event in STORY_EVENTS}),
+    ],
+)
+def test_events_for_turn_count_boundaries_at_late_recall_turns(
+    turn_count: int, expected_keys: set[str]
+) -> None:
+    selected_keys = {event.key for event in events_for_turn_count(turn_count)}
+    assert selected_keys == expected_keys
+
+
+def test_events_for_turn_count_excludes_long_gap_event_before_its_callback() -> None:
+    # A partial run whose turn_count falls between the long-gap event's early setup
+    # (turn 17) and its late callback (turn 95) must not assert on it at all: the
+    # setup happening is harmless, but the callback is out of range so it is filtered.
+    selected_keys = {event.key for event in events_for_turn_count(60)}
+    assert "hollow_bookend_note" not in selected_keys
 
 
 def test_structured_warnings_are_strict_or_report_only() -> None:
@@ -435,3 +516,143 @@ def test_write_json_atomic_replaces_target_without_leftover_temp(tmp_path: Path)
     write_json_atomic(path, {"status": "pass"})
     assert json.loads(path.read_text(encoding="utf-8")) == {"status": "pass"}
     assert sorted(path.parent.iterdir()) == [path]
+
+
+# --- P1.4 fingerprint sentinel excluded from count paths (cross-review P4, 2026-07-11) --
+#
+# The embedding-model fingerprint sentinel (docs/22 P1.4) is a real point
+# ``ensure_collection`` writes into every collection it touches. ``_qdrant_count`` must
+# exclude it (the same ``must_not`` mechanism ``QdrantVectorStore._build_qdrant_filter``
+# already applies on every search path), or the checkpoint's unfiltered canon-lore count
+# would be inflated by 1 -- letting the ">=1 lore" gate pass on a stamped-but-empty
+# collection and diverging from ``InMemoryVectorStore``, whose fingerprint is a separate
+# dict entry, never a counted point. Runs against an embedded ``QdrantClient(":memory:")``
+# (same pattern as tests/unit/test_vector_store_fingerprint.py) so the real sentinel/filter
+# code path is exercised.
+
+
+def _qdrant_store() -> QdrantVectorStore:
+    from qdrant_client import QdrantClient
+
+    store = QdrantVectorStore(url="local")
+    store._client = QdrantClient(":memory:")
+    return store
+
+
+def test_qdrant_count_excludes_sentinel_on_stamped_empty_collection() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagCollection
+
+    store = _qdrant_store()
+    # Stamps the fingerprint sentinel into a brand-new, otherwise-empty collection --
+    # exactly what happens the first time any indexer/ingest call passes model_key.
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="all-MiniLM-L6-v2")
+
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 0
+
+
+def test_qdrant_count_excludes_sentinel_alongside_real_points() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagChunk, RagCollection
+
+    store = _qdrant_store()
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="all-MiniLM-L6-v2")
+    chunks = [
+        RagChunk(
+            id=f"lore-{i}",
+            source="lore.md",
+            source_type="lore",
+            text=f"canon fact {i}",
+            visibility=Visibility.PLAYER,
+            world_id="w1",
+        )
+        for i in range(3)
+    ]
+    store.upsert_chunks(RagCollection.CANON_LORE, chunks, [[1.0, 0.0, 0.0]] * 3)
+
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 3
+
+
+def test_qdrant_count_missing_collection_is_zero() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagCollection
+
+    store = _qdrant_store()
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 0
+
+
+def test_inspect_live_state_excludes_consolidated_rows_from_persisted_memory_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # docs/22 P2 (fixed 2026-07-11): consolidation (C2) marks originals CONSOLIDATED_TAG
+    # in SQLite but never deletes the row, while unindexing them from Qdrant. An
+    # unfiltered SQLite count would diverge from the Qdrant-indexed count on the very
+    # first roll-up and fail the checkpoint's SQLite/Qdrant parity assertion forever
+    # after. persisted_memory_count must exclude consolidated-marked rows to stay
+    # comparable.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_live_state
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-11T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "world", "scene", "persona", "Player", now, now),
+    )
+    rows = [
+        ("mem-1", "[]"),  # ordinary, still retrievable
+        ("mem-2", "[]"),  # ordinary, still retrievable
+        ("mem-3", json.dumps(["consolidated"])),  # folded original, SQLite-only now
+        ("mem-4", json.dumps(["consolidation_summary"])),  # the roll-up itself, indexed
+    ]
+    for memory_id, tags_json in rows:
+        connection.execute(
+            "INSERT INTO memory_episodes "
+            "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+            "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (memory_id, "session-1", "scene", "persona", "summary", 1, "player", tags_json, now),
+        )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_count",
+        lambda vector_store, collection, session_id=None: 3,
+    )
+
+    inspection = inspect_live_state(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path)),
+        session_id="session-1",
+    )
+
+    # 4 rows persisted, but "mem-3" (consolidated) is excluded -- matching the Qdrant
+    # side, which no longer indexes it (patched above to 3: mem-1, mem-2, mem-4).
+    assert inspection.persisted_memory_count == 3
+    assert inspection.session_memory_count == 3
+
+
+def test_qdrant_count_session_filter_still_excludes_sentinel() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagChunk, RagCollection
+
+    store = _qdrant_store()
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 3, model_key="all-MiniLM-L6-v2")
+    chunk = RagChunk(
+        id="mem-1",
+        source="memory_episode:mem-1",
+        source_type="session_memory",
+        text="a memory",
+        visibility=Visibility.PLAYER,
+        session_id="session-a",
+    )
+    store.upsert_chunks(RagCollection.SESSION_MEMORY, [chunk], [[1.0, 0.0, 0.0]])
+
+    assert _qdrant_count(store, RagCollection.SESSION_MEMORY, session_id="session-a") == 1
+    assert _qdrant_count(store, RagCollection.SESSION_MEMORY, session_id="session-b") == 0

@@ -19,10 +19,11 @@ from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, Visibility
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
 from app.rag.retriever import build_retrieval_query
-from app.rag.vector_store import QdrantVectorStore
+from app.rag.vector_store import _SENTINEL_PAYLOAD_KEY, QdrantVectorStore
 
 MIN_TURN_COUNT = 5
 MAX_TURN_COUNT = 100
@@ -45,7 +46,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask which corridor the regent's envoy used after leaving the gallery.",
     "I compare the west-door lock with the archive key in Iria's sketch.",
     "I ask whether the roses were rearranged before or after the envoy departed.",
-    "I listen for footsteps and ask Iria who is still awake below us.",
+    "I tell Iria I have hidden a folded note inside the hollow bookend on the third archive shelf.",
     "I ask what record in the archive would most threaten the regent.",
     "I ask Iria what she needs me to understand before I leave the gallery.",
     "I pause beside the final mirror and ask what our next move should be.",
@@ -83,7 +84,7 @@ ROSE_GALLERY_MESSAGES = (
     "I trace the conservatory passage behind the roses and ask where it ends.",
     "I ask which neutral courtier might be swayed by the ledger's contents.",
     "I tell Iria to watch the eastern stair while I approach the archive.",
-    "I ask whether the regent's secretary carried anything sealed tonight.",
+    "I press an amber ring into Iria's palm and tell her to wear it as a sign of my word.",
     "I test the west door with three soft taps and wait for her answer.",
     "I ask Iria to confirm the blue wax seal on the note just delivered.",
     "I ask how long the guards' midnight rotation leaves the corridor empty.",
@@ -93,12 +94,12 @@ ROSE_GALLERY_MESSAGES = (
     "I ask her to describe the envoy's face when he first entered the gallery.",
     "I ask what sound the hidden archive latch makes when it gives way.",
     "I tell Iria I will copy a single page and leave the seal unbroken.",
-    "I ask which ally should receive that copied page before dawn.",
+    "I ask Iria whether she still wears the token I gave her that night.",
     "I ask whether the ballroom crowd has thinned enough to cross unseen.",
     "I study the envoy's discarded note and compare its hand to the ledger.",
     "I ask Iria to recall the exact rule we set for trusting any message.",
     "I ask whether the regent has summoned anyone to the gallery tonight.",
-    "I ask which mirror would warn us first if someone climbs the eastern stair.",
+    "I tell Iria that if we are separated, I will wait for her at the old north stair.",
     "I ask Iria to repeat where I hid the spare archive key.",
     "I ask what distraction could clear the west corridor for a full minute.",
     "I tell Iria the three-tap signal still stands if we must part.",
@@ -108,7 +109,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask whether the clock's silenced chime was meant as a signal to someone.",
     "I ask her to name the courtier who changed their route after the envoy left.",
     "I tell Iria I trust only the blue-sealed messages from this point on.",
-    "I ask whether the conservatory door can be barred from the inside.",
+    "I ask Iria whether she remembers where I said I would wait if we were separated.",
     "I ask what the regent fears most about the winter succession record.",
     "I ask Iria to keep the silver compass hidden until I send the safe signal.",
     "I ask which corridor the secretary used when he slipped away just now.",
@@ -123,7 +124,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask whether the eastern stair is finally clear of watchers.",
     "I ask her to recall the promise I made about returning before dawn.",
     "I ask which message tonight carried no blue seal and should be doubted.",
-    "I tell Iria I will return the copied page to her by the west door.",
+    "I ask Iria whether she remembers where I hid that folded note.",
     "I ask whether the regent's envoy has reentered the palace gates.",
     "I ask Iria for the safe signal one last time before I leave the gallery.",
     "I ask which ally waits beyond the conservatory to carry our evidence.",
@@ -146,6 +147,14 @@ STORY_EVENTS = (
         definition_turn=3,
         callback_turn=13,
         term_groups=(("promise", "promised"), ("return", "come back"), ("dawn",)),
+    ),
+    # Long-gap probe: fact stated in the opening act, callback near the very end of a
+    # 100-turn run — the "old durable fact still retrievable after 100 turns" case.
+    StoryEvent(
+        key="hollow_bookend_note",
+        definition_turn=17,
+        callback_turn=95,
+        term_groups=(("bookend",), ("note",), ("shelf", "shelves")),
     ),
     StoryEvent(
         key="silver_compass",
@@ -170,6 +179,20 @@ STORY_EVENTS = (
         definition_turn=40,
         callback_turn=50,
         term_groups=(("three", "3"), ("tap", "knock"), ("west",), ("door",)),
+    ),
+    # Late-recall probes (turns 51-100 were previously filler; a 100-turn run asserted
+    # nothing past turn 50). Both setup and callback fall after turn 50.
+    StoryEvent(
+        key="amber_ring_token",
+        definition_turn=55,
+        callback_turn=65,
+        term_groups=(("amber",), ("ring",), ("wear", "sign", "token")),
+    ),
+    StoryEvent(
+        key="north_stair_rendezvous",
+        definition_turn=70,
+        callback_turn=80,
+        term_groups=(("north",), ("stair", "stairs"), ("wait", "meet")),
     ),
 )
 
@@ -230,6 +253,11 @@ class EventAttribution:
 @dataclass(frozen=True)
 class PersistenceInspection:
     persisted_turn_count: int
+    # Excludes consolidation-marked (CONSOLIDATED_TAG) rows (docs/22 P2, fixed
+    # 2026-07-11) so this stays comparable to ``session_memory_count``: consolidation
+    # is non-destructive in SQLite (the original rows stay, tagged, forever) but
+    # unindexes them from Qdrant, so an unfiltered SQLite count would permanently
+    # diverge from the Qdrant-indexed count starting at the first roll-up.
     persisted_memory_count: int
     canon_lore_count: int
     session_memory_count: int
@@ -623,12 +651,20 @@ def inspect_live_state(
                 (session_id,),
             ).fetchone()[0]
         )
-        persisted_memory_count = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM memory_episodes WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-        )
+        memory_tag_rows = connection.execute(
+            "SELECT tags_json FROM memory_episodes WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+    # Consolidation (docs/22 C2/P3) marks originals CONSOLIDATED_TAG and unindexes them
+    # from Qdrant, but never deletes the SQLite row -- so counting every row here would
+    # diverge from the Qdrant-indexed session_memory_count as soon as one roll-up runs
+    # (docs/22 P2, fixed 2026-07-11). Excluding consolidated-marked rows keeps the two
+    # sides comparable.
+    persisted_memory_count = sum(
+        1
+        for (tags_json,) in memory_tag_rows
+        if CONSOLIDATED_TAG not in json.loads(tags_json)
+    )
     vector_store = QdrantVectorStore(url=settings.qdrant_url)
     return PersistenceInspection(
         persisted_turn_count=persisted_turn_count,
@@ -779,20 +815,38 @@ def _qdrant_count(
     *,
     session_id: str | None = None,
 ) -> int:
+    """Count points in ``collection``, excluding the P1.4 embedding-model fingerprint
+    sentinel meta point (docs/22 P4, fixed 2026-07-11).
+
+    The sentinel is a real point ``ensure_collection`` writes into every collection it
+    touches, so an unscoped ``client.count()`` (the ``session_id is None`` canon-lore
+    path) would count it too -- inflating ``canon_lore_count`` by 1 and letting the
+    checkpoint's ``>= 1 lore`` gate pass on a stamped-but-otherwise-empty collection,
+    diverging from ``InMemoryVectorStore`` (whose fingerprint lives in a separate dict,
+    never a counted entry). Reuses the same ``must_not`` exclusion
+    ``QdrantVectorStore._build_qdrant_filter`` applies on every search path.
+    """
     if not vector_store.client.collection_exists(collection_name=collection.value):
         return 0
-    count_filter = None
-    if session_id is not None:
-        from qdrant_client.http import models
+    from qdrant_client.http import models
 
-        count_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="session_id",
-                    match=models.MatchValue(value=session_id),
-                )
-            ]
+    must: list[Any] = []
+    if session_id is not None:
+        must.append(
+            models.FieldCondition(
+                key="session_id",
+                match=models.MatchValue(value=session_id),
+            )
         )
+    count_filter = models.Filter(
+        must=must,
+        must_not=[
+            models.FieldCondition(
+                key=_SENTINEL_PAYLOAD_KEY,
+                match=models.MatchValue(value=True),
+            )
+        ],
+    )
     result = vector_store.client.count(
         collection_name=collection.value,
         count_filter=count_filter,

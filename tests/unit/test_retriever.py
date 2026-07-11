@@ -470,3 +470,23 @@ def test_clip_line_default_max_chars_unchanged_at_300() -> None:
     result = _clip_line(text)
     assert len(result) <= 300
     assert result.endswith("...")
+
+
+# --- Sentence-trim retention floor (cross-review P1, 2026-07-11) -------------------
+
+
+def test_clip_line_early_terminator_does_not_collapse_the_line() -> None:
+    # Mirrors the context_budget._truncate_text repro: an abbreviation a few
+    # characters in must not collapse the whole clipped line to noise.
+    text = "Mr. " + "x" * 960
+    result = _clip_line(text, max_chars=200)
+    assert result != "Mr...."
+    assert len(result) == 200
+    assert result.startswith("Mr. xxx")
+
+
+def test_clip_line_sentence_boundary_wins_at_exactly_half_budget() -> None:
+    text = "AAAAAAAAA. " + "b" * 40
+    result = _clip_line(text, max_chars=23)
+    assert result == "AAAAAAAAA...."
+    assert len(result) <= 23

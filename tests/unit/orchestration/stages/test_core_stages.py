@@ -24,6 +24,7 @@ from app.domain import (
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
 from app.memory import MemoryEpisodeStore
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages import (
     LoadedTurnContext,
@@ -982,6 +983,68 @@ def test_retrieval_stage_backfill_survives_duplicate_text_collisions_end_to_end(
     assert len(selected) == 5
 
 
+def test_over_fetch_margin_does_not_cover_heavy_single_fact_duplicate_pileup() -> None:
+    # docs/22 P6 honesty note (2026-07-11): the over-fetch margin (retrieved_chunks - 1)
+    # is a *bounded* worst-case heuristic, not a universal guarantee that the block
+    # always reaches budget.retrieved_chunks. This pins the documented residual gap: one
+    # fact repeated more times than the margin can still push genuinely distinct chunks
+    # entirely out of rerank_chunks' truncated top_k window, since that truncation runs
+    # *before* select_retrieved_chunks_for_prompt's N3 dedup ever sees the rest of the
+    # candidate pool. This is a real, deliberately-out-of-scope limitation of a
+    # fixed-size fetch margin (would need write-side dedup or fetch-retry to close, per
+    # the retrieval.py comment), not a regression to "fix" by widening the margin further.
+    from app.rag.models import RagCollection
+    from app.rag.ranking import RetrievalRankingContext, rerank_chunks
+
+    def make(chunk_id: str, text: str, *, score: float) -> RetrievedChunk:
+        return RetrievedChunk(
+            id=chunk_id,
+            source="s",
+            source_type="lore",
+            text=text,
+            score=score,
+            visibility=Visibility.PLAYER,
+        )
+
+    retrieved_chunks = 5
+    # One fact restated under 9 distinct ids, all ranked above 4 genuinely distinct
+    # facts -- more duplicate copies than the (retrieved_chunks - 1) == 4 margin covers.
+    candidates = [
+        (
+            RagCollection.CANON_LORE,
+            make(f"dup-{i}", "The regent distrusts the chancellor.", score=0.9 - i * 0.001),
+        )
+        for i in range(9)
+    ] + [
+        (RagCollection.CANON_LORE, make(f"distinct-{i}", text, score=0.5))
+        for i, text in enumerate(
+            [
+                "A storm is expected by nightfall.",
+                "The bridge was repaired last week.",
+                "A new merchant arrived in town.",
+                "The well ran dry this morning.",
+            ]
+        )
+    ]
+    top_k = retrieved_chunks + max(retrieved_chunks - 1, 0)  # no standing facts here
+
+    chunks, _ = rerank_chunks(
+        context=RetrievalRankingContext(query="q", session_id="s", persona_id="p"),
+        candidates=candidates,
+        top_k=top_k,
+    )
+    from app.orchestration.context_budget import select_retrieved_chunks_for_prompt
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks, budget=ContextBudget(retrieved_chunks=retrieved_chunks)
+    )
+
+    # The 4 genuinely distinct facts exist in `candidates` but never reach the
+    # truncated top_k window, so only the one duplicated fact survives -- documented,
+    # expected under-fill, not a bug in the margin's sizing.
+    assert len(selected) == 1
+
+
 class RecordingMemoryStore:
     def __init__(self) -> None:
         self.persisted: list[Any] = []
@@ -1012,15 +1075,28 @@ class RecordingMemoryStore:
         return [episode for episode in self.persisted if episode.session_id == session_id]
 
     def mark_memories_consolidated(self, memory_ids: list[str]) -> None:
+        # Mirrors SQLiteMemoryRepository.add_tag_to_memories: mutate the stored
+        # episode's tags in place (not just record the call) so a *second*
+        # list_memories_for_session -> select_consolidatable pass in the same test
+        # correctly sees these as no-longer-eligible, same as the real store.
         self.consolidated_ids.extend(memory_ids)
+        target_ids = set(memory_ids)
+        for episode in self.persisted:
+            if episode.id in target_ids and CONSOLIDATED_TAG not in episode.tags:
+                episode.tags.append(CONSOLIDATED_TAG)
 
 
 class _RecordingIndexer:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_index_memories: bool = False) -> None:
         self.indexed: list[list[Any]] = []
         self.unindexed: list[str] = []
+        self.fail_index_memories = fail_index_memories
+        self.index_memories_calls = 0
 
     def index_memories(self, memories: list[Any]) -> object:
+        self.index_memories_calls += 1
+        if self.fail_index_memories:
+            raise RuntimeError("qdrant unavailable")
         self.indexed.append(list(memories))
         return None
 
@@ -1097,6 +1173,70 @@ async def test_memory_stage_consolidates_when_threshold_reached() -> None:
     assert set(store.consolidated_ids) == set(original_ids)
     assert set(indexer.unindexed) == set(original_ids)
     assert any("rolled up 3 memories" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_marks_originals_despite_index_failure_no_retrip() -> None:
+    # docs/22 P3 (fixed 2026-07-11): SQLite-first ordering. Previously the summary was
+    # indexed *before* the originals were marked consolidated, so an index failure (e.g.
+    # a P1.4 embedding-model fingerprint mismatch) raised out of _persist_consolidation
+    # between those two steps -- the summary row was already committed, but the
+    # originals were never marked, so the same oldest-N backlog re-tripped the threshold
+    # on the very next turn and minted a second summary of the same memories (one orphan
+    # summary row per turn). With SQLite-first ordering, persist + mark both complete
+    # before any Qdrant work runs, so an index failure degrades to a warning and the
+    # next turn correctly sees a shrunk, below-threshold backlog.
+    store = RecordingMemoryStore()
+    context = _context()
+    _seed_filler(store, context.session.id, 3)
+    indexer = _RecordingIndexer(fail_index_memories=True)
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+    )
+
+    first = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:3]]
+    # The summary was still persisted and the originals still marked despite the
+    # indexing failure -- the SQLite side is authoritative and complete.
+    assert len(store.persisted) == 4
+    assert set(store.consolidated_ids) == set(original_ids)
+    assert indexer.unindexed == []
+    assert any("indexing degraded" in warning for warning in first.warnings)
+    assert any("rolled up 3 memories" in warning for warning in first.warnings)
+    # Must not be reported as "skipped" -- that would misleadingly imply nothing was
+    # persisted, when in fact the SQLite-side write fully completed.
+    assert not any("consolidation skipped" in warning for warning in first.warnings)
+
+    indexer.fail_index_memories = False  # e.g. Qdrant becomes reachable again
+    second = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I wait by the mirrors.",
+        assistant_message="Nothing changes.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    # No second summary: the originals are already marked consolidated in SQLite, so
+    # the eligible backlog is back below threshold and this turn is a no-op.
+    assert len(store.persisted) == 4
+    assert second.warnings == ()
 
 
 @pytest.mark.asyncio

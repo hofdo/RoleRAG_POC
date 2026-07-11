@@ -121,6 +121,52 @@ def test_select_text_dedup_interacts_with_standing_facts_exclusion() -> None:
     assert [chunk.id for chunk in selected] == ["mem-distinct", "mem-extra"]
 
 
+def test_select_dedupes_on_post_truncation_text_when_pre_truncation_text_differs() -> None:
+    # docs/22 P5 (fixed 2026-07-11): two chunks sharing an 850-char prefix but
+    # diverging after it are distinct pre-truncation, so the N3 pre-truncation check
+    # alone lets both through -- but at an 800-char cap, _truncate_text renders them
+    # byte-identical prompt blocks. The post-truncation check must catch this.
+    shared_prefix = "The regent distrusts the chancellor and plans to act soon. " * 14
+    shared_prefix = shared_prefix[:850]
+    text_a = shared_prefix + "A" * 150  # 1000 chars total
+    text_b = shared_prefix + "B" * 150  # 1000 chars total, diverges only after 850
+    assert text_a != text_b  # pre-truncation texts are genuinely distinct
+
+    chunks = [
+        _chunk("mem-a", text=text_a),
+        _chunk("mem-b", text=text_b),
+        _chunk("mem-c", text="A storm is expected by nightfall."),
+    ]
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks,
+        budget=ContextBudget(retrieved_chunks=2, max_retrieved_chunk_chars=800),
+    )
+
+    # mem-b renders identically to the already-selected mem-a once truncated to 800
+    # chars, so it must be dropped and the freed slot filled by the next distinct
+    # chunk (mem-c) -- not left duplicated in the prompt.
+    assert [chunk.id for chunk in selected] == ["mem-a", "mem-c"]
+    assert selected[0].text != text_a  # confirms truncation actually happened
+    assert len(selected[0].text) <= 800
+
+
+def test_select_leaves_distinct_post_truncation_text_untouched() -> None:
+    # Chunks that remain distinct after truncation (diverge within the cap) must not
+    # be affected by the post-truncation dedup check.
+    chunks = [
+        _chunk("mem-a", text="The regent distrusts the chancellor."),
+        _chunk("mem-b", text="The chancellor distrusts the regent."),
+    ]
+
+    selected = select_retrieved_chunks_for_prompt(
+        chunks,
+        budget=ContextBudget(retrieved_chunks=2, max_retrieved_chunk_chars=800),
+    )
+
+    assert [chunk.id for chunk in selected] == ["mem-a", "mem-b"]
+
+
 def test_select_exclude_texts_empty_is_byte_identical() -> None:
     chunks = [_chunk("player-1", text="only fact")]
     baseline = select_retrieved_chunks_for_prompt(
@@ -216,6 +262,44 @@ def test_truncate_text_falls_back_to_hard_cut_when_no_space_in_budget() -> None:
     result = _truncate_text(text, 10)
     assert result == "AAAAAAA..."
     assert len(result) == 10
+
+
+# --- Sentence-trim retention floor (cross-review P1, 2026-07-11) -------------------
+
+
+def test_truncate_text_early_terminator_does_not_collapse_the_chunk() -> None:
+    # A leading abbreviation ("Mr.") is a sentence boundary a few characters in.
+    # Winning unconditionally would collapse an entire 960-char chunk to "Mr...."
+    # while still consuming one of the prompt's scarce retrieved-chunk slots. The
+    # word-boundary fallback would fail identically here (the only space in the
+    # text is the one right after "Mr."), so the fix must fall all the way through
+    # to a hard cut at the full budget rather than stopping at the first tier that
+    # merely isn't the sentence boundary.
+    text = "Mr. " + "x" * 960
+    result = _truncate_text(text, 200)
+    assert result != "Mr...."
+    assert len(result) == 200
+    assert result.startswith("Mr. xxx")
+    assert result.endswith("...")
+
+
+def test_truncate_text_sentence_boundary_wins_at_exactly_half_budget() -> None:
+    # budget = max_chars - 3 = 20; a sentence boundary retaining exactly half
+    # (10 chars) must still win the tie (">=", not ">").
+    text = "AAAAAAAAA. " + "b" * 40
+    result = _truncate_text(text, 23)
+    assert result == "AAAAAAAAA...."
+    assert len(result) <= 23
+
+
+def test_truncate_text_sentence_boundary_below_half_budget_falls_through() -> None:
+    # Same shape as the exact-half case but the boundary now retains one char
+    # less than half the budget, so it must lose to a later, larger word/hard-cut
+    # tier instead of winning on a stale ">" comparison.
+    text = "AAAAAAAA. " + "b" * 40
+    result = _truncate_text(text, 23)
+    assert result != "AAAAAAAA...."
+    assert len(result) <= 23
 
 
 # --- Context-ceiling preflight estimator (#69) --------------------------------------

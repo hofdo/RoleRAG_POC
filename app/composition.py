@@ -39,13 +39,31 @@ from app.persistence.repositories import (
 )
 from app.rag import (
     ActorContextRetriever,
+    ChunkingConfig,
     EmbeddingProvider,
     FastEmbedEmbeddingProvider,
     QdrantVectorStore,
     Retriever,
     VectorStore,
+    ingest_lore_manifest,
 )
 from app.rag.ranking import RankingWeights
+
+
+@dataclass
+class LoreAutoIngestOutcome:
+    """Result of a best-effort scenario-lore auto-ingest attempt.
+
+    ``attempted`` is ``False`` when the scenario pack has no ``documents/manifest.json`` --
+    nothing to index, and callers should treat this as a silent no-op (not a warning). When
+    ``attempted`` is ``True``, either ``warning`` is set (the ingest failed; session creation
+    must proceed anyway) or ``document_count``/``chunk_count`` describe what was indexed.
+    """
+
+    attempted: bool
+    document_count: int = 0
+    chunk_count: int = 0
+    warning: str | None = None
 
 
 @dataclass
@@ -196,6 +214,52 @@ def build_actor_context_retriever(
             default_top_k=settings.rag_default_top_k,
         ),
         weights=build_ranking_weights(settings),
+    )
+
+
+def auto_ingest_scenario_lore(
+    settings: Settings, content_root: Path | str
+) -> LoreAutoIngestOutcome:
+    """Best-effort: index the scenario's lore so retrieval works without a separate ingest
+    step. Shared by the CLI's ``start-session`` and the API's ``POST /sessions`` -- both
+    session-creation paths call this once the session itself is durably created, and neither
+    lets its outcome block session creation (CLI: colored ``typer.secho`` feedback; API: mapped
+    onto ``CreateSessionResponse.warnings``).
+
+    A scenario with no manifest is silent (``attempted=False``): nothing to index. An
+    unreachable vector store, a missing embedding backend, or an embedding-model fingerprint
+    mismatch (docs/22 P1.4) only sets ``outcome.warning`` -- run ``ingest-scenario-lore``
+    later, which fails loud instead. A manifest that references a missing document also
+    surfaces as a warning here rather than being swallowed, so a typo'd lore path does not
+    silently leave retrieval empty.
+
+    Idempotent: re-running this for the same content_root re-indexes the same lore without
+    duplicating it -- ``ingest_document`` replaces a source's chunks by path (see
+    ``ingest_lore_manifest``), so re-creating a session in the same world/content_root is safe.
+    """
+    root = Path(content_root)
+    if not (root / "documents" / "manifest.json").exists():
+        return LoreAutoIngestOutcome(attempted=False)
+    try:
+        results = ingest_lore_manifest(
+            root,
+            embedding_provider=build_embedding_provider(settings),
+            vector_store=build_vector_store(settings),
+            chunking_config=ChunkingConfig(
+                chunk_size_chars=settings.rag_chunk_size_chars,
+                chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+            ),
+            model_key=settings.embedding_model,
+        )
+    except Exception as exc:  # degrade gracefully: a session must still be creatable
+        return LoreAutoIngestOutcome(
+            attempted=True,
+            warning=f"scenario lore auto-ingest skipped: {exc}",
+        )
+    return LoreAutoIngestOutcome(
+        attempted=True,
+        document_count=len(results),
+        chunk_count=sum(result.chunk_count for result in results),
     )
 
 

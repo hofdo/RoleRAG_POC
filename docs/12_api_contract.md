@@ -1,6 +1,6 @@
 # 12 - API Contract
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-11 @ a20bfc5
 
 ## Scope
 
@@ -106,7 +106,8 @@ invalid_content_catalog` using the standard error envelope.
   "scene_id": "rose-gallery",
   "player_name": "Avery",
   "active_persona_id": "archivist",
-  "provider": "local"
+  "provider": "local",
+  "skip_lore_ingest": false
 }
 ```
 
@@ -120,7 +121,16 @@ cloud_unavailable`; `auto` allows it silently; `ask` is enforced by the CLI/SPA 
 (interactive confirmation before the request is sent), not by this endpoint itself. A
 `cloud` request also requires a configured cloud API key regardless of `CLOUD_MODE`.
 
-The response contains safe session identifiers and the bound provider:
+`skip_lore_ingest` (default `false`, additive) mirrors the CLI's `start-session
+--skip-lore-ingest`: unless set to `true`, session creation best-effort auto-ingests the
+scenario's `documents/manifest.json` lore (idempotent, fail-open) via the shared
+`app.composition.auto_ingest_scenario_lore` helper. A scenario with no manifest is a silent
+no-op. A failed ingest (unreachable vector store, missing embedding backend, or an
+embedding-model fingerprint mismatch — docs/22 P1.4) never fails session creation; it
+surfaces as a string in the response's `warnings`.
+
+The response contains safe session identifiers, the bound provider, and any auto-ingest
+warnings:
 
 ```json
 {
@@ -128,7 +138,8 @@ The response contains safe session identifiers and the bound provider:
   "world_id": "demo_world",
   "active_scene_id": "rose-gallery",
   "active_persona_id": "archivist",
-  "provider": "local"
+  "provider": "local",
+  "warnings": []
 }
 ```
 

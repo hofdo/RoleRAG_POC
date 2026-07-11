@@ -16,6 +16,25 @@ records; this file is the quick delta between versions.
 - **Behavioral WAL concurrency tests** (#64), **coverage measurement** (#61, report-only,
   91% baseline), **frontend lint in CI** (#62), **SPA build in CI** (#52), and a
   **non-blocking dependency-audit job** (#63).
+- **Cloud critic visibility projection** (#65): `TurnCritiqueStage.run` now projects
+  `retrieved_chunks` to the route's allowed visibility before calling the critic — cloud routes
+  see player-visible chunks only, closing a gap where a misbehaving or custom
+  `actor_context_retriever` could otherwise deliver a GM/private chunk into a cloud critic prompt.
+  A new `provider_binding` regression check
+  (`malicious_retriever_gm_chunk_never_reaches_cloud`) pins it, taking the regression runner from
+  84 to 85 checks (fcfd304).
+- **Token usage & context-ceiling preflight** (#69): `token_usage` (prompt/completion/total) is
+  now persisted into turn diagnostics and exposed on `CreateTurnResponse`/`TurnDetailResponse`/SSE;
+  opt-in `MODEL_CONTEXT_WINDOW_TOKENS` + `CONTEXT_WARN_RATIO` add a pre-generation estimate warning
+  and a post-generation actual-usage warning when a turn's prompt approaches the configured context
+  window; retrieved-chunk and recent-dialogue trimming now cuts at word boundaries instead of
+  mid-word (f977ba8).
+- **API auto-ingest scenario lore on `POST /sessions`** (#16 follow-up): the API (and therefore
+  the SPA) now mirrors the CLI's `start-session` auto-ingest instead of requiring a separate
+  `ingest-scenario-lore` call. Both surfaces share one `app.composition.auto_ingest_scenario_lore`
+  helper — idempotent, fail-open; a failed ingest degrades to a new
+  `CreateSessionResponse.warnings: list[str]` instead of failing session creation. New additive
+  request field `skip_lore_ingest: bool = false` (CLI parity: `--skip-lore-ingest`).
 
 ### Changed
 
@@ -34,6 +53,22 @@ records; this file is the quick delta between versions.
   (0c11c29). Both validated on a live 26B + Qdrant run with zero recall regression.
 - Removed the dead cloud-repair path (#56) and deduplicated controlled-failure /
   diagnostics assembly in the orchestrator (#54).
+- **Reroll persona restore** (#66): deleting the last turn (`DELETE /sessions/{id}/turns/last`)
+  now restores `sessions.active_persona_id` to the nearest surviving `SUCCESS` turn's persona when
+  the deleted turn had committed a persona switch, instead of stranding the session on it; scene
+  switches are unaffected since they only move via the explicit scene endpoint, never as a
+  per-turn side effect (856c73b).
+- **CLI service assembly** (#67): `cli._build_services` now delegates to
+  `composition.build_services` instead of a hand-rolled ~55-line assembly, so CLI turns honor
+  author-pinned canon facts, record structured-output failures, and can reach semantic
+  write-dedup — collaborators (`canon_repository`, `structured_failure_sink`,
+  `memory_embedding_provider`) the API composition root already wired but the CLI previously
+  omitted (1c36821).
+- **Atomic turn_index assignment** (#70): `SQLiteTurnRepository.append_turn` now assigns
+  `turn_index` inside the `INSERT` itself via a correlated `MAX(turn_index)+1` subselect plus
+  `RETURNING`, instead of a separate read-then-write, so concurrent writers on one session
+  serialize on SQLite's write lock instead of racing to compute the same index; a true
+  cross-process concurrency test replaces the prior single-process WAL test (d50fc7c).
 
 ## 1.2.0 — 2026-07-04
 
