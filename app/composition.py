@@ -178,6 +178,8 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
         memory_consolidation_min_age=settings.memory_consolidation_min_age,
         memory_consolidation_batch_cap=settings.memory_consolidation_batch_cap,
+        model_context_window_tokens=settings.model_context_window_tokens,
+        context_warn_ratio=settings.context_warn_ratio,
     )
 
 

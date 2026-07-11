@@ -12,6 +12,7 @@ from app.persistence.repositories import (
     SQLiteMemoryRepository,
     SQLiteSessionRepository,
     SQLiteTurnRepository,
+    restore_persona_after_turn_delete,
 )
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
@@ -29,4 +30,5 @@ __all__ = [
     "SQLiteTurnRepository",
     "connect_sqlite",
     "initialize_database",
+    "restore_persona_after_turn_delete",
 ]

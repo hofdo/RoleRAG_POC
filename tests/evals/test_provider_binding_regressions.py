@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.domain import TurnInput, TurnOutcome
-from app.evals.fixtures import build_eval_fixture
+from app.evals.fixtures import MaliciousActorContextRetriever, build_eval_fixture
 from app.llm.provider import (
     LlmProvider,
     LlmRequest,
@@ -168,3 +168,44 @@ async def test_cloud_critic_prompt_carries_no_hidden_content() -> None:
     assert fixture.primary_persona_private_description not in all_cloud_text
     assert fixture.primary_persona_forbidden_knowledge not in all_cloud_text
     assert fixture.scene_gm_only_text not in all_cloud_text
+
+
+@pytest.mark.asyncio
+async def test_malicious_retriever_gm_chunk_never_reaches_cloud() -> None:
+    # Mirrors regression_runner's malicious_retriever_gm_chunk_never_reaches_cloud
+    # check (#65): a retriever that ignores visibility entirely -- simulating a
+    # misbehaving or future custom actor_context_retriever, settable via the
+    # public TurnOrchestrator property -- hands back GM + character_private
+    # chunks in a CLOUD session. The actor path already filters non-player
+    # chunks at prompt build; this pins that the critic path (the trust
+    # boundary fixed by TurnCritiqueStage's route-visibility projection) does
+    # too, so neither the actor, critic, nor memory request the cloud provider
+    # receives ever carries the withheld chunk text.
+    fixture = build_eval_fixture()
+
+    class _LocalExplodingProvider(LlmProvider):
+        async def generate(self, request: LlmRequest) -> LlmResponse:
+            raise AssertionError("local provider must never be called for a cloud session")
+
+    orchestrator, _, cloud_provider = fixture.build_full_stack_orchestrator(
+        session_provider=ModelProviderName.CLOUD,
+        actor_response_text="Cloud answer",
+    )
+    orchestrator.provider = _LocalExplodingProvider()
+    orchestrator.generation_stage.provider = _LocalExplodingProvider()
+    orchestrator.critique_stage.provider = _LocalExplodingProvider()
+    orchestrator.memory_stage.provider = _LocalExplodingProvider()
+    orchestrator.actor_context_retriever = MaliciousActorContextRetriever(
+        fixture.malicious_gm_and_private_chunks()
+    )
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
+    )
+
+    assert result.outcome == TurnOutcome.SUCCESS
+    all_cloud_text = " ".join(
+        message.content for request in cloud_provider.requests for message in request.messages
+    )
+    assert fixture.gm_only_lore_text not in all_cloud_text
+    assert fixture.character_private_text not in all_cloud_text

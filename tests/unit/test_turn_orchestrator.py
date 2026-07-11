@@ -252,6 +252,7 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
         "critic_status": CriticStatus.ACCEPTED,
         "warnings": [],
         "retrieval": None,
+        "token_usage": {"total_tokens": 15},
     }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
@@ -917,6 +918,69 @@ async def test_turn_orchestrator_repairs_draft_with_unsupported_entity(
     assert len(provider.requests) == 2
 
 
+class UsagePerResponseProvider(LlmProvider):
+    """Scripts distinct text AND usage per call, so a test can prove which
+    generation's usage ends up on the final TurnResult (#69: repair generation's
+    usage when a repair ran, otherwise the initial actor generation's)."""
+
+    def __init__(self, responses: list[tuple[str, dict[str, int]]]) -> None:
+        self.responses = responses
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        index = len(self.requests)
+        self.requests.append(request)
+        text, usage = self.responses[index]
+        return LlmResponse(
+            text=text, provider="fake", model=request.model, usage=usage, finish_reason="stop"
+        )
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_token_usage_reflects_the_repair_generation(
+    tmp_path: Path,
+) -> None:
+    provider = UsagePerResponseProvider(
+        [
+            ("Duke Erran handed me a silver map this morning.", {"total_tokens": 111}),
+            (
+                "I have heard enough to know the regent fears open daylight.",
+                {"total_tokens": 222},
+            ),
+        ]
+    )
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider(), critic=RepairFriendlyCritic())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(
+            session_id="demo-session",
+            message="What have you heard about the regent?",
+        )
+    )
+
+    assert result.critic_status == CriticStatus.REPAIRED
+    # The repair generation produced the served text, so its usage -- not the
+    # rejected initial draft's -- is what's reported.
+    assert result.token_usage == {"total_tokens": 222}
+
+
+@pytest.mark.asyncio
+async def test_turn_orchestrator_token_usage_none_when_actor_fails_before_any_generation(
+    tmp_path: Path,
+) -> None:
+    provider = SequencedProvider(["", ""])
+    orchestrator = _build_orchestrator(tmp_path, FakeProvider())
+    orchestrator.generation_stage.provider = provider
+
+    result = await orchestrator.run_turn(
+        turn_input=TurnInput(session_id="demo-session", message="What now?")
+    )
+
+    assert result.outcome == TurnOutcome.CONTROLLED_FAILURE
+    assert result.token_usage is None
+
+
 @pytest.mark.asyncio
 async def test_turn_orchestrator_does_not_repair_clean_draft(tmp_path: Path) -> None:
     provider = FakeProvider()
@@ -1449,6 +1513,8 @@ async def test_run_turn_persists_diagnostics_matching_result(tmp_path: Path) -> 
     assert stored.diagnostics.warnings == result.warnings
     assert stored.diagnostics.memory_written == result.memory_written
     assert stored.diagnostics.finish_reason == result.finish_reason
+    assert stored.diagnostics.token_usage == result.token_usage
+    assert result.token_usage == {"total_tokens": 15}
 
 
 @pytest.mark.asyncio

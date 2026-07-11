@@ -3,6 +3,38 @@
 Notable changes per release. The dated acceptance/report docs under `docs/` remain the deep
 records; this file is the quick delta between versions.
 
+## Unreleased
+
+### Added
+
+- **Deterministic frontend↔backend contract test** (#60): `app/diagnostics/contract_app.py`
+  serves the real FastAPI app with fake-provider overrides; a Playwright spec
+  (`tests/e2e/spa-contract.spec.mjs`) drives the built SPA over real HTTP in CI (9097877).
+- **Vector-store parity harness** (#50): one fixture set through both `InMemoryVectorStore`
+  and embedded-Qdrant `.search()` paths across every filter dimension; Qdrant tags filter
+  fixed to AND semantics.
+- **Behavioral WAL concurrency tests** (#64), **coverage measurement** (#61, report-only,
+  91% baseline), **frontend lint in CI** (#62), **SPA build in CI** (#52), and a
+  **non-blocking dependency-audit job** (#63).
+
+### Changed
+
+- **Angular 19 → 21** via `ng update` (f0e4b8a, ae7f96f), clearing the `@angular/core`
+  hydration advisory GHSA-rgjc-h3x7-9mwg surfaced by the #63 audit.
+- **CLI/API config parity** (#48): the CLI now builds its orchestrator config through
+  `composition.build_orchestrator_config`; a parity test pins both roots to the same config.
+- **docker-compose**: Qdrant `/readyz` healthcheck + `service_healthy` readiness gate and
+  `restart: unless-stopped` on both services (#58); `.dockerignore` excludes backups and
+  WAL sidecars (#53); upper bounds on high-risk Python deps (#59).
+
+### Fixed
+
+- **RAG C1** — standing-facts double-spend no longer evicts distinct retrieved chunks
+  (64db602); **RAG N1** — extractor framing stripped before write-dedup coverage math
+  (0c11c29). Both validated on a live 26B + Qdrant run with zero recall regression.
+- Removed the dead cloud-repair path (#56) and deduplicated controlled-failure /
+  diagnostics assembly in the orchestrator (#54).
+
 ## 1.2.0 — 2026-07-04
 
 ### Changed (breaking)

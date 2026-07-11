@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import perf_counter
 
 from app.domain import CriticResult, CriticStatus, TurnOutcome
@@ -44,6 +44,7 @@ class RepairStageResult:
     finish_reason: str | None
     outcome: TurnOutcome
     warnings: tuple[str, ...]
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class RepairResolution:
     When ``controlled_failure`` is True the caller returns a CONTROLLED_FAILURE turn;
     otherwise it applies text/route/finish_reason/critic_status and continues. ``repair_duration``
     is set only when a repair attempt actually ran (so ``stage_timings['repair']`` matches today).
+    ``usage`` follows the same generation as ``finish_reason``: the repair generation's
+    usage when a repair ran, otherwise the initial actor generation's (#69).
     """
 
     text: str
@@ -62,6 +65,7 @@ class RepairResolution:
     warnings: tuple[str, ...]
     controlled_failure: bool
     repair_duration: float | None = None
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 def _validation_repair_instruction(validation: DraftValidationResult) -> str:
@@ -104,16 +108,21 @@ class TurnRepairStage:
         cloud session this pass runs on cloud."""
         warnings: list[str] = []
         repair_route = self.routing_stage.repair(provider=context.session.provider)
-        repaired_text, repaired_route, repaired_finish_reason, generation_warnings = (
-            await self.generation_stage.generate_messages(
-                route=repair_route,
-                messages=self.critique_stage.critic_agent.build_local_repair_messages(
-                    actor_messages=list(actor_messages),
-                    rejected_draft=draft,
-                    issues=critique.issues,
-                    repair_instruction=critique.repair_instruction,
-                ),
-            )
+        repair_messages = self.critique_stage.critic_agent.build_local_repair_messages(
+            actor_messages=list(actor_messages),
+            rejected_draft=draft,
+            issues=critique.issues,
+            repair_instruction=critique.repair_instruction,
+        )
+        (
+            repaired_text,
+            repaired_route,
+            repaired_finish_reason,
+            repaired_usage,
+            generation_warnings,
+        ) = await self.generation_stage.generate_messages(
+            route=repair_route,
+            messages=repair_messages,
         )
         warnings.extend(generation_warnings)
         repaired_critique = await self.critique_stage.run(
@@ -133,7 +142,10 @@ class TurnRepairStage:
             # The re-check critic errored: same fail-closed rule as the initial critique (#17).
             # Don't serve the unvalidated repaired draft.
             return self._controlled_failure(
-                repaired_route, warnings, finish_reason=repaired_finish_reason
+                repaired_route,
+                warnings,
+                finish_reason=repaired_finish_reason,
+                usage=repaired_usage,
             )
         if repaired_critique.critique is None or repaired_critique.critique.accepted:
             return RepairStageResult(
@@ -142,11 +154,13 @@ class TurnRepairStage:
                 finish_reason=repaired_finish_reason,
                 outcome=TurnOutcome.SUCCESS,
                 warnings=tuple(warnings),
+                usage=repaired_usage,
             )
         return self._controlled_failure(
             repaired_route,
             warnings,
             finish_reason=repaired_finish_reason,
+            usage=repaired_usage,
         )
 
     async def resolve(
@@ -173,6 +187,7 @@ class TurnRepairStage:
                 critic_status=CriticStatus.REJECTED,
                 warnings=("draft withheld: critic validation unavailable",),
                 controlled_failure=True,
+                usage=generation.usage,
             )
         base_status = (
             CriticStatus.SKIPPED if critique.critique is None else CriticStatus.ACCEPTED
@@ -194,6 +209,7 @@ class TurnRepairStage:
                 critic_status=base_status,
                 warnings=(),
                 controlled_failure=False,
+                usage=generation.usage,
             )
 
         # A repair pass will actually run from here on, so this is the first point where
@@ -238,6 +254,7 @@ class TurnRepairStage:
                     warnings=tuple(warnings),
                     controlled_failure=False,
                     repair_duration=repair_duration,
+                    usage=generation.usage,
                 )
             if repair_failure is not None:
                 warnings.append(f"repair failed: {repair_failure}")
@@ -251,6 +268,7 @@ class TurnRepairStage:
                 warnings=tuple(warnings),
                 controlled_failure=True,
                 repair_duration=repair_duration,
+                usage=repair.usage if repair is not None else generation.usage,
             )
 
         assert repair is not None
@@ -261,6 +279,7 @@ class TurnRepairStage:
             critic_status=CriticStatus.REPAIRED,
             warnings=tuple(warnings),
             controlled_failure=False,
+            usage=repair.usage,
             repair_duration=repair_duration,
         )
 
@@ -270,6 +289,7 @@ class TurnRepairStage:
         warnings: list[str],
         *,
         finish_reason: str | None,
+        usage: dict[str, int] | None = None,
     ) -> RepairStageResult:
         return RepairStageResult(
             text=CONTROLLED_FAILURE_TEXT,
@@ -277,4 +297,5 @@ class TurnRepairStage:
             finish_reason=finish_reason,
             outcome=TurnOutcome.CONTROLLED_FAILURE,
             warnings=tuple(warnings),
+            usage=usage or {},
         )

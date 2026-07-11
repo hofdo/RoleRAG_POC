@@ -141,6 +141,16 @@ class Settings(BaseSettings):
     # leaks; the value is pinned by test_scan_reply_paraphrase_threshold_is_applied.
     containment_overlap_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
+    # Opt-in context-ceiling preflight (#69). 0 disables entirely (byte-identical
+    # default): no prompt-size estimate, no overflow warning, no behavior change.
+    # Set to the local model's actual context window (e.g. 8192 for an 8K llama.cpp
+    # profile) to get an early warning -- never a block -- when the estimated or
+    # actual prompt+completion token count approaches it.
+    model_context_window_tokens: int = Field(default=0, ge=0)
+    # Fraction of model_context_window_tokens that triggers the preflight/post-hoc
+    # warning. Only meaningful when model_context_window_tokens > 0.
+    context_warn_ratio: float = Field(default=0.85, gt=0.0, le=1.0)
+
     structured_output_failure_log_dir: Path | None = None
 
     recent_dialogue_turns: int = Field(default=8, ge=0)

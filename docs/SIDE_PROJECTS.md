@@ -1,6 +1,6 @@
 # RoleRAG POC — Side Projects
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-10 @ 9097877
 
 Ideas that build *on top of* the engine without changing its core. Source: the 10-agent deep
 analysis. Four original entries shipped in 1.1.0 and are marked **BUILT** below; the remaining
@@ -65,8 +65,8 @@ memory-growth views remain open extensions.
 
 ## Tier C — large / deferred
 
-- ~~**Polished React/Angular SPA**~~ — **BUILT (1.1.0)**: Angular 19 SPA at `/app`; the vanilla-JS
-  `/play` UI was removed.
+- ~~**Polished React/Angular SPA**~~ — **BUILT (1.1.0, since upgraded to Angular 21)**: SPA at
+  `/app`; the vanilla-JS `/play` UI was removed.
 - ~~**Eval dashboard**~~ — **BUILT (1.1.0)**: SPA Eval page over `GET /diagnostics/eval-runs`.
 - **Authoring studio** — UI to create/validate worlds, personas, scenes, lore. Wraps
   `validate-content` + `create-scenario-template` + `ingest-scenario-lore`.

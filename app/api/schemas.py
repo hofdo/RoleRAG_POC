@@ -168,6 +168,10 @@ class CreateTurnResponse(BaseModel):
     errors: list[TurnError] = Field(default_factory=list)
     retrieval: RetrievalDiagnosticsResponse | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
+    # Token usage from the generation that produced `text` (repair generation's usage
+    # when a repair ran, otherwise the initial actor generation's). None when no
+    # generation completed or the provider reported no usage (#69).
+    token_usage: dict[str, int] | None = None
 
 
 class StreamTextPayload(BaseModel):
@@ -183,6 +187,7 @@ class StreamFinalPayload(BaseModel):
     errors: list[TurnError] = Field(default_factory=list)
     retrieval: RetrievalDiagnosticsResponse | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
+    token_usage: dict[str, int] | None = None
 
 
 class StreamFailurePayload(StreamFinalPayload):
@@ -267,6 +272,7 @@ class TurnDetailResponse(BaseModel):
     errors: list[TurnError] = Field(default_factory=list)
     stage_timings: dict[str, float] = Field(default_factory=dict)
     retrieval: RetrievalDiagnosticsResponse | None = None
+    token_usage: dict[str, int] | None = None
 
 
 class EvalRunSummary(BaseModel):

@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-10 @ 61e45b6
+> Reviewed: 2026-07-11 @ 7d820d5
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -319,6 +319,199 @@ highs are `http-proxy-middleware`, a dev-server-only transitive of `@angular-dev
 (never in the shipped static bundle); no non-breaking fix, left as-is.
 `make check` runs Python-only so it's a narrower gate than CI; `data/sessions/` is a git-tracked
 empty legacy dir (sessions live in SQLite now) — harmless.
+
+## Review 2026-07-10 — independent current-state analysis
+
+A second, independent code-grounded review at `9097877` (cross-model verification against an
+external GPT-5.6 analysis brief; both reviews reached the same overall verdict). Verified before
+filing: deterministic gate green locally (ruff / `mypy --strict` / 614 pytest / 84-check
+regression runner) and GitHub Actions CI green at this commit. Everything below was confirmed
+against source, not inherited from either review. RAG-core findings were re-confirmed but add
+nothing new — the P0.4 measurement gate and P2.2 long-campaign validation in
+[docs/22](22_rag_scaling_roadmap.md) remain the authoritative retrieval roadmap (this review
+independently endorses P0.4 as the highest-value RAG work; note the live checkpoint's recall
+probes all land at or before turn 50, so 100-turn runs assert nothing about late recall — already
+recorded there).
+
+Ordered by value. Effort S/M/L.
+
+### Correctness / safety — do first
+
+- [x] **#65** *(safety, M)* **Critic prompt lacks a final visibility projection for retrieved
+  chunks.** The actor path independently drops non-player chunks at prompt build
+  (`context_budget.select_retrieved_chunks_for_prompt` skips `visibility != PLAYER`), but the
+  critic path formats whatever chunks it is handed
+  (`critic_agent._format_retrieved_chunks` prints the visibility label without filtering on it);
+  the only chunk-level gates are upstream in the retriever. `include_hidden=False` covers
+  authored persona/scene fields only. In the shipped configuration nothing leaks — but a
+  misbehaving or future custom `actor_context_retriever` (settable via a public property on the
+  orchestrator) would deliver a GM/private chunk straight into a **cloud** critic prompt,
+  violating invariant #2 at the trust boundary. Fix: project `retrieved_chunks` to the route's
+  allowed visibility inside `TurnCritiqueStage.run` (player-only when the route is cloud) and add
+  a malicious-retriever case to the `provider_binding` regression category. Acceptance: a
+  retriever that returns GM/character-private chunks cannot get one into any cloud request.
+  **Shipped:** `TurnCritiqueStage.run` now projects `retrieved_chunks` to the route's allowed
+  visibility *before* calling `critic_agent.evaluate` (`_project_chunks_to_route_visibility` in
+  `app/orchestration/stages/critique.py`) — cloud routes keep PLAYER-visible chunks only and the
+  stage warns `"critic context filtered: N non-player chunk(s) withheld from cloud critic"`; local
+  routes are unaffected. `tests/unit/orchestration/stages/test_core_stages.py` covers the cloud
+  filter+warning, local pass-through, and empty/player-only no-warning paths. The
+  `provider_binding` eval gained a `malicious_retriever_gm_chunk_never_reaches_cloud` check
+  (`app/evals/regression_runner.py`, mirrored in
+  `tests/evals/test_provider_binding_regressions.py`) that wires a stub retriever
+  (`MaliciousActorContextRetriever` in `app/evals/fixtures.py`) returning GM + character_private
+  chunks into a full-stack CLOUD-session turn and asserts neither string reaches any recorded
+  cloud request (actor, critic, or memory). Gate green.
+
+- [x] **#66** *(bug, S)* **Reroll leaves a deleted turn's persona/scene switch committed.**
+  `DELETE /sessions/{id}/turns/last` reverses the turn row, its memories (timestamp provenance),
+  and its vectors — but not `sessions.active_persona_id`/`active_scene_id` committed by that
+  turn's post-persistence switch (`turn_orchestrator.run_turn` persona-switch commit). Deleting
+  the turn strands the session on a persona/scene the surviving history never switched to. Fix in
+  the reroll path + integration test; while there, consider wrapping the three separately-committed
+  delete steps in one transaction (a crash between them currently orphans memory rows).
+  **Shipped:** scoped to persona only — scenes never change as a per-turn side effect
+  (`TurnInput` has no scene field; `active_scene_id` only moves via the explicit
+  `POST /sessions/{id}/scene` endpoint), so a scene switch made after the deleted turn is a
+  deliberate, independent action and correctly survives a reroll; a test now pins that. Added
+  `restore_persona_after_turn_delete` (`app/persistence/repositories.py`), called from
+  `delete_last_turn` in `app/api/routes.py`: a CONTROLLED_FAILURE deleted turn never committed a
+  persona change (no-op); a SUCCESS deleted turn restores the persona of the nearest remaining
+  SUCCESS turn (CONTROLLED_FAILURE turns never move the pointer, so they're skipped); if no
+  SUCCESS turn remains (the deleted turn was the first to ever switch persona since session
+  creation), the pre-switch value isn't recoverable — `sessions` only stores the *current*
+  `active_persona_id`, not the creation-time one, so it's left as-is (documented limitation).
+  Deferred the three-way-transaction idea: `SQLiteTurnRepository`/`SQLiteMemoryRepository` each
+  auto-commit per call on a shared connection, so wrapping turn-delete + memory-delete atomically
+  would mean adding no-commit variants (or a cross-repository transaction helper) to both
+  Protocols — more invasive than this fix warrants; left for a follow-up if the crash-window risk
+  is ever judged worth it.
+
+- [x] **#67** *(bug, S)* **CLI orchestrator wiring omits three collaborators the API wires.**
+  #48 fixed *config* parity, but `cli._build_services` still constructed the `TurnOrchestrator`
+  without `canon_repository` (CLI turns silently ignored author-pinned canon facts that API turns
+  honor), `structured_failure_sink` (CLI structured-output failures were never recorded), and
+  `memory_embedding_provider` (semantic write-dedup/consolidation could never activate on CLI even
+  when configured); the returned `AppServices` also omitted `turn_repository`, `memory_repository`,
+  `canon_repository`, and `memory_indexer`. **Shipped:** `cli._build_services` now delegates
+  outright to `composition.build_services` — the ~55-line hand-rolled assembly is gone, replaced by
+  a one-line call, so the two composition roots can no longer drift on *either* config or
+  collaborators. The five CLI-local builder aliases that only the deleted assembly used
+  (`_build_local_provider`, `_build_cloud_provider`, `_build_critic_agent`, `_build_file_loader`,
+  `_build_memory_curator`) were removed as dead code; the three aliases other CLI commands still
+  call directly (`ingest`, `ingest-scenario-lore`, `reindex-memories`, `reset-index`,
+  `delete-session`, `reset-db`, `retrieve-debug`'s manual retriever, lore auto-ingest) —
+  `_build_embedding_provider`, `_build_vector_store`, `_build_actor_context_retriever` — were kept.
+  `tests/integration/test_cli.py` patches that targeted the removed CLI aliases for
+  `_build_services`-routed commands (`start-session`, `resume`, `turn`, `retrieve-debug`'s loader)
+  now target `app.composition.build_*` instead, since that's where those calls are resolved after
+  delegation; patches for the still-direct CLI aliases were left as `app.cli._build_*`.
+  `tests/unit/test_composition_config_parity.py` gained
+  `test_cli_and_api_build_services_wire_the_same_collaborators`, which builds both roots with fake
+  providers and asserts `canon_repository`, `structured_failure_sink`, and
+  `memory_embedding_provider` all reach the built orchestrator on both surfaces — the concrete #67
+  regression tripwire — plus `test_cli_build_services_delegates_to_composition_build_services`
+  pinning the delegation itself. Gate green (85 regression checks). Live-smoke caveat, same as #48:
+  this changes real CLI turn behavior (canon facts now injected, structured failures now logged,
+  semantic dedup now reachable) — a live `bash scripts/live-smoke.sh` pass is advisable before
+  relying on it in a real session, since the deterministic gate can't exercise real canon-fact
+  retrieval quality or a live embedding backend.
+
+### Decision
+
+- [ ] **#68** *(decision, S)* **Paraphrase-flag policy is undocumented risk acceptance.**
+  `secret_guard.scan_reply` redacts verbatim hidden-fact echoes but only *flags* likely
+  paraphrases; the orchestrator appends a warning and still persists and returns the flagged
+  reply to the player. No layer repairs or withholds it, and no decision record says this is
+  intentional. Decide: (a) accept and record under Decisions (cheap, honest), or (b) escalate a
+  paraphrase flag to the bounded repair pass / controlled failure (dearer; changes turn-failure
+  rates — validate via live-smoke). Either outcome closes the gap between the code and a strict
+  reading of the secrecy invariant.
+
+### Observability
+
+- [x] **#69** *(observability, M)* **Token usage is captured but dead; context budget is
+  character-based and unverified against real context windows.** `LlmResponse.usage`
+  (prompt/completion/total tokens, `openai_compatible.py`) has zero consumers; there is no
+  preflight size estimate, no configured model-context ceiling, no overflow warning; retrieved
+  chunks and recent dialogue are clipped mid-word by character count. Ship: persist usage into
+  turn diagnostics (additive), a configured context ceiling + warning threshold, and
+  word/sentence-boundary trimming. Acceptance: an oversized scenario is observable *before*
+  generation, validated against llama.cpp logs (docs/22 measure-first: offline evals cannot see
+  this). **Shipped:** three additive, opt-in pieces, all byte-identical by default.
+  (1) *Usage persistence:* `TurnDiagnostics.token_usage` and `TurnResult.token_usage`
+  (`app/domain/models.py`) — optional `dict[str, int] | None`, so old `diagnostics_json` rows
+  without the key deserialize with `token_usage=None`. Usage now threads through
+  `GenerationStageResult.usage` and `RepairStageResult`/`RepairResolution.usage`
+  (`app/orchestration/stages/generation.py`, `repair.py`) up to
+  `TurnOrchestrator._turn_diagnostics`: the reported usage is always the generation that produced
+  the *served* text — the repair generation's when a repair ran, otherwise the initial actor
+  generation's (mirrors how `finish_reason` was already tracked) — and `None` when no generation
+  completed at all (actor failed before any usable response). Exposed as an optional
+  `token_usage` field on `CreateTurnResponse`, `TurnDetailResponse`, and `StreamFinalPayload`/
+  `StreamFailurePayload` (`app/api/schemas.py`, wired in `app/api/routes.py` +`app/api/sse.py`);
+  SPA untouched. (2) *Context-ceiling preflight:* new `Settings.model_context_window_tokens`
+  (default `0` = disabled) and `Settings.context_warn_ratio` (default `0.85`), mirrored in
+  `.env.example`. When enabled, `app/orchestration/context_budget.py::context_preflight_warning`
+  estimates prompt+completion tokens from the built actor messages via a chars/4 heuristic
+  (`estimate_prompt_tokens`, `CHARS_PER_TOKEN_ESTIMATE`) and appends a warning
+  (`"context preflight: estimated N tokens vs window W (warn ratio R)"`) to the turn's warnings
+  when it crosses `warn_ratio * window` — before generation runs, warn-only, never blocking. Once
+  a real usage report arrives, `context_usage_warning` checks actual `prompt_tokens` against the
+  same threshold and appends a second, independent warning
+  (`"context preflight: actual prompt_tokens N exceeded R * window W"`) if the real count crosses
+  it — actual beats estimate, and both can fire independently (e.g. the estimate under-shot).
+  (3) *Boundary-aware trimming:* `_truncate_text` (`context_budget.py`) and
+  `_truncate_recent_dialogue_message` (`context_builder.py`) now cut at the last word boundary
+  within budget instead of mid-word, falling back to the old hard cut only when no boundary exists
+  within budget (a single unbroken run of characters at least as long as the budget); never
+  exceeds `max_chars` either way. Existing regression fixtures use single-run test strings with no
+  embedded spaces near the cut point, so their pinned truncated output is unaffected (verified by
+  running the full offline gate). Tests: `tests/unit/test_context_budget.py` (boundary
+  cut/exact-fit/no-space-fallback/unchanged-when-short, estimator math, preflight/actual-usage
+  warning threshold and disabled-by-default cases), `tests/unit/test_context_builder.py` (same
+  boundary cases for dialogue trimming), `tests/unit/orchestration/stages/test_core_stages.py`
+  (usage threading, preflight/actual-usage warnings enabled vs. disabled),
+  `tests/unit/test_turn_orchestrator.py` (token_usage reflects the repair generation when a repair
+  ran, `None` when the actor fails before any generation, diagnostics-round-trip parity),
+  `tests/unit/test_repositories.py` (a hand-written pre-#69 `diagnostics_json` payload with no
+  `token_usage` key still deserializes), `tests/unit/test_config.py` (new-key defaults and
+  overrides). **PENDING:** the llama.cpp validation half of the acceptance criterion — comparing
+  the preflight warning against real llama-server logs on a deliberately oversized scenario — is
+  NOT yet done. The deterministic offline gate (ruff/mypy/pytest/regression_runner) cannot see
+  this; it requires `bash scripts/live-smoke.sh` against a real local model with
+  `MODEL_CONTEXT_WINDOW_TOKENS` set to that model's actual context size, which has not been run
+  for this change.
+
+### Testing
+
+- [x] **#70** *(testing, S)* **The #64 WAL test is single-process; the real CLI+API race is
+  untested.** Both #64 tests run two connections in one interpreter — no second OS process
+  despite the commit title. The actual exposure is `append_turn`'s read-then-write
+  `turn_index = count_turns + 1`, which two concurrent writers can both compute; the
+  `UNIQUE(session_id, turn_index)` constraint fails safe (IntegrityError) rather than corrupting,
+  but nothing tests or documents that. Either add a true cross-process test + an atomic
+  `INSERT … SELECT MAX(turn_index)+1`, or record the single-writer-per-session assumption as a
+  documented limit. Low urgency for single-user scope; filed so the "proven cross-process" claim
+  isn't over-read. **Shipped:** `SQLiteTurnRepository.append_turn`
+  (`app/persistence/repositories.py`) now assigns `turn_index` inside the `INSERT` itself, via a
+  correlated subselect (`SELECT COALESCE(MAX(turn_index), 0) + 1 FROM turns WHERE session_id = ?`)
+  plus `RETURNING turn_index, id`, instead of a separate `count_turns()` read before the write —
+  concurrent writers on one session now serialize on SQLite's write lock and each gets a distinct,
+  contiguous index instead of racing to compute the same one. `count_turns` itself is unchanged
+  (still used by the CLI, diagnostics, and evals). Added
+  `tests/unit/test_sqlite.py::test_append_turn_assigns_contiguous_unique_indices_across_real_processes`,
+  which spawns a genuine second OS process (`subprocess` running a `python -c` worker script) that
+  races the pytest process to append turns to the same session in the same on-disk database file,
+  synchronized via a filesystem ready/go handshake (no fixed sleeps); asserts zero errors on either
+  side and a contiguous, duplicate-free `1..N` index sequence afterward. The existing #64 tests
+  (`test_wal_reader_is_not_blocked_by_an_open_writer`,
+  `test_second_writer_waits_on_busy_timeout_instead_of_locking`) remain as-is — they still validate
+  WAL/busy_timeout behavior correctly, just within one process; they were not renamed or reframed.
+
+*Fixed directly with this review (no ID):* stale "Angular 19" references swept to Angular 21
+(README, docs/02, docs/09, docs/SIDE_PROJECTS, frontend/README); CHANGELOG gained an
+`Unreleased` section covering the post-1.2.0 batch (#48–#64, Angular 21, RAG C1/N1, #60).
 
 ## Not doing (personal-use scope)
 

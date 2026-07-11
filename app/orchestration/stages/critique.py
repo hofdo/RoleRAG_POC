@@ -19,6 +19,7 @@ from typing import Protocol
 
 from app.agents.secret_guard import collect_hidden_facts, redact_hidden_facts, scan_reply
 from app.domain import CriticResult, PersonaCard, RetrievedChunk, SceneState
+from app.domain.visibility import Visibility
 from app.llm.provider import LlmMessage, LlmProvider, resolve_provider
 from app.llm.router import (
     HIGH_SCENE_COMPLEXITY,
@@ -121,6 +122,14 @@ class TurnCritiqueStage:
         # The critic follows the session's provider (route_provider is the actor
         # route's provider, which IS the session provider -- see SessionState.provider).
         route = self.routing_stage.critic(provider=route_provider)
+        # Trust-boundary projection: a cloud critic may only ever see PLAYER-visible
+        # retrieved chunks. This is independent of (and does not replace) the actor
+        # path's own filtering in context_budget.select_retrieved_chunks_for_prompt --
+        # a misbehaving or custom retriever must not be able to smuggle a GM/
+        # character_private chunk into a cloud request via this stage.
+        critic_chunks, projection_warnings = _project_chunks_to_route_visibility(
+            chunks=retrieved_chunks, route_provider=route.provider
+        )
         try:
             critique = await self.critic_agent.evaluate(
                 provider=resolve_provider(route, local=self.provider, cloud=self.cloud_provider),
@@ -129,7 +138,7 @@ class TurnCritiqueStage:
                 scene=scene,
                 user_message=user_message,
                 draft=draft,
-                retrieved_chunks=list(retrieved_chunks),
+                retrieved_chunks=critic_chunks,
                 # Hidden authored content never leaves the machine: cloud critics
                 # check prose/consistency only; the deterministic local
                 # secret_guard scan remains the containment layer.
@@ -146,9 +155,12 @@ class TurnCritiqueStage:
                 )
                 return CritiqueStageResult(
                     critique=critique,
-                    warnings=("critic output redacted: prevented hidden-fact leak",),
+                    warnings=(
+                        *projection_warnings,
+                        "critic output redacted: prevented hidden-fact leak",
+                    ),
                 )
-            return CritiqueStageResult(critique=critique, warnings=())
+            return CritiqueStageResult(critique=critique, warnings=projection_warnings)
         except StructuredOutputError as exc:
             warnings = [f"critic skipped: {exc} ({exc.category})"]
             warnings.extend(
@@ -183,6 +195,28 @@ class TurnCritiqueStage:
             or scene_complexity >= self.high_scene_complexity
             or route_provider == ModelProviderName.CLOUD
         )
+
+
+def _project_chunks_to_route_visibility(
+    *,
+    chunks: Sequence[RetrievedChunk],
+    route_provider: ModelProviderName,
+) -> tuple[list[RetrievedChunk], tuple[str, ...]]:
+    """Project retrieved chunks to what the critic's route is allowed to see.
+
+    A local critic may see everything it was handed (nothing leaves the machine).
+    A cloud critic is restricted to PLAYER-visible chunks, regardless of what the
+    retriever produced -- this is the trust boundary for invariant #2, independent
+    of the actor prompt's own filtering.
+    """
+    if route_provider != ModelProviderName.CLOUD:
+        return list(chunks), ()
+    projected = [chunk for chunk in chunks if chunk.visibility == Visibility.PLAYER]
+    dropped = len(chunks) - len(projected)
+    if dropped == 0:
+        return projected, ()
+    warning = f"critic context filtered: {dropped} non-player chunk(s) withheld from cloud critic"
+    return projected, (warning,)
 
 
 def record_structured_failure(

@@ -68,6 +68,57 @@ class TurnRepository(Protocol):
     def delete_last_turn(self, session_id: str) -> StoredTurn | None: ...
 
 
+def restore_persona_after_turn_delete(
+    *,
+    session_repository: SessionRepository,
+    turn_repository: TurnRepository,
+    session_id: str,
+    deleted_turn: StoredTurn,
+) -> None:
+    """Undo the durable ``active_persona_id`` commit a deleted turn made, if any.
+
+    ``TurnOrchestrator.run_turn`` commits a per-turn persona override to the session
+    row only AFTER the turn persists with outcome SUCCESS (see
+    ``app/orchestration/turn_orchestrator.py``); a CONTROLLED_FAILURE turn never
+    commits one, by design (a failed turn the player never saw succeed must not
+    move session state). Consequently, right after any SUCCESS turn completes,
+    ``sessions.active_persona_id`` always equals that turn's own ``persona_id`` --
+    whether or not that turn requested a switch, because a non-switching turn's
+    persona_id already equalled the prior active_persona_id. Right after a
+    CONTROLLED_FAILURE turn, active_persona_id is untouched (left exactly as it
+    was before that turn ran).
+
+    So deleting the most recent turn (reroll) must restore active_persona_id to
+    whatever it held immediately before the deleted turn ran:
+
+    - If the deleted turn was not SUCCESS, it never committed a persona change;
+      no-op.
+    - If it was SUCCESS, the value to restore is the persona_id of the nearest
+      *remaining* SUCCESS turn (CONTROLLED_FAILURE turns never move the pointer,
+      so they are skipped when walking backward).
+    - If no SUCCESS turn remains, the deleted turn was the first to ever move the
+      pointer since session creation. The sessions row only tracks the CURRENT
+      active_persona_id, not the creation-time value, so once that first switch
+      committed the original persona is no longer recoverable from stored state.
+      Documented limitation (see docs/BACKLOG.md #66): active_persona_id is left
+      as-is in this edge case rather than guessed at.
+    """
+    if deleted_turn.outcome != TurnOutcome.SUCCESS:
+        return
+    session = session_repository.get_session(session_id)
+    if session is None or session.active_persona_id != deleted_turn.persona_id:
+        # Session gone, or active_persona_id no longer matches what the deleted
+        # turn committed (e.g. it was already restored, or something else moved
+        # it since) -- don't clobber an unrelated value.
+        return
+    for turn in reversed(turn_repository.list_all_turns(session_id)):
+        if turn.outcome == TurnOutcome.SUCCESS:
+            if turn.persona_id != session.active_persona_id:
+                session_repository.update_active_persona(session_id, turn.persona_id)
+            return
+    # No SUCCESS turn remains: nothing recoverable to restore to (see docstring).
+
+
 class MemoryRepository(Protocol):
     def append_memories(
         self,
@@ -249,8 +300,16 @@ class SQLiteTurnRepository:
         route: ModelRoute,
         outcome: TurnOutcome = TurnOutcome.SUCCESS,
     ) -> StoredTurn:
-        turn_index = self.count_turns(session_id) + 1
         created_at = utc_now()
+        # turn_index is assigned atomically inside the INSERT itself (a correlated
+        # subselect over the same table), not via a separate count-then-write step.
+        # Two concurrent writers on the same session_id both execute this single
+        # statement; SQLite serializes them on the write lock (WAL + busy_timeout,
+        # see app/persistence/sqlite.py), so the second writer's subselect always
+        # observes the first writer's committed row and gets the next index -- no
+        # UNIQUE(session_id, turn_index) collision is possible. RETURNING reports
+        # back the index actually assigned, which may differ from a value computed
+        # ahead of time under concurrency.
         cursor = self.connection.execute(
             """
             INSERT INTO turns (
@@ -268,11 +327,16 @@ class SQLiteTurnRepository:
                 route_requires_user_confirmation,
                 created_at,
                 outcome
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                ?,
+                (SELECT COALESCE(MAX(turn_index), 0) + 1 FROM turns WHERE session_id = ?),
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            RETURNING turn_index, id
             """,
             (
                 session_id,
-                turn_index,
+                session_id,
                 scene_id,
                 persona_id,
                 user_message,
@@ -289,8 +353,12 @@ class SQLiteTurnRepository:
                 outcome.value,
             ),
         )
+        returned = cursor.fetchone()
         self.connection.commit()
-        row_id = cursor.lastrowid
+        if returned is None:
+            raise RuntimeError("SQLite did not return the persisted turn's row id/index")
+        turn_index = int(returned["turn_index"])
+        row_id = returned["id"]
         if row_id is None:
             raise RuntimeError("SQLite did not return a row id for the persisted turn")
         return StoredTurn(

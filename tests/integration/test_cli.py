@@ -311,12 +311,15 @@ def test_cli_route_defaults_to_local_provider() -> None:
 
 
 def test_cli_start_session_and_turn_run_with_mocked_provider(tmp_path: Path) -> None:
+    # start-session and turn both route through app.cli._build_services, which delegates
+    # to app.composition.build_services (#67) -- patch the composition-level builders, not
+    # CLI-local aliases, so these fakes actually reach the orchestrator.
     context_retriever = FakeActorContextRetriever()
     with (
-        patch("app.cli._build_local_provider", return_value=FakeProvider()),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
-        patch("app.cli._build_actor_context_retriever", return_value=context_retriever),
+        patch("app.composition.build_local_provider", return_value=FakeProvider()),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_file_loader", return_value=FakeLoader()),
+        patch("app.composition.build_actor_context_retriever", return_value=context_retriever),
     ):
         start_result = runner.invoke(
             app,
@@ -552,9 +555,9 @@ def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
 
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
     with (
-        patch("app.cli._build_local_provider", return_value=FakeProvider()),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
+        patch("app.composition.build_local_provider", return_value=FakeProvider()),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_file_loader", return_value=FakeLoader()),
     ):
         runner.invoke(
             app,
@@ -582,8 +585,8 @@ def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
 
 def test_cli_turn_fails_clearly_for_missing_session(tmp_path: Path) -> None:
     with (
-        patch("app.cli._build_local_provider", return_value=FakeProvider()),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_local_provider", return_value=FakeProvider()),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
     ):
         result = runner.invoke(
             app,
@@ -707,12 +710,14 @@ def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunk
         ],
     )
     provider = FakeProvider()
+    # start-session and turn both route through app.cli._build_services, which delegates to
+    # app.composition.build_services (#67) -- patch the composition-level builders.
     with (
-        patch("app.cli._build_local_provider", return_value=provider),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
-        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
-        patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.composition.build_local_provider", return_value=provider),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_file_loader", return_value=FakeLoader()),
+        patch("app.composition.build_embedding_provider", return_value=embedding_provider),
+        patch("app.composition.build_vector_store", return_value=vector_store),
     ):
         runner.invoke(
             app,
@@ -758,8 +763,12 @@ def test_cli_retrieve_debug_uses_in_memory_retrieval_and_omits_chunk_text(tmp_pa
             )
         ],
     )
+    # start-session's _build_services call needs a fake loader; that call routes through
+    # app.composition.build_services (#67), so the loader patch targets app.composition.
+    # retrieve-debug builds its own retriever directly from the CLI-local aliases (not via
+    # _build_services), so those two stay patched on app.cli.
     with (
-        patch("app.cli._build_file_loader", return_value=FakeLoader()),
+        patch("app.composition.build_file_loader", return_value=FakeLoader()),
         patch("app.cli._build_embedding_provider", return_value=embedding_provider),
         patch("app.cli._build_vector_store", return_value=vector_store),
     ):
@@ -818,11 +827,17 @@ def test_cli_turn_uses_stored_scenario_pack_world_for_retrieval(tmp_path: Path) 
     )
     provider = FakeProvider()
     database_path = tmp_path / "sessions.db"
+    # start-session (no --skip-lore-ingest) auto-ingests scenario lore via the CLI-local
+    # embedding/vector-store aliases directly; turn's retrieval goes through
+    # app.cli._build_services, which delegates to app.composition.build_services (#67) --
+    # both target sets must return the same fakes so the seeded chunks are visible to turn.
     with (
-        patch("app.cli._build_local_provider", return_value=provider),
-        patch("app.cli._build_critic_agent", return_value=FakeCritic()),
+        patch("app.composition.build_local_provider", return_value=provider),
+        patch("app.composition.build_critic_agent", return_value=FakeCritic()),
         patch("app.cli._build_embedding_provider", return_value=embedding_provider),
         patch("app.cli._build_vector_store", return_value=vector_store),
+        patch("app.composition.build_embedding_provider", return_value=embedding_provider),
+        patch("app.composition.build_vector_store", return_value=vector_store),
     ):
         start_result = runner.invoke(
             app,

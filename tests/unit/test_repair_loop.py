@@ -322,6 +322,7 @@ async def test_orchestrator_fails_closed_after_a_single_repair_pass_is_still_rej
         "critic_status": CriticStatus.REJECTED,
         "warnings": [],
         "retrieval": None,
+        "token_usage": {"total_tokens": 15},
     }
     # Exactly two generation calls: the initial draft and the one repair attempt.
     assert len(fake_provider.requests) == 2
