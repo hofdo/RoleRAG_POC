@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agents.memory_curator import MemoryCurator
 from app.api.routes import get_read_services, get_turn_services, stream_turn
 from app.api.schemas import CreateTurnRequest
 from app.composition import AppServices
@@ -23,7 +24,7 @@ from app.domain import (
 from app.evals.fixtures import DeterministicKeywordEmbeddingProvider
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.main import app
-from app.memory import MemoryIndexer, RecentDialogueStore
+from app.memory import MemoryEpisodeStore, MemoryIndexer, RecentDialogueStore
 from app.orchestration.turn_orchestrator import TurnOrchestrator, TurnOrchestratorConfig
 from app.persistence import (
     DemoWorldRecord,
@@ -535,6 +536,164 @@ def test_post_turn_uses_in_memory_retrieval_without_live_qdrant(tmp_path: Path) 
     assert retrieval["selected"][0]["selected_rank"] == 1
     assert "text" not in retrieval["selected"][0]
     assert retrieval["rejected"] == []
+
+
+def _build_full_loop_services(
+    tmp_path: Path,
+) -> tuple[AppServices, SequencedFakeProvider, SQLiteMemoryRepository]:
+    """Real SQLite (session/turn/memory) + a real InMemoryVectorStore seeded with lore
+    + a real MemoryEpisodeStore/MemoryCurator/MemoryIndexer wired to that SAME vector
+    store, all behind a fake provider. Lets a test drive two real API turns and prove
+    memory written by turn 1 is indexed and retrieved by turn 2 (docs/10 gap 2)."""
+    connection = connect_sqlite(tmp_path / "api-full-loop.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    embedding_provider = DeterministicKeywordEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+    lore_chunk = RagChunk(
+        id="public-lore",
+        source="demo_lore.md",
+        source_type="lore",
+        text="The gallery archive mirror marks the locked west door.",
+        visibility=Visibility.PLAYER,
+        world_id="demo_world",
+    )
+    vector_store.ensure_collection(RagCollection.CANON_LORE, embedding_provider.dimension)
+    vector_store.upsert_chunks(
+        RagCollection.CANON_LORE, [lore_chunk], embedding_provider.embed_batch([lore_chunk.text])
+    )
+    provider = SequencedFakeProvider(
+        [
+            # Turn 1 actor draft.
+            "Only archivists speak of the gallery mirror and what it marks.",
+            # Turn 1's deferred memory curation (driven manually below).
+            (
+                '{"write_memory": true, "memories": ['
+                '{"summary": "The player promised to return before dawn for the archive key.",'
+                ' "visibility": "player", "importance": 4, "tags": ["promise", "archive"],'
+                ' "scene_id": "rose-gallery", "actor_id": "archivist"}],'
+                ' "reason": "The promise changes future access."}'
+            ),
+            # Turn 2 actor draft.
+            "Yes -- the promise of dawn still holds; the archive key awaits you.",
+        ]
+    )
+    memory_store = MemoryEpisodeStore(memory_repository=memory_repository)
+    memory_indexer = MemoryIndexer(
+        memory_store=memory_store,
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+    )
+    retriever = ActorContextRetriever(
+        retriever=Retriever(embedding_provider=embedding_provider, vector_store=vector_store)
+    )
+    recent_dialogue_store = RecentDialogueStore(turn_repository=turn_repository, recent_turns=8)
+    orchestrator = TurnOrchestrator(
+        loader=FakeLoader(),
+        provider=provider,
+        critic_agent=FakeCritic(),
+        session_repository=session_repository,
+        turn_repository=turn_repository,
+        recent_dialogue_store=recent_dialogue_store,
+        memory_store=memory_store,
+        memory_curator=MemoryCurator(),
+        memory_indexer=memory_indexer,
+        actor_context_retriever=retriever,
+        config=TurnOrchestratorConfig(
+            local_model="local-model",
+            cloud_model="cloud-model",
+            local_max_tokens=700,
+            cloud_max_tokens=1000,
+            local_temperature=0.75,
+            cloud_temperature=0.65,
+        ),
+    )
+    return (
+        AppServices(
+            connection=connection,
+            session_repository=session_repository,
+            orchestrator=orchestrator,
+            recent_dialogue_store=recent_dialogue_store,
+            turn_repository=turn_repository,
+            memory_repository=memory_repository,
+            memory_indexer=memory_indexer,
+        ),
+        provider,
+        memory_repository,
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_turn_writes_and_indexes_memory_then_next_turn_retrieves_it(
+    tmp_path: Path,
+) -> None:
+    """Full API + persistence + retrieval loop (docs/10 gap 2): a real API turn (real
+    SQLite session/turn/memory repos, real InMemoryVectorStore, fake provider) seeds
+    and retrieves lore end to end (already covered by
+    test_post_turn_uses_in_memory_retrieval_without_live_qdrant above); this test
+    closes the remaining half -- memory written by one turn is indexed and then
+    actually retrieved by the NEXT turn's real retrieval stage.
+
+    POST /sessions/{id}/turns always defers memory curation to a fire-and-forget
+    background task that builds its OWN AppServices from Settings (see
+    _isolate_deferred_memory_settings above and app.api.routes._run_deferred_memory_job)
+    rather than reusing an injected fake provider -- so it can't be driven
+    deterministically through a real HTTP round trip without a live model. Like
+    test_delete_last_turn_drains_in_flight_deferred_memory_job_before_sweeping above
+    (which calls routes.delete_last_turn directly instead of through TestClient for
+    the same event-loop-determinism reason), this test calls routes._run_turn -- the
+    exact function the POST /turns route handler calls -- directly, and then awaits
+    orchestrator.run_deferred_memory on OUR wired services in place of the real
+    fire-and-forget task, so the whole loop stays deterministic.
+    """
+    from app.api import routes
+
+    services, provider, memory_repository = _build_full_loop_services(tmp_path)
+
+    first = await routes._run_turn(
+        "session-1",
+        # Deliberately not phrased as a direct question/first-person action ("I ..." or
+        # ending in "?") -- app/orchestration/draft_validator.py's evaded-action check
+        # would otherwise force a validator-triggered repair pass through FakeCritic,
+        # which is shared across this module's tests and asserts repair never runs.
+        CreateTurnRequest(message="A promise is made to return before dawn for the archive key."),
+        services,
+        defer_memory=True,
+    )
+    assert first.memory_written is False
+    assert first.deferred_memory is not None
+
+    await services.orchestrator.run_deferred_memory(first.deferred_memory)
+
+    stored_memories = memory_repository.list_memories_for_session("session-1")
+    assert len(stored_memories) == 1
+    assert stored_memories[0].summary.startswith("The player promised")
+
+    second = await routes._run_turn(
+        "session-1",
+        CreateTurnRequest(message="Does the promise about the archive key at dawn still hold?"),
+        services,
+        defer_memory=True,
+    )
+
+    assert len(provider.requests) == 3
+    prompt = provider.requests[2].messages[0].content
+    assert "The player promised to return before dawn for the archive key." in prompt
+
+    assert second.retrieval is not None
+    retrieved_ids = {entry.id for entry in second.retrieval.selected}
+    assert stored_memories[0].id in retrieved_ids
 
 
 def test_post_turn_returns_404_for_missing_session(tmp_path: Path) -> None:
