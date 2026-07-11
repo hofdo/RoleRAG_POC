@@ -39,6 +39,7 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                     errors=classify_warnings(result.warnings),
                     retrieval=retrieval,
                     stage_timings=result.stage_timings,
+                    token_usage=result.token_usage,
                 ),
             )
         ]
@@ -55,6 +56,7 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                 errors=classify_warnings(result.warnings),
                 retrieval=retrieval,
                 stage_timings=result.stage_timings,
+                token_usage=result.token_usage,
             ),
         ),
     ]

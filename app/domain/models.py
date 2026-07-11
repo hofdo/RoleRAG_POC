@@ -185,6 +185,13 @@ class TurnDiagnostics(BaseModel):
     finish_reason: str | None = None
     warnings: list[str] = Field(default_factory=list)
     memory_written: bool
+    # Token usage (prompt_tokens/completion_tokens/total_tokens) from the generation
+    # that produced the persisted text: the repair generation's usage when a repair
+    # ran, otherwise the initial actor generation's. None when no generation
+    # completed (e.g. the actor call itself failed) or the provider reported none.
+    # Optional and additive: old persisted rows without this key deserialize with
+    # token_usage=None (docs #69).
+    token_usage: dict[str, int] | None = None
 
 
 class DeferredMemoryJob(BaseModel):
@@ -216,6 +223,8 @@ class TurnResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     retrieval: TurnRetrievalDiagnostics | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
+    # See TurnDiagnostics.token_usage for the same-generation-as-final-text rule.
+    token_usage: dict[str, int] | None = None
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
     deferred_memory: "DeferredMemoryJob | None" = Field(default=None, exclude=True)
 

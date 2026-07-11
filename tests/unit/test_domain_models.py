@@ -316,6 +316,7 @@ def test_turn_result_accepts_nested_model_route() -> None:
         "warnings": [],
         "retrieval": None,
         "stage_timings": {},
+        "token_usage": None,
     }
 
 

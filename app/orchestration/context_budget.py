@@ -5,6 +5,13 @@ from collections.abc import Collection, Sequence
 from pydantic import BaseModel, Field
 
 from app.domain import RetrievedChunk, Visibility
+from app.llm.provider import LlmMessage
+
+# Preflight prompt-size heuristic, not an exact tokenizer count: ~4 characters per
+# token holds up reasonably for English prose. It exists only to warn before a
+# small local context window silently context-shifts (#69); real usage (when the
+# provider reports it) always supersedes this estimate.
+CHARS_PER_TOKEN_ESTIMATE = 4
 
 
 class ContextBudget(BaseModel):
@@ -50,8 +57,75 @@ def _normalize_for_match(text: str) -> str:
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
+    """Cut at the last word boundary within budget rather than mid-word, then
+    append "...". Falls back to a hard cut when no boundary is found (a single
+    run of non-space characters at least as long as the budget) so the result
+    never exceeds max_chars either way."""
     if len(text) <= max_chars:
         return text
     if max_chars <= 3:
         return "." * max_chars
-    return f"{text[: max_chars - 3]}..."
+    budget = max_chars - 3
+    truncated = text[:budget]
+    boundary = truncated.rfind(" ")
+    if boundary > 0:
+        truncated = truncated[:boundary]
+    return f"{truncated}..."
+
+
+def estimate_prompt_tokens(
+    messages: Sequence[LlmMessage],
+    *,
+    max_tokens: int,
+) -> int:
+    """Cheap preflight estimate of prompt + completion tokens for one generation
+    call, using CHARS_PER_TOKEN_ESTIMATE. Not an exact tokenizer count -- see that
+    constant's docstring."""
+    total_chars = sum(len(message.content) for message in messages)
+    return (total_chars // CHARS_PER_TOKEN_ESTIMATE) + max_tokens
+
+
+def context_preflight_warning(
+    messages: Sequence[LlmMessage],
+    *,
+    max_tokens: int,
+    context_window_tokens: int,
+    warn_ratio: float,
+) -> str | None:
+    """Warn (never block) when the estimated prompt+completion token count for an
+    about-to-run generation call would cross warn_ratio * context_window_tokens.
+    Disabled when context_window_tokens <= 0 (the default -- byte-identical, no
+    warning ever fires)."""
+    if context_window_tokens <= 0:
+        return None
+    estimated = estimate_prompt_tokens(messages, max_tokens=max_tokens)
+    threshold = warn_ratio * context_window_tokens
+    if estimated <= threshold:
+        return None
+    return (
+        f"context preflight: estimated {estimated} tokens vs window {context_window_tokens} "
+        f"(warn ratio {warn_ratio})"
+    )
+
+
+def context_usage_warning(
+    usage: dict[str, int],
+    *,
+    context_window_tokens: int,
+    warn_ratio: float,
+) -> str | None:
+    """Post-hoc counterpart to context_preflight_warning: once a real usage report
+    is available, actual prompt_tokens beats the chars/4 estimate. Disabled when
+    context_window_tokens <= 0 or the provider reported no prompt_tokens."""
+    if context_window_tokens <= 0:
+        return None
+    prompt_tokens = usage.get("prompt_tokens")
+    if not prompt_tokens:
+        return None
+    threshold = warn_ratio * context_window_tokens
+    if prompt_tokens <= threshold:
+        return None
+    return (
+        f"context preflight: actual prompt_tokens {prompt_tokens} exceeded "
+        f"{warn_ratio} * window {context_window_tokens}"
+    )

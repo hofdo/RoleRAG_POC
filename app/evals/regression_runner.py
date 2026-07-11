@@ -9,7 +9,7 @@ from app.agents.memory_curator import MemoryCurator, MemoryCuratorOutputError
 from app.agents.secret_guard import scan_reply
 from app.domain import TurnInput, TurnOutcome
 from app.evals.event_key_retrieval import evaluate_event_key_retrieval
-from app.evals.fixtures import EvalFixture, build_eval_fixture
+from app.evals.fixtures import EvalFixture, MaliciousActorContextRetriever, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
 from app.evals.memory_recall import evaluate_memory_recall
 from app.evals.retrieval_miss import evaluate_retrieval_miss
@@ -300,11 +300,47 @@ async def _provider_binding_result(fixture: EvalFixture) -> CategoryResult:
         hidden not in all_cloud_text for hidden in hidden_strings
     )
 
+    # malicious_retriever_gm_chunk_never_reaches_cloud: a retriever that ignores
+    # visibility (a misbehaving or future custom actor_context_retriever, settable
+    # via the public TurnOrchestrator property) hands back GM + character_private
+    # chunks straight into a CLOUD session. The actor path already filters these at
+    # prompt build (context_budget.select_retrieved_chunks_for_prompt); this pins
+    # that the critic path -- the trust boundary fixed for #65 -- filters them too,
+    # so neither the actor, critic, nor memory request the cloud provider sees ever
+    # contains the withheld chunk text.
+    malicious_orchestrator, _, malicious_cloud_fake = fixture.build_full_stack_orchestrator(
+        session_provider=ModelProviderName.CLOUD,
+        actor_response_text="Cloud answer",
+    )
+    malicious_orchestrator.provider = _LocalExplodingProvider()
+    malicious_orchestrator.generation_stage.provider = _LocalExplodingProvider()
+    malicious_orchestrator.critique_stage.provider = _LocalExplodingProvider()
+    malicious_orchestrator.memory_stage.provider = _LocalExplodingProvider()
+    malicious_orchestrator.actor_context_retriever = MaliciousActorContextRetriever(
+        fixture.malicious_gm_and_private_chunks()
+    )
+    malicious_result = await malicious_orchestrator.run_turn(
+        turn_input=TurnInput(session_id=fixture.session.id, message="What do I notice?")
+    )
+    malicious_cloud_text = " ".join(
+        message.content
+        for request in malicious_cloud_fake.requests
+        for message in request.messages
+    )
+    malicious_retriever_gm_chunk_never_reaches_cloud = (
+        malicious_result.outcome == TurnOutcome.SUCCESS
+        and fixture.gm_only_lore_text not in malicious_cloud_text
+        and fixture.character_private_text not in malicious_cloud_text
+    )
+
     checks = {
         "local_session_never_calls_cloud": local_never_calls_cloud,
         "cloud_session_runs_all_tasks_on_cloud": cloud_runs_all_tasks_on_cloud,
         "cloud_critic_prompt_carries_no_hidden_content": (
             cloud_critic_prompt_carries_no_hidden_content
+        ),
+        "malicious_retriever_gm_chunk_never_reaches_cloud": (
+            malicious_retriever_gm_chunk_never_reaches_cloud
         ),
         "structured_tasks_stay_greedy_on_both_providers": (
             local_critic.temperature == 0.0

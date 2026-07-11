@@ -176,6 +176,8 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         containment_overlap_threshold=settings.containment_overlap_threshold,
         memory_consolidation_threshold=settings.memory_consolidation_threshold,
         memory_consolidation_max_importance=settings.memory_consolidation_max_importance,
+        model_context_window_tokens=settings.model_context_window_tokens,
+        context_warn_ratio=settings.context_warn_ratio,
     )
 
 

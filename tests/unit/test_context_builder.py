@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 
 from app.domain import PersonaCard, SceneState, StoredTurn, TurnInput
 from app.llm.router import ModelProviderName, ModelRoute
-from app.orchestration.context_builder import build_actor_messages
+from app.orchestration.context_builder import (
+    _truncate_recent_dialogue_message,
+    build_actor_messages,
+)
 
 
 def test_context_builder_includes_persona_scene_recent_events_and_user_message() -> None:
@@ -238,3 +241,30 @@ def test_context_builder_truncates_only_prior_dialogue_messages() -> None:
     assert messages[3].content == "What have you heard about the regent?"
     assert recent_turns[0].user_message == full_user_message
     assert recent_turns[0].assistant_message == full_assistant_message
+
+
+# --- Boundary-aware trimming (#69) -------------------------------------------------
+
+
+def test_truncate_recent_dialogue_message_unchanged_when_within_budget() -> None:
+    assert _truncate_recent_dialogue_message("short message", max_chars=900) == "short message"
+
+
+def test_truncate_recent_dialogue_message_cuts_at_last_word_boundary() -> None:
+    text = "The regent fears open daylight and hidden passageways beyond the gate"
+    result = _truncate_recent_dialogue_message(text, max_chars=30)
+    body = result.split("\n", maxsplit=1)[0]
+    assert len(body) <= 30
+    assert text.startswith(body)
+    assert not body.endswith(" ")
+    # The retained body must be a whitespace-delimited prefix: the character right
+    # after it in the original text is either the end of the string or a space.
+    assert text[len(body)] == " "
+    assert "Prior dialogue truncated for prompt budget" in result
+
+
+def test_truncate_recent_dialogue_message_falls_back_to_hard_cut_when_no_space() -> None:
+    text = "U" * 50
+    result = _truncate_recent_dialogue_message(text, max_chars=10)
+    assert result.startswith("U" * 10)
+    assert "Prior dialogue truncated for prompt budget" in result

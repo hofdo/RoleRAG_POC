@@ -1,6 +1,6 @@
 # 09 — Current Architecture Map
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-10 @ 9097877
 
 ## Overview
 
@@ -58,7 +58,7 @@ graph TD
 |---|---|
 | `app/cli.py` | local operational interface for config, sessions, routes, ingestion, and turns |
 | `app/main.py` + `app/api/` | HTTP interface with thin route handlers |
-| `frontend/` | Angular 19 SPA (play, inspector, analytics, eval) served at `/app`; see [frontend/README.md](../frontend/README.md) |
+| `frontend/` | Angular 21 SPA (play, inspector, analytics, eval) served at `/app`; see [frontend/README.md](../frontend/README.md) |
 | `app/composition.py` | central wiring for providers, repositories, retriever, and orchestrator |
 | `app/domain/` | typed data models and visibility values |
 | `app/orchestration/` | turn lifecycle as an injectable stage pipeline (`stages/`, 13 stage modules) plus `canon_builder.py`, `draft_validator.py`, `turn_errors.py`, prompt assembly, and context budgeting |

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -32,6 +33,9 @@ from app.orchestration.stages import (
     TurnRetrievalStage,
     TurnRoutingStage,
 )
+from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
+from app.orchestration.stages.retrieval import RetrievalStageResult
+from app.orchestration.stages.routing import RoutingStageResult
 
 
 def _context() -> LoadedTurnContext:
@@ -517,6 +521,175 @@ def test_generation_stage_warns_on_silent_prompt_truncation() -> None:
 
     assert any("recent dialogue truncated" in warning for warning in warnings)
     assert any("retrieved context truncated" in warning for warning in warnings)
+
+
+class _UsageScriptedProvider(LlmProvider):
+    """Answers every request with a fixed piece of text and a scripted usage dict,
+    so tests can assert exactly what GenerationStageResult.usage / warnings carry."""
+
+    def __init__(self, *, usage: dict[str, int], text: str = "A short reply.") -> None:
+        self.usage = usage
+        self.text = text
+        self.requests: list[LlmRequest] = []
+
+    async def generate(self, request: LlmRequest) -> LlmResponse:
+        self.requests.append(request)
+        return LlmResponse(
+            text=self.text,
+            provider="fake",
+            model=request.model,
+            usage=self.usage,
+            finish_reason="stop",
+        )
+
+
+@dataclass(frozen=True)
+class _GenerationRunArgs:
+    turn_input: TurnInput
+    context: LoadedTurnContext
+    retrieval: RetrievalStageResult
+    routing: RoutingStageResult
+
+
+def _generation_run_args(*, message: str = "Hello there.") -> _GenerationRunArgs:
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=50,
+        temperature=0.5,
+        reason="test route",
+    )
+    return _GenerationRunArgs(
+        turn_input=TurnInput(session_id="session", message=message),
+        context=_context(),
+        retrieval=RetrievalStageResult(chunks=(), confidence=0.9, warnings=()),
+        routing=RoutingStageResult(route=route, scene_complexity=1, warnings=()),
+    )
+
+
+async def _run_generation_stage(
+    stage: TurnGenerationStage, args: _GenerationRunArgs
+) -> GenerationStageResult:
+    return await stage.run(
+        turn_input=args.turn_input,
+        context=args.context,
+        retrieval=args.retrieval,
+        routing=args.routing,
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_run_threads_usage_from_response() -> None:
+    provider = _UsageScriptedProvider(
+        usage={"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50}
+    )
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert result.usage == {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50}
+    assert result.text == "A short reply."
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_disabled_by_default() -> None:
+    # model_context_window_tokens defaults to 0: no estimate, no warning, no
+    # behavior change, no matter how large the prompt is.
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+    args = _generation_run_args(message="x" * 100_000)
+
+    result = await _run_generation_stage(stage, args)
+
+    assert not any("context preflight" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_fires_above_threshold() -> None:
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=100,
+        context_warn_ratio=0.5,
+    )
+    # System prompt alone (persona/scene boilerplate) plus this is easily >200 chars
+    # (~>50 estimated tokens vs a 50-token threshold).
+    args = _generation_run_args(message="x" * 1000)
+
+    result = await _run_generation_stage(stage, args)
+
+    assert any("context preflight: estimated" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_context_preflight_silent_below_threshold() -> None:
+    provider = _UsageScriptedProvider(usage={"total_tokens": 0})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=1_000_000,
+        context_warn_ratio=0.85,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert not any("context preflight" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_actual_usage_warning_fires_when_configured() -> None:
+    provider = _UsageScriptedProvider(usage={"prompt_tokens": 900, "total_tokens": 950})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+        model_context_window_tokens=1000,
+        context_warn_ratio=0.85,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert any(
+        "context preflight: actual prompt_tokens 900" in warning for warning in result.warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_stage_actual_usage_warning_disabled_by_default() -> None:
+    # Even a huge reported prompt_tokens must not warn when the window is disabled.
+    provider = _UsageScriptedProvider(usage={"prompt_tokens": 999_999})
+    stage = TurnGenerationStage(
+        provider=provider,
+        cloud_provider=None,
+        routing_stage=_routing(),
+        context_budget=ContextBudget(),
+        recent_dialogue_max_message_chars=900,
+    )
+
+    result = await _run_generation_stage(stage, _generation_run_args())
+
+    assert not any("context preflight" in warning for warning in result.warnings)
 
 
 @pytest.mark.asyncio
@@ -1273,6 +1446,156 @@ async def test_critique_stage_auto_gating_skips_low_risk_turn() -> None:
     assert result.failed is False  # a deliberate gate is not a failure; the draft still serves
     assert result.warnings == ("critic gated: low-risk turn",)
     assert critic.calls == 0
+
+
+class CapturingCriticAgent:
+    """Records the retrieved_chunks it was actually handed by the stage."""
+
+    def __init__(self, result: CriticResult) -> None:
+        self.result = result
+        self.received_chunks: list[RetrievedChunk] | None = None
+
+    async def evaluate(
+        self,
+        *,
+        retrieved_chunks: list[RetrievedChunk],
+        **_: object,
+    ) -> CriticResult:
+        self.received_chunks = retrieved_chunks
+        return self.result
+
+    def build_local_repair_messages(self, **_: object) -> list[Any]:
+        return []
+
+
+def _mixed_visibility_chunks() -> tuple[RetrievedChunk, ...]:
+    return (
+        RetrievedChunk(
+            id="player-1",
+            source="lore.md",
+            source_type="lore",
+            text="Public lore.",
+            score=0.5,
+            visibility=Visibility.PLAYER,
+        ),
+        RetrievedChunk(
+            id="gm-1",
+            source="gm.md",
+            source_type="lore",
+            text="GM-only lore.",
+            score=0.9,
+            visibility=Visibility.GM,
+        ),
+        RetrievedChunk(
+            id="private-1",
+            source="private.md",
+            source_type="memory",
+            text="Character-private memory.",
+            score=0.8,
+            visibility=Visibility.CHARACTER_PRIVATE,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_cloud_route_filters_non_player_chunks_and_warns() -> None:
+    critic = CapturingCriticAgent(CriticResult(accepted=True))
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        cloud_provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+    )
+    context = _context()
+    chunks = _mixed_visibility_chunks()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="What do I notice?",
+        draft="...",
+        retrieved_chunks=chunks,
+        route_provider=ModelProviderName.CLOUD,
+    )
+
+    assert critic.received_chunks == [chunks[0]]
+    assert result.warnings == (
+        "critic context filtered: 2 non-player chunk(s) withheld from cloud critic",
+    )
+    assert result.critique == CriticResult(accepted=True)
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_local_route_passes_all_chunks_through_unchanged() -> None:
+    critic = CapturingCriticAgent(CriticResult(accepted=True))
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+    )
+    context = _context()
+    chunks = _mixed_visibility_chunks()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="What do I notice?",
+        draft="...",
+        retrieved_chunks=chunks,
+        route_provider=ModelProviderName.LOCAL,
+    )
+
+    assert critic.received_chunks == list(chunks)
+    assert result.warnings == ()
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_cloud_route_with_no_chunks_emits_no_warning() -> None:
+    critic = CapturingCriticAgent(CriticResult(accepted=True))
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        cloud_provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="What do I notice?",
+        draft="...",
+        retrieved_chunks=(),
+        route_provider=ModelProviderName.CLOUD,
+    )
+
+    assert critic.received_chunks == []
+    assert result.warnings == ()
+
+
+@pytest.mark.asyncio
+async def test_critique_stage_cloud_route_with_only_player_chunks_emits_no_warning() -> None:
+    critic = CapturingCriticAgent(CriticResult(accepted=True))
+    stage = TurnCritiqueStage(
+        provider=UnusedProvider(),
+        cloud_provider=UnusedProvider(),
+        critic_agent=critic,
+        routing_stage=_routing(),
+    )
+    context = _context()
+    chunks = (_mixed_visibility_chunks()[0],)
+
+    result = await stage.run(
+        persona=context.persona,
+        scene=context.scene,
+        user_message="What do I notice?",
+        draft="...",
+        retrieved_chunks=chunks,
+        route_provider=ModelProviderName.CLOUD,
+    )
+
+    assert critic.received_chunks == list(chunks)
+    assert result.warnings == ()
 
 
 def test_critique_stage_rejects_unknown_gating_mode() -> None:
