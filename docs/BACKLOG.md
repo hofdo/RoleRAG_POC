@@ -517,6 +517,23 @@ Ordered by value. Effort S/M/L.
 (README, docs/02, docs/09, docs/SIDE_PROJECTS, frontend/README); CHANGELOG gained an
 `Unreleased` section covering the post-1.2.0 batch (#48–#64, Angular 21, RAG C1/N1, #60).
 
+### Found while closing the docs/10 coverage gaps (2026-07-11)
+
+- [ ] **#71** *(decision, S)* **Actor-stage provider-transport failures bypass controlled
+  failure.** `TurnOrchestrator.run_turn` catches only `EmptyProviderResponseError` /
+  `TruncatedProviderResponseError` around actor generation; a raw transport error
+  (`ProviderTimeoutError`/`ProviderUnavailableError`) propagates uncaught to the API/CLI caller —
+  the API maps it to 503/504, but **no CONTROLLED_FAILURE turn is persisted** and the player's
+  message is not recorded for that attempt. The same exception from the *critic* stage fails
+  closed into a persisted controlled-failure turn (invariant #4), because `TurnCritiqueStage.run`
+  catches broadly. The asymmetry is pinned (not fixed) by
+  `tests/integration/test_provider_unavailability.py`. Decide: (a) keep the 503/504 contract and
+  record it here as intended (transport failure = transient infrastructure error, retryable, so
+  no turn row belongs in history), or (b) catch transport errors in `run_turn` and persist a
+  controlled-failure turn like the critic path — which changes the API envelope for provider
+  outages and needs the SPA's error handling re-checked. Either way the tests document today's
+  behavior; flip them with the decision.
+
 ## Not doing (personal-use scope)
 
 StageGraph/DAG/plugin extensibility · hard memory-episode cap default (regressed recall) ·
