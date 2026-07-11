@@ -45,7 +45,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask which corridor the regent's envoy used after leaving the gallery.",
     "I compare the west-door lock with the archive key in Iria's sketch.",
     "I ask whether the roses were rearranged before or after the envoy departed.",
-    "I listen for footsteps and ask Iria who is still awake below us.",
+    "I tell Iria I have hidden a folded note inside the hollow bookend on the third archive shelf.",
     "I ask what record in the archive would most threaten the regent.",
     "I ask Iria what she needs me to understand before I leave the gallery.",
     "I pause beside the final mirror and ask what our next move should be.",
@@ -83,7 +83,7 @@ ROSE_GALLERY_MESSAGES = (
     "I trace the conservatory passage behind the roses and ask where it ends.",
     "I ask which neutral courtier might be swayed by the ledger's contents.",
     "I tell Iria to watch the eastern stair while I approach the archive.",
-    "I ask whether the regent's secretary carried anything sealed tonight.",
+    "I press an amber ring into Iria's palm and tell her to wear it as a sign of my word.",
     "I test the west door with three soft taps and wait for her answer.",
     "I ask Iria to confirm the blue wax seal on the note just delivered.",
     "I ask how long the guards' midnight rotation leaves the corridor empty.",
@@ -93,12 +93,12 @@ ROSE_GALLERY_MESSAGES = (
     "I ask her to describe the envoy's face when he first entered the gallery.",
     "I ask what sound the hidden archive latch makes when it gives way.",
     "I tell Iria I will copy a single page and leave the seal unbroken.",
-    "I ask which ally should receive that copied page before dawn.",
+    "I ask Iria whether she still wears the token I gave her that night.",
     "I ask whether the ballroom crowd has thinned enough to cross unseen.",
     "I study the envoy's discarded note and compare its hand to the ledger.",
     "I ask Iria to recall the exact rule we set for trusting any message.",
     "I ask whether the regent has summoned anyone to the gallery tonight.",
-    "I ask which mirror would warn us first if someone climbs the eastern stair.",
+    "I tell Iria that if we are separated, I will wait for her at the old north stair.",
     "I ask Iria to repeat where I hid the spare archive key.",
     "I ask what distraction could clear the west corridor for a full minute.",
     "I tell Iria the three-tap signal still stands if we must part.",
@@ -108,7 +108,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask whether the clock's silenced chime was meant as a signal to someone.",
     "I ask her to name the courtier who changed their route after the envoy left.",
     "I tell Iria I trust only the blue-sealed messages from this point on.",
-    "I ask whether the conservatory door can be barred from the inside.",
+    "I ask Iria whether she remembers where I said I would wait if we were separated.",
     "I ask what the regent fears most about the winter succession record.",
     "I ask Iria to keep the silver compass hidden until I send the safe signal.",
     "I ask which corridor the secretary used when he slipped away just now.",
@@ -123,7 +123,7 @@ ROSE_GALLERY_MESSAGES = (
     "I ask whether the eastern stair is finally clear of watchers.",
     "I ask her to recall the promise I made about returning before dawn.",
     "I ask which message tonight carried no blue seal and should be doubted.",
-    "I tell Iria I will return the copied page to her by the west door.",
+    "I ask Iria whether she remembers where I hid that folded note.",
     "I ask whether the regent's envoy has reentered the palace gates.",
     "I ask Iria for the safe signal one last time before I leave the gallery.",
     "I ask which ally waits beyond the conservatory to carry our evidence.",
@@ -146,6 +146,14 @@ STORY_EVENTS = (
         definition_turn=3,
         callback_turn=13,
         term_groups=(("promise", "promised"), ("return", "come back"), ("dawn",)),
+    ),
+    # Long-gap probe: fact stated in the opening act, callback near the very end of a
+    # 100-turn run — the "old durable fact still retrievable after 100 turns" case.
+    StoryEvent(
+        key="hollow_bookend_note",
+        definition_turn=17,
+        callback_turn=95,
+        term_groups=(("bookend",), ("note",), ("shelf", "shelves")),
     ),
     StoryEvent(
         key="silver_compass",
@@ -170,6 +178,20 @@ STORY_EVENTS = (
         definition_turn=40,
         callback_turn=50,
         term_groups=(("three", "3"), ("tap", "knock"), ("west",), ("door",)),
+    ),
+    # Late-recall probes (turns 51-100 were previously filler; a 100-turn run asserted
+    # nothing past turn 50). Both setup and callback fall after turn 50.
+    StoryEvent(
+        key="amber_ring_token",
+        definition_turn=55,
+        callback_turn=65,
+        term_groups=(("amber",), ("ring",), ("wear", "sign", "token")),
+    ),
+    StoryEvent(
+        key="north_stair_rendezvous",
+        definition_turn=70,
+        callback_turn=80,
+        term_groups=(("north",), ("stair", "stairs"), ("wait", "meet")),
     ),
 )
 

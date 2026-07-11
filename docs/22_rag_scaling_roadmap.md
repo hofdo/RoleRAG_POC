@@ -1,6 +1,11 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-10 @ 24d4aab
+> Reviewed: 2026-07-11 @ 3568956
+>
+> **Update 2026-07-11.** Added late-recall `StoryEvent`s to the live checkpoint (see the
+> *Eval methodology* bullet under
+> [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building))
+> so a 100-turn live-smoke run asserts recall past turn 50, including a long-gap probe.
 >
 > **Update 2026-07-08.** A follow-up code-grounded review re-checked the RAG core and memory
 > lifecycle. It **confirmed** two of the [unverified candidates](#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
@@ -402,9 +407,14 @@ it with a note.
 - *Qdrant/vector store:* deleting a session with Qdrant unreachable can orphan
   still-retrievable `persona_memory` vectors (fail-open delete, nothing re-sweeps);
   `replace_source` is delete-then-upsert — a brief retrieval outage window per re-ingest.
-- *Eval methodology:* the live checkpoint's recall probes all land before turn ~50 — a
-  100-turn run asserts nothing about late recall (add late second-callback StoryEvents);
-  retrieval-miss floors measure absolute score rather than margin-over-best-distractor.
+- *Eval methodology:* **fixed 2026-07-11** — the live checkpoint's recall probes all landed
+  before turn ~50, so a 100-turn run asserted nothing about late recall. Three late
+  `StoryEvent`s are now wired into `app/diagnostics/live_checkpoint.py`
+  (`amber_ring_token` 55→65, `north_stair_rendezvous` 70→80, and a long-gap probe
+  `hollow_bookend_note` 17→95 — an old fact stated in the opening act, recalled 78 turns
+  later) covered by deterministic unit tests; live-run validation (does the local model
+  actually recall it) is still pending a `LIVE_TURN_COUNT=100` run on real hardware.
+  Retrieval-miss floors still measure absolute score rather than margin-over-best-distractor.
 - *Query construction:* `build_retrieval_query` puts the user message **last** after up to
   ~1.3K chars of framing ([retriever.py:145-168](../app/rag/retriever.py)) — near MiniLM's
   ~256-token input truncation the message can fall off the embedded text entirely (the

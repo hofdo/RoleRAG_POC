@@ -8,14 +8,17 @@ from typing import Any
 import pytest
 
 from app.diagnostics.live_checkpoint import (
+    ROSE_GALLERY_MESSAGES,
     STORY_EVENTS,
     CheckpointError,
     EventAttribution,
     PersistenceInspection,
     build_event_attribution,
     conversation_messages,
+    events_for_turn_count,
     resolve_turn_count,
     run_checkpoint,
+    semantic_match,
     validate_warnings,
     write_reports,
 )
@@ -154,6 +157,83 @@ def test_all_lengths_share_the_same_story_prefix() -> None:
         assert conversation_messages(count) == full[:count]
     assert "promise to return before dawn" in full[2]
     assert len(full) == 100
+
+
+def test_story_events_have_unique_callback_turns_within_bounds() -> None:
+    callback_turns = [event.callback_turn for event in STORY_EVENTS]
+    assert len(callback_turns) == len(set(callback_turns))
+    for event in STORY_EVENTS:
+        assert 1 <= event.definition_turn <= 100
+        assert 1 <= event.callback_turn <= 100
+        assert event.definition_turn < event.callback_turn
+
+
+def test_story_events_still_leave_exactly_100_scripted_messages() -> None:
+    assert len(ROSE_GALLERY_MESSAGES) == 100
+
+
+def test_story_event_definition_messages_satisfy_their_own_semantic_match() -> None:
+    # The scripted line that states the fact must contain every keyword group so a
+    # faithful summary of it can plausibly satisfy semantic_match at callback time.
+    for event in STORY_EVENTS:
+        definition_message = ROSE_GALLERY_MESSAGES[event.definition_turn - 1]
+        assert semantic_match(definition_message, event.term_groups), event.key
+
+
+def test_story_event_callback_messages_reference_at_least_one_term_group() -> None:
+    # Callback questions deliberately withhold most of the answer (they prompt recall
+    # rather than restate it), but should still gesture at the event via some term.
+    for event in STORY_EVENTS:
+        callback_message = ROSE_GALLERY_MESSAGES[event.callback_turn - 1].casefold()
+        assert any(
+            any(term.casefold() in callback_message for term in group)
+            for group in event.term_groups
+        ), event.key
+
+
+def test_at_least_one_story_event_is_a_long_gap_late_recall_probe() -> None:
+    # Acceptance criterion from docs/22: an old durable fact must still be retrievable
+    # near the end of a 100-turn run, not just shortly after it was stated.
+    gaps = [event.callback_turn - event.definition_turn for event in STORY_EVENTS]
+    assert max(gaps) >= 60
+
+
+# Keys of the five events that existed before this change, all with callback_turn <= 50.
+_ORIGINAL_FIVE_KEYS: set[str] = {
+    "before_dawn_promise",
+    "silver_compass",
+    "blue_seal_trust_rule",
+    "key_hiding_place",
+    "three_tap_signal",
+}
+
+
+@pytest.mark.parametrize(
+    ("turn_count", "expected_keys"),
+    [
+        (50, _ORIGINAL_FIVE_KEYS),
+        (64, _ORIGINAL_FIVE_KEYS),
+        (65, _ORIGINAL_FIVE_KEYS | {"amber_ring_token"}),
+        (79, _ORIGINAL_FIVE_KEYS | {"amber_ring_token"}),
+        (80, _ORIGINAL_FIVE_KEYS | {"amber_ring_token", "north_stair_rendezvous"}),
+        (94, _ORIGINAL_FIVE_KEYS | {"amber_ring_token", "north_stair_rendezvous"}),
+        (95, {event.key for event in STORY_EVENTS}),
+        (100, {event.key for event in STORY_EVENTS}),
+    ],
+)
+def test_events_for_turn_count_boundaries_at_late_recall_turns(
+    turn_count: int, expected_keys: set[str]
+) -> None:
+    selected_keys = {event.key for event in events_for_turn_count(turn_count)}
+    assert selected_keys == expected_keys
+
+
+def test_events_for_turn_count_excludes_long_gap_event_before_its_callback() -> None:
+    # A partial run whose turn_count falls between the long-gap event's early setup
+    # (turn 17) and its late callback (turn 95) must not assert on it at all: the
+    # setup happening is harmless, but the callback is out of range so it is filtered.
+    selected_keys = {event.key for event in events_for_turn_count(60)}
+    assert "hollow_bookend_note" not in selected_keys
 
 
 def test_structured_warnings_are_strict_or_report_only() -> None:
