@@ -19,10 +19,11 @@ from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, Visibility
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
 from app.rag.retriever import build_retrieval_query
-from app.rag.vector_store import QdrantVectorStore
+from app.rag.vector_store import _SENTINEL_PAYLOAD_KEY, QdrantVectorStore
 
 MIN_TURN_COUNT = 5
 MAX_TURN_COUNT = 100
@@ -252,6 +253,11 @@ class EventAttribution:
 @dataclass(frozen=True)
 class PersistenceInspection:
     persisted_turn_count: int
+    # Excludes consolidation-marked (CONSOLIDATED_TAG) rows (docs/22 P2, fixed
+    # 2026-07-11) so this stays comparable to ``session_memory_count``: consolidation
+    # is non-destructive in SQLite (the original rows stay, tagged, forever) but
+    # unindexes them from Qdrant, so an unfiltered SQLite count would permanently
+    # diverge from the Qdrant-indexed count starting at the first roll-up.
     persisted_memory_count: int
     canon_lore_count: int
     session_memory_count: int
@@ -645,12 +651,20 @@ def inspect_live_state(
                 (session_id,),
             ).fetchone()[0]
         )
-        persisted_memory_count = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM memory_episodes WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()[0]
-        )
+        memory_tag_rows = connection.execute(
+            "SELECT tags_json FROM memory_episodes WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+    # Consolidation (docs/22 C2/P3) marks originals CONSOLIDATED_TAG and unindexes them
+    # from Qdrant, but never deletes the SQLite row -- so counting every row here would
+    # diverge from the Qdrant-indexed session_memory_count as soon as one roll-up runs
+    # (docs/22 P2, fixed 2026-07-11). Excluding consolidated-marked rows keeps the two
+    # sides comparable.
+    persisted_memory_count = sum(
+        1
+        for (tags_json,) in memory_tag_rows
+        if CONSOLIDATED_TAG not in json.loads(tags_json)
+    )
     vector_store = QdrantVectorStore(url=settings.qdrant_url)
     return PersistenceInspection(
         persisted_turn_count=persisted_turn_count,
@@ -801,20 +815,38 @@ def _qdrant_count(
     *,
     session_id: str | None = None,
 ) -> int:
+    """Count points in ``collection``, excluding the P1.4 embedding-model fingerprint
+    sentinel meta point (docs/22 P4, fixed 2026-07-11).
+
+    The sentinel is a real point ``ensure_collection`` writes into every collection it
+    touches, so an unscoped ``client.count()`` (the ``session_id is None`` canon-lore
+    path) would count it too -- inflating ``canon_lore_count`` by 1 and letting the
+    checkpoint's ``>= 1 lore`` gate pass on a stamped-but-otherwise-empty collection,
+    diverging from ``InMemoryVectorStore`` (whose fingerprint lives in a separate dict,
+    never a counted entry). Reuses the same ``must_not`` exclusion
+    ``QdrantVectorStore._build_qdrant_filter`` applies on every search path.
+    """
     if not vector_store.client.collection_exists(collection_name=collection.value):
         return 0
-    count_filter = None
-    if session_id is not None:
-        from qdrant_client.http import models
+    from qdrant_client.http import models
 
-        count_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="session_id",
-                    match=models.MatchValue(value=session_id),
-                )
-            ]
+    must: list[Any] = []
+    if session_id is not None:
+        must.append(
+            models.FieldCondition(
+                key="session_id",
+                match=models.MatchValue(value=session_id),
+            )
         )
+    count_filter = models.Filter(
+        must=must,
+        must_not=[
+            models.FieldCondition(
+                key=_SENTINEL_PAYLOAD_KEY,
+                match=models.MatchValue(value=True),
+            )
+        ],
+    )
     result = vector_store.client.count(
         collection_name=collection.value,
         count_filter=count_filter,

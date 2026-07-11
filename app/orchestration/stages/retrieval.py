@@ -76,12 +76,20 @@ class TurnRetrievalStage:
             # duplicates an earlier one, and rerank_chunks truncates its candidate pool to
             # exactly top_k *before* that dedup ever runs -- so a fixed-size window has no
             # replacement candidate available once a duplicate is dropped, and the block
-            # silently shrinks. Worst case, every slot but one in the first
-            # `retrieved_chunks` window is a duplicate of an earlier one, so
-            # retrieved_chunks - 1 extra candidates are needed to guarantee a distinct
-            # backfill is available whenever the ranked pool actually contains one.
-            # Bounded and deterministic; does not change ranking or truncate anything the
-            # prompt step wasn't already going to drop.
+            # silently shrinks. This margin covers the specific worst case it was sized
+            # for: every slot but one in the first `retrieved_chunks` window is a
+            # duplicate of an earlier one (retrieved_chunks - 1 wasted slots total,
+            # matching the reviewer's repro). It is a bounded heuristic, not a universal
+            # guarantee -- one fact repeated more times than the margin (heavy
+            # near-duplicate pileup of a single memory, exactly the accumulation N3 exists
+            # to catch) can still push genuinely distinct chunks out of the truncated
+            # top_k window entirely, under-filling the block below budget even though
+            # those chunks exist upstream (docs/22 P6, honesty note added 2026-07-11).
+            # That residual case is a write-side/consolidation concern (semantic
+            # write-dedup, or C2 folding the backlog), not something a larger fixed
+            # over-fetch margin can close -- deliberately not addressed here. Deterministic
+            # and bounded; does not change ranking or truncate anything the prompt step
+            # wasn't already going to drop.
             top_k = (
                 self.context_budget.retrieved_chunks
                 + len(context.standing_facts)

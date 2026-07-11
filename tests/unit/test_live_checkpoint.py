@@ -23,6 +23,7 @@ from app.diagnostics.live_checkpoint import (
     write_reports,
 )
 from app.domain import MemoryEpisode, Visibility
+from app.rag.vector_store import QdrantVectorStore
 
 
 class FakeResponse:
@@ -515,3 +516,143 @@ def test_write_json_atomic_replaces_target_without_leftover_temp(tmp_path: Path)
     write_json_atomic(path, {"status": "pass"})
     assert json.loads(path.read_text(encoding="utf-8")) == {"status": "pass"}
     assert sorted(path.parent.iterdir()) == [path]
+
+
+# --- P1.4 fingerprint sentinel excluded from count paths (cross-review P4, 2026-07-11) --
+#
+# The embedding-model fingerprint sentinel (docs/22 P1.4) is a real point
+# ``ensure_collection`` writes into every collection it touches. ``_qdrant_count`` must
+# exclude it (the same ``must_not`` mechanism ``QdrantVectorStore._build_qdrant_filter``
+# already applies on every search path), or the checkpoint's unfiltered canon-lore count
+# would be inflated by 1 -- letting the ">=1 lore" gate pass on a stamped-but-empty
+# collection and diverging from ``InMemoryVectorStore``, whose fingerprint is a separate
+# dict entry, never a counted point. Runs against an embedded ``QdrantClient(":memory:")``
+# (same pattern as tests/unit/test_vector_store_fingerprint.py) so the real sentinel/filter
+# code path is exercised.
+
+
+def _qdrant_store() -> QdrantVectorStore:
+    from qdrant_client import QdrantClient
+
+    store = QdrantVectorStore(url="local")
+    store._client = QdrantClient(":memory:")
+    return store
+
+
+def test_qdrant_count_excludes_sentinel_on_stamped_empty_collection() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagCollection
+
+    store = _qdrant_store()
+    # Stamps the fingerprint sentinel into a brand-new, otherwise-empty collection --
+    # exactly what happens the first time any indexer/ingest call passes model_key.
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="all-MiniLM-L6-v2")
+
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 0
+
+
+def test_qdrant_count_excludes_sentinel_alongside_real_points() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagChunk, RagCollection
+
+    store = _qdrant_store()
+    store.ensure_collection(RagCollection.CANON_LORE, 3, model_key="all-MiniLM-L6-v2")
+    chunks = [
+        RagChunk(
+            id=f"lore-{i}",
+            source="lore.md",
+            source_type="lore",
+            text=f"canon fact {i}",
+            visibility=Visibility.PLAYER,
+            world_id="w1",
+        )
+        for i in range(3)
+    ]
+    store.upsert_chunks(RagCollection.CANON_LORE, chunks, [[1.0, 0.0, 0.0]] * 3)
+
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 3
+
+
+def test_qdrant_count_missing_collection_is_zero() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagCollection
+
+    store = _qdrant_store()
+    assert _qdrant_count(store, RagCollection.CANON_LORE) == 0
+
+
+def test_inspect_live_state_excludes_consolidated_rows_from_persisted_memory_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # docs/22 P2 (fixed 2026-07-11): consolidation (C2) marks originals CONSOLIDATED_TAG
+    # in SQLite but never deletes the row, while unindexing them from Qdrant. An
+    # unfiltered SQLite count would diverge from the Qdrant-indexed count on the very
+    # first roll-up and fail the checkpoint's SQLite/Qdrant parity assertion forever
+    # after. persisted_memory_count must exclude consolidated-marked rows to stay
+    # comparable.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_live_state
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-11T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "world", "scene", "persona", "Player", now, now),
+    )
+    rows = [
+        ("mem-1", "[]"),  # ordinary, still retrievable
+        ("mem-2", "[]"),  # ordinary, still retrievable
+        ("mem-3", json.dumps(["consolidated"])),  # folded original, SQLite-only now
+        ("mem-4", json.dumps(["consolidation_summary"])),  # the roll-up itself, indexed
+    ]
+    for memory_id, tags_json in rows:
+        connection.execute(
+            "INSERT INTO memory_episodes "
+            "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+            "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (memory_id, "session-1", "scene", "persona", "summary", 1, "player", tags_json, now),
+        )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_count",
+        lambda vector_store, collection, session_id=None: 3,
+    )
+
+    inspection = inspect_live_state(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path)),
+        session_id="session-1",
+    )
+
+    # 4 rows persisted, but "mem-3" (consolidated) is excluded -- matching the Qdrant
+    # side, which no longer indexes it (patched above to 3: mem-1, mem-2, mem-4).
+    assert inspection.persisted_memory_count == 3
+    assert inspection.session_memory_count == 3
+
+
+def test_qdrant_count_session_filter_still_excludes_sentinel() -> None:
+    from app.diagnostics.live_checkpoint import _qdrant_count
+    from app.rag.models import RagChunk, RagCollection
+
+    store = _qdrant_store()
+    store.ensure_collection(RagCollection.SESSION_MEMORY, 3, model_key="all-MiniLM-L6-v2")
+    chunk = RagChunk(
+        id="mem-1",
+        source="memory_episode:mem-1",
+        source_type="session_memory",
+        text="a memory",
+        visibility=Visibility.PLAYER,
+        session_id="session-a",
+    )
+    store.upsert_chunks(RagCollection.SESSION_MEMORY, [chunk], [[1.0, 0.0, 0.0]])
+
+    assert _qdrant_count(store, RagCollection.SESSION_MEMORY, session_id="session-a") == 1
+    assert _qdrant_count(store, RagCollection.SESSION_MEMORY, session_id="session-b") == 0
