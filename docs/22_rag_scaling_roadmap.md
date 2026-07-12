@@ -468,6 +468,28 @@ Effort S. — [ ]
 > every configuration. Fix (#72): dedicated `WRITE_DEDUP_COVERAGE_THRESHOLD=0.75` for the
 > dedup call site, deterministic-fallback coverage unchanged at 0.5, and both dedup warnings
 > now name the dropped summaries. Third run pending with the fix in place.
+>
+> **Third run 2026-07-12 (#72 fix in) — FAILED at turn 38; P2.2 validation now BLOCKED ON
+> P1.1 (finding #73).** `silver_compass` **passed** (#72 verified live), then
+> `CheckpointError: event blue_seal_trust_rule was not selected by callback retrieval`. The
+> memory existed, matched, and was indexed; it ranked **12 of 17** candidates (top-5
+> selected) for the callback "I ask Iria what rule we agreed to use before trusting any
+> message" — whose direct answer it is. Offline reproduction (`reindex-memories` into a
+> disposable Qdrant + `inspect_story_event` against the run's SQLite): dense score 0.3221
+> vs 0.45–0.58 for scene-vocabulary chatter — `all-MiniLM-L6-v2` misses the
+> "rule for trusting messages" ↔ "only trust blue-wax-sealed messages" paraphrase; the
+> lexical leg boosted it +0.15, not enough. **Recency exonerated**: identical rank at
+> `RAG_RECENCY_WEIGHT=0.0` and `0.02`. Root cause is pool size: the #72 fix (correctly)
+> persists more memories — 48 indexed by turn 37 vs 36 pre-fix — and dense-only retrieval
+> stops surfacing direct answers at that scale; run 1 passed the same probe on a luckier
+> phrasing/pool. Candidate-swap experiment on the live case: `paraphrase-multilingual-
+> MiniLM-L12-v2` ranks it **worse** (18/48 dense vs MiniLM's 10/48), and
+> `jinaai/jina-embeddings-v2-base-de` fails to load under current onnxruntime (broken graph
+> fusion) — so P1.2 alone does not fix this class; **P1.1 hybrid sparse+dense and/or P2.5
+> rerank are the load-bearing fixes**, with this query/pool as their live acceptance case.
+> The preset machinery itself validated fine across the three runs: consolidation fired
+> (15 folded + 1 summary, run 1), SQLite/Qdrant parity held, the turn-17 probe survived a
+> consolidation pass. Re-run P2.2 after P1.1 lands.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index

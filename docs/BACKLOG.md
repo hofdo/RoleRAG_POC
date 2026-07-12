@@ -594,6 +594,20 @@ Ordered by value. Effort S/M/L.
   Regression tests pin the compass/dawn pair verbatim. Live validation rides with the
   Phase D re-run (docs/22 P2.2).
 
+- [ ] **#73** *(retrieval, M — this is P1.1/P2.5's live acceptance case)* **Dense-only
+  retrieval stops surfacing direct answers at ~50-memory pools.** docs/25 Phase D run 3:
+  the blue-seal trust-rule memory ranked 12/17 (top-5 selected) for the callback question
+  it directly answers — dense score 0.3221 vs 0.45–0.58 for scene-vocabulary chatter;
+  lexical-leg boost (+0.15) insufficient; recency exonerated (identical at 0.0/0.02).
+  Reproducible offline from the run's SQLite via `reindex-memories` + `inspect_story_event`
+  (docs/22 § P2.2 third-run note has the method and numbers; the run's database is preserved
+  at `docs/artifacts/live-validation-D3-2026-07-12.db`, session
+  `1a3f65da-73f5-4729-a58d-f058d1d01aac`, target memory `354b8d98`). Candidate model swaps do NOT
+  fix it (multilingual-L12 ranks it worse; jina-de fails to load under current onnxruntime —
+  also a P1.2 viability note). Acceptance for P1.1 hybrid / P2.5 rerank: this query against
+  this pool must place the blue-seal memory in the selected set; then re-run the full
+  docs/25 Phase D preset, which is blocked on this item.
+
 ## Not doing (personal-use scope)
 
 StageGraph/DAG/plugin extensibility · hard memory-episode cap default (regressed recall) ·
