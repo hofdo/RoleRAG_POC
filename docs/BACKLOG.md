@@ -93,6 +93,31 @@ no longer exists. Order was value + independence, decisions last; each item was 
   (`app/orchestration/stages/critique.py`: `include_hidden=route.provider ==
   ModelProviderName.LOCAL`) plus a provider-binding eval test that pins the invariant.
 
+## Decisions (2026-07-12: paraphrase flags + actor transport failures)
+
+- **#68 — Paraphrase flags stay warn-and-serve; recorded as accepted risk.** `secret_guard`
+  keeps redacting verbatim hidden-fact echoes and only *flagging* likely paraphrases; flagged
+  replies are persisted and served with the warning attached. Rationale: hidden fields never
+  enter the actor prompt (visibility invariant), so a paraphrase flag marks *confabulated*
+  overlap with authored secrets, not an actual leak of prompt content — the containment
+  regression checks pin exactly this split (`verbatim_echo_redacted`,
+  `paraphrased_confabulation_flagged`, `in_character_deflection_not_flagged`). Escalating a
+  flag to the repair pass would feed the hidden text into another generation to scrub a
+  maybe-overlap (a larger real exposure than the flag itself), and escalating to controlled
+  failure would raise the fail-closed rate for false-positive overlap on a personal-use app.
+  Revisit only if a real session produces a flagged paraphrase that reads as a genuine
+  disclosure — that concrete transcript reopens (b).
+- **#71 — Actor-stage transport failures keep the 503/504 contract; no turn row.** A
+  `ProviderTimeoutError`/`ProviderUnavailableError` before/during actor generation leaves
+  nothing worth persisting: no draft text exists, the player's message is not consumed, and
+  the correct client behavior is retry-same-message (the SPA's SSE client already aborts hung
+  streams). Persisting a controlled-failure turn there would write history/memory rows for
+  infrastructure blips and break clean retry semantics. The critic-stage asymmetry is
+  principled, not accidental: by critic time real actor text exists, and fail-closed
+  (persisted controlled failure) beats both silently dropping it and serving unvalidated text
+  (invariant #4). `tests/integration/test_provider_unavailability.py` continues to pin the
+  contract as intended behavior rather than an accident.
+
 ## Shipped 2026-07-01/02 (play-experience v1.2)
 
 The play-experience batch that landed on main alongside the decisions above. The SPA resume
@@ -433,7 +458,10 @@ Ordered by value. Effort S/M/L.
 
 ### Decision
 
-- [ ] **#68** *(decision, S)* **Paraphrase-flag policy is undocumented risk acceptance.**
+- [x] **#68** *(decision, S)* **Resolved 2026-07-12 — (a) accepted and recorded** under
+  "Decisions (2026-07-12)" above: warn-and-serve stays; paraphrase flags mark confabulated
+  overlap, not prompt leakage. Original item:
+  **Paraphrase-flag policy is undocumented risk acceptance.**
   `secret_guard.scan_reply` redacts verbatim hidden-fact echoes but only *flags* likely
   paraphrases; the orchestrator appends a warning and still persists and returns the flagged
   reply to the player. No layer repairs or withholds it, and no decision record says this is
@@ -529,8 +557,10 @@ Ordered by value. Effort S/M/L.
 
 ### Found while closing the docs/10 coverage gaps (2026-07-11)
 
-- [ ] **#71** *(decision, S)* **Actor-stage provider-transport failures bypass controlled
-  failure.** `TurnOrchestrator.run_turn` catches only `EmptyProviderResponseError` /
+- [x] **#71** *(decision, S)* **Resolved 2026-07-12 — (a) 503/504 contract kept and recorded**
+  under "Decisions (2026-07-12)" above: transport failure = transient, retryable, no turn row;
+  the pinning tests now document intended behavior. Original item:
+  **Actor-stage provider-transport failures bypass controlled failure.** `TurnOrchestrator.run_turn` catches only `EmptyProviderResponseError` /
   `TruncatedProviderResponseError` around actor generation; a raw transport error
   (`ProviderTimeoutError`/`ProviderUnavailableError`) propagates uncaught to the API/CLI caller —
   the API maps it to 503/504, but **no CONTROLLED_FAILURE turn is persisted** and the player's
