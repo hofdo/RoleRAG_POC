@@ -3,7 +3,41 @@
 Notable changes per release. The dated acceptance/report docs under `docs/` remain the deep
 records; this file is the quick delta between versions.
 
-## Unreleased
+## 1.3.0 — 2026-07-12
+
+### Fixed (found live)
+
+- **Lexical write-dedup false-dropped terse distinct facts** (#72): the always-on coverage
+  dedup dropped any candidate with ≥50% of its content terms contained in one existing
+  summary — terse phrasings of distinct facts crossed that bar on frame vocabulary alone
+  (found by the docs/25 Phase D 100-turn runs; run-dependent, since extractor phrasing
+  length varies). Dedicated `WRITE_DEDUP_COVERAGE_THRESHOLD = 0.75` for the dedup call site
+  (deterministic-fallback coverage unchanged at 0.5); both dedup warnings now name every
+  dropped summary, so drops are auditable from turn diagnostics (88cf2b5).
+- **Live-checkpoint late-recall probes were paraphrase-brittle**: `amber_ring_token` /
+  `north_stair_rendezvous` synonym groups widened to the extractor paraphrases a real run
+  produced ("symbol/promise/pledge/pact", "rendezvous"); assertions unchanged (1db74e7).
+
+### Validation (docs/24 + docs/25, all on `26b-mtp` + Qdrant)
+
+- **First real semantic-benchmark run** (docs/22 P0.4): `all-MiniLM-L6-v2` reranked overall
+  recall@10 **0.824** / nDCG@10 **0.761**, German subset 0.630; opt-in floors calibrated
+  0.3/0.2/0.30 → 0.75/0.70/0.55; the P1 measurement gate is open (75388f4).
+- **Live validation phases A–C green**: #48/#67 composition parity (14/14 PASS, 0 misses),
+  #69 context accounting (warnings fire at a 1024 ceiling, silent at the real 16384, no
+  llama.cpp context shift), #6 recency 0.02/0.04 no-regression at 8 turns — shipped default
+  stays 0.0 (c5a2a91, ccde1b3, a30d192).
+- **Phase D (P2.2 long-campaign preset) is blocked on P1.1, not on the preset** (#73):
+  consolidation fired and held SQLite/Qdrant parity across three 100-turn attempts, but
+  dense-only retrieval stops selecting direct-answer memories at ~50-memory pools — filed
+  with an offline-reproducible acceptance case for P1.1 hybrid retrieval / P2.5 rerank
+  (f7101d8).
+
+### Decisions
+
+- **#68**: paraphrase flags stay warn-and-serve (flags mark confabulated overlap with
+  authored secrets, not prompt leakage). **#71**: actor-stage transport failures keep the
+  503/504 contract with no persisted turn row (f430261).
 
 ### Added
 
