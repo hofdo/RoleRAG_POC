@@ -186,13 +186,21 @@ STORY_EVENTS = (
         key="amber_ring_token",
         definition_turn=55,
         callback_turn=65,
-        term_groups=(("amber",), ("ring",), ("wear", "sign", "token")),
+        # "symbol"/"promise"/"pledge"/"pact": observed extractor paraphrase of the scripted
+        # "wear it as a sign of my word" (docs/22 P2.2 first-run finding, 2026-07-12) --
+        # the memory read "symbol of a pact/promise" and the probe false-negatived.
+        term_groups=(
+            ("amber",),
+            ("ring",),
+            ("wear", "sign", "token", "symbol", "promise", "pledge", "pact"),
+        ),
     ),
     StoryEvent(
         key="north_stair_rendezvous",
         definition_turn=70,
         callback_turn=80,
-        term_groups=(("north",), ("stair", "stairs"), ("wait", "meet")),
+        # "rendezvous": same paraphrase-risk class as amber_ring_token's finding.
+        term_groups=(("north",), ("stair", "stairs"), ("wait", "meet", "rendezvous")),
     ),
 )
 
