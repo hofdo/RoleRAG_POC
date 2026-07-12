@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from app.domain import MemoryCandidate
 from app.memory import MemoryEpisodeStore
-from app.memory.deterministic_extractor import is_covered_by_summaries
+from app.memory.deterministic_extractor import (
+    WRITE_DEDUP_COVERAGE_THRESHOLD,
+    is_covered_by_summaries,
+)
 from app.memory.semantic_dedup import is_semantic_duplicate
 from app.orchestration.stages.session_summary_cache import SessionSummaryCache
 from app.rag.embeddings import EmbeddingProvider
@@ -46,14 +49,20 @@ class MemoryDeduplicator:
         if not existing:
             return candidates
         kept: list[MemoryCandidate] = []
+        dropped_summaries: list[str] = []
         for candidate in candidates:
-            if is_covered_by_summaries(candidate.summary, existing):
+            if is_covered_by_summaries(
+                candidate.summary, existing, threshold=WRITE_DEDUP_COVERAGE_THRESHOLD
+            ):
+                dropped_summaries.append(candidate.summary)
                 continue
             kept.append(candidate)
             existing.append(candidate.summary)
-        dropped = len(candidates) - len(kept)
-        if dropped:
-            warnings.append(f"memory dedup dropped {dropped} duplicate candidate(s)")
+        if dropped_summaries:
+            warnings.append(
+                f"memory dedup dropped {len(dropped_summaries)} duplicate candidate(s): "
+                + "; ".join(_snippet(s) for s in dropped_summaries)
+            )
         return self._drop_semantic_duplicates(
             candidates=kept,
             existing_summaries=existing[: len(existing) - len(kept)],
@@ -78,6 +87,7 @@ class MemoryDeduplicator:
         try:
             reference_vectors = list(self.embedding_provider.embed_batch(existing_summaries))
             kept: list[MemoryCandidate] = []
+            dropped_summaries: list[str] = []
             for candidate in candidates:
                 vector = self.embedding_provider.embed_text(candidate.summary)
                 if is_semantic_duplicate(
@@ -85,13 +95,24 @@ class MemoryDeduplicator:
                     reference_vectors,
                     threshold=self.write_dedup_cosine_threshold,
                 ):
+                    dropped_summaries.append(candidate.summary)
                     continue
                 kept.append(candidate)
                 reference_vectors.append(vector)
         except Exception as exc:
             warnings.append(f"semantic memory dedup skipped: {exc}")
             return candidates
-        dropped = len(candidates) - len(kept)
-        if dropped:
-            warnings.append(f"semantic memory dedup dropped {dropped} near-duplicate candidate(s)")
+        if dropped_summaries:
+            warnings.append(
+                f"semantic memory dedup dropped {len(dropped_summaries)} near-duplicate "
+                "candidate(s): " + "; ".join(_snippet(s) for s in dropped_summaries)
+            )
         return kept
+
+
+def _snippet(summary: str, limit: int = 80) -> str:
+    # The dropped text used to be unrecoverable — a live false-drop (docs/22 P2.2,
+    # 2026-07-12) took a DB diff against a prior run to diagnose. Warnings persist
+    # into turn diagnostics, so the snippet makes drops auditable after the fact.
+    text = summary if len(summary) <= limit else summary[: limit - 1] + "…"
+    return f'"{text}"'

@@ -15,7 +15,17 @@ from app.domain import MemoryCandidate, Visibility
 from app.rag.ranking import content_terms
 
 DETERMINISTIC_EVENT_IMPORTANCE = 4
+# Default for the deterministic-fallback "did the curator already cover this
+# explicit event" check (stages/memory.py) — unchanged at 0.5.
 COVERAGE_THRESHOLD = 0.5
+# Write-dedup drop threshold (stages/memory_dedup.py). At the old shared 0.5 a
+# terse distinct fact was silently dropped: "The player gave Iria Vale a silver
+# compass to keep until his return" hit 0.56 coverage against a compass-free
+# promise memory sharing only {player, iria, vale, keep, return} (docs/22 P2.2
+# live finding, 2026-07-12; run-dependent, since extractor phrasing length
+# varies). 0.75 keeps verbatim/near-verbatim repeats dropping (~1.0 coverage)
+# while a terse distinct fact survives.
+WRITE_DEDUP_COVERAGE_THRESHOLD = 0.75
 
 # Constant framing every deterministic candidate is wrapped in. Kept verbatim in
 # the stored summary (it keeps the exact event keys retrievable by the lexical

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain import Visibility
 from app.memory.deterministic_extractor import (
+    WRITE_DEDUP_COVERAGE_THRESHOLD,
     extract_explicit_durable_events,
     is_covered_by_summaries,
 )
@@ -187,3 +188,29 @@ def test_framing_prefix_still_dedups_identical_framed_fact() -> None:
     # No new false-writes: an identical framed fact still dedups after stripping.
     fact = 'The player stated: "I promise to guard the northern gate."'
     assert is_covered_by_summaries(fact, [fact])
+
+
+def test_terse_distinct_fact_survives_frame_vocabulary_overlap_at_dedup_threshold() -> None:
+    # docs/22 P2.2 live finding (2026-07-12): at the old shared 0.5 threshold this
+    # terse compass-gift candidate hit 0.56 coverage against a compass-free promise
+    # memory sharing only frame vocabulary {player, iria, vale, keep, return} and
+    # was silently dropped by write-dedup (run-dependent, since extractor phrasing
+    # length varies). The dedicated write-dedup threshold must keep it alive.
+    assert not is_covered_by_summaries(
+        "The player gave Iria Vale a silver compass to keep until his return.",
+        [
+            "The player promised to return to the archive before dawn, provided "
+            "Iria Vale keeps the archive door unbarred."
+        ],
+        threshold=WRITE_DEDUP_COVERAGE_THRESHOLD,
+    )
+
+
+def test_terse_near_verbatim_restatement_is_still_covered_at_dedup_threshold() -> None:
+    # No new false-writes at the raised threshold: a restatement carrying no new
+    # content terms still dedups against the original.
+    assert is_covered_by_summaries(
+        "The player gave Iria Vale a silver compass to keep.",
+        ["The player gave Iria Vale a silver compass to keep until his return."],
+        threshold=WRITE_DEDUP_COVERAGE_THRESHOLD,
+    )

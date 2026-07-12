@@ -574,6 +574,26 @@ Ordered by value. Effort S/M/L.
   outages and needs the SPA's error handling re-checked. Either way the tests document today's
   behavior; flip them with the decision.
 
+### Found by the docs/25 Phase D live runs (2026-07-12)
+
+- [x] **#72** *(correctness, S)* **Lexical write-dedup false-dropped terse distinct facts —
+  found live, fixed.** The always-on coverage dedup
+  (`app/orchestration/stages/memory_dedup.py` → `is_covered_by_summaries`) dropped any
+  candidate whose content terms were ≥50% contained in ONE existing summary. Terse
+  extractor phrasings of *distinct* facts cross that bar on frame vocabulary alone: the
+  docs/25 Phase D re-run's turn-21 compass gift ("player gave Iria Vale a silver compass to
+  keep until his return") hit 0.56 coverage against the compass-free dawn-promise memory
+  (shared terms: {player, iria, vale, keep, return}) and was silently dropped —
+  `memory_written: False`, later `CheckpointError` at the turn-31 callback. Run-dependent:
+  the first Phase D run's longer phrasing (9+ distinct terms) survived the same check.
+  **Shipped:** dedicated `WRITE_DEDUP_COVERAGE_THRESHOLD = 0.75` for the write-dedup call
+  site (near-verbatim restatements still drop at ~1.0 coverage); the deterministic-fallback
+  coverage check keeps the old `COVERAGE_THRESHOLD = 0.5` byte-identical. Both dedup
+  warnings now carry snippets of every dropped summary (the drop was previously
+  unrecoverable from diagnostics — it took a DB diff against the prior run to find).
+  Regression tests pin the compass/dawn pair verbatim. Live validation rides with the
+  Phase D re-run (docs/22 P2.2).
+
 ## Not doing (personal-use scope)
 
 StageGraph/DAG/plugin extensibility · hard memory-episode cap default (regressed recall) ·

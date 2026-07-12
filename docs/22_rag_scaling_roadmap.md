@@ -453,6 +453,21 @@ Effort S. — [ ]
 > a probe false-negative — or keep the vocabulary strict and accept paraphrase-sensitivity as
 > part of what the probe measures. Validate stays unchecked either way until a full 100-turn
 > pass exists.
+>
+> **Second run 2026-07-12 (probes widened) — FAILED at turn 31 with a REAL defect (fixed as
+> BACKLOG #72).** `CheckpointError: event silver_compass has no persisted matching memory` —
+> and this time the memory truly wasn't there: turn 21's diagnostics show the curator
+> extracted the compass-gift episode and the **always-on lexical write-dedup dropped it**
+> (`memory dedup dropped 1 duplicate candidate(s)`, `memory_written: False`). At the shared
+> `COVERAGE_THRESHOLD=0.5`, every natural terse phrasing of the gift scores 0.50–0.56
+> coverage against the compass-free dawn-promise memory on frame vocabulary alone
+> ({player, iria, vale, keep, return}) — verified by running `is_covered_by_summaries`
+> against the run's own SQLite rows. Run-dependent: run 1's longer phrasing survived, which
+> is also why 8–50-turn acceptance runs never tripped it. Not preset-related — the semantic
+> `0.92` knob was innocent (measured cosine for the pair: 0.50); this dedup is active in
+> every configuration. Fix (#72): dedicated `WRITE_DEDUP_COVERAGE_THRESHOLD=0.75` for the
+> dedup call site, deterministic-fallback coverage unchanged at 0.5, and both dedup warnings
+> now name the dropped summaries. Third run pending with the fix in place.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
