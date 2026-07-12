@@ -177,8 +177,9 @@ validation gate in docs/22.
   **Shipped:** the CLI now delegates to `build_orchestrator_config` and passes the two
   `MemoryIndexer` kwargs (`importance_floor`, `session_memory_max_episodes`);
   `tests/unit/test_composition_config_parity.py` pins that both roots produce the same config.
-  Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget)
-  (validation procedure: docs/25).
+  Gate green. Live-smoke validated 2026-07-12 (docs/25 Phase A, `26b-mtp`): CLI
+  structured-token budget change confirmed under a real model + Qdrant — 14/14 report steps
+  PASS, conversation checkpoint `status: pass`, 0 callback-recall / retrieval-selection misses.
 
 - [x] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
   `tests/integration/test_cli.py` patched `app.cli._backup_database` for `delete-session` /
@@ -419,11 +420,10 @@ Ordered by value. Effort S/M/L.
   providers and asserts `canon_repository`, `structured_failure_sink`, and
   `memory_embedding_provider` all reach the built orchestrator on both surfaces — the concrete #67
   regression tripwire — plus `test_cli_build_services_delegates_to_composition_build_services`
-  pinning the delegation itself. Gate green (85 regression checks). Live-smoke caveat, same as #48:
-  this changes real CLI turn behavior (canon facts now injected, structured failures now logged,
-  semantic dedup now reachable) — a live `bash scripts/live-smoke.sh` pass is advisable before
-  relying on it in a real session, since the deterministic gate can't exercise real canon-fact
-  retrieval quality or a live embedding backend (validation procedure: docs/25).
+  pinning the delegation itself. Gate green (85 regression checks). Live-smoke validated
+  2026-07-12 (docs/25 Phase A, `26b-mtp`): canon injection, structured-failure logging, and
+  semantic-dedup reachability confirmed under a real model + Qdrant — 14/14 report steps PASS,
+  conversation checkpoint `status: pass`, 0 callback-recall / retrieval-selection misses.
 
 ### Decision
 
