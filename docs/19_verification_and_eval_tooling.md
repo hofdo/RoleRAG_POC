@@ -1,6 +1,6 @@
 # 19 — Verification & Eval Tooling
 
-> Reviewed: 2026-07-10 @ 61e45b6
+> Reviewed: 2026-07-12 @ ea31def
 
 ## Purpose
 
@@ -27,6 +27,7 @@ carries the deep operational detail those keep a summary of.
 | [`scripts/ab-sweep.sh`](../scripts/ab-sweep.sh) | One-factor-at-a-time (OFAT) sweep over RAG memory/retrieval knobs, wrapping `live-smoke.sh` | `MODEL_PROFILE`, `TURNS`, `TOP_K`, `OUT` |
 | [`scripts/test-local-model-matrix.sh`](../scripts/test-local-model-matrix.sh) | Deterministic checks once, then the full **live** stack sequentially for the `small` and `26b` profiles (hours of real generation), aggregated by `app.diagnostics.model_comparison`; see [14](14_local_model_comparison_2026-06-08.md) and the section below | `PYTHON`, `MODEL_COMPARE_ARTIFACT_DIR`, `MODEL_COMPARE_TURN_COUNT` |
 | [`scripts/dev-up.sh`](../scripts/dev-up.sh) / [`scripts/dev-down.sh`](../scripts/dev-down.sh) | Bring the full dev stack up/down (used by `make dev`) | `DEV_API_PORT` |
+| [`scripts/semantic-benchmark.sh`](../scripts/semantic-benchmark.sh) | One-command real-embedding recall@k/nDCG/MRR benchmark over the graded semantic corpus (docs/22 P0.4; walkthrough: [docs/24](24_semantic_benchmark_runbook.md)) — no Qdrant/API/model server needed. Wraps the resilient `rolerag semantic-benchmark --json` CLI, prints suggested floors via `scripts/lib/suggest_floors.py`, and optionally runs the opt-in `-m semantic` pytest tier | `MODELS`, `TOP_K`, `INCLUDE_KEYWORD`, `RUN_PYTEST`, `ARTIFACT_PATH` |
 
 The scripts source shared helpers from `scripts/lib/`: process lifecycle
 (`process-lifecycle.sh`), the local-model launch profiles

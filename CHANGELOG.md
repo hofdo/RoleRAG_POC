@@ -35,6 +35,18 @@ records; this file is the quick delta between versions.
   helper — idempotent, fail-open; a failed ingest degrades to a new
   `CreateSessionResponse.warnings: list[str]` instead of failing session creation. New additive
   request field `skip_lore_ingest: bool = false` (CLI parity: `--skip-lore-ingest`).
+- **Resilient `semantic-benchmark` CLI + one-command runner + runbook** (docs/22 P0.4):
+  `rolerag semantic-benchmark` now tries each `--model`/`--keyword` provider independently
+  instead of aborting the whole run on the first failure — a bad model name or a blocked
+  download is logged to stderr (`[failed] <label>: <ExceptionType>: <message>`) and skipped,
+  stdout stays machine-pure JSON/table for whichever providers succeeded, and the command still
+  exits non-zero if any provider failed. New `scripts/semantic-benchmark.sh` wraps the CLI
+  end to end (env-configured: `MODELS`/`TOP_K`/`INCLUDE_KEYWORD`/`RUN_PYTEST`/`ARTIFACT_PATH`),
+  writing the `--json` artifact, printing a suggested-floor summary against it via new
+  `scripts/lib/suggest_floors.py`, and optionally running the opt-in `-m semantic` pytest tier.
+  New runbook [docs/24](docs/24_semantic_benchmark_runbook.md) walks the first real-model run
+  end to end and the floor-calibration procedure for
+  `tests/evals/test_semantic_benchmark_opt_in.py` (ea31def).
 
 ### Changed
 
