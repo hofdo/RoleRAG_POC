@@ -1,0 +1,695 @@
+[
+  {
+    "provider_label": "sentence-transformers/all-MiniLM-L6-v2",
+    "raw": {
+      "german": {
+        "mrr": 0.05,
+        "ndcg_at_10": 0.07542619854554293,
+        "query_count": 9,
+        "recall_at_10": 0.2037037037037037,
+        "recall_at_5": 0.037037037037037035,
+        "recall_at_5_strict": 0.0
+      },
+      "label": "raw dense (single-query, no rerank boosts)",
+      "overall": {
+        "mrr": 0.4373015873015873,
+        "ndcg_at_10": 0.4700722202125475,
+        "query_count": 36,
+        "recall_at_10": 0.662037037037037,
+        "recall_at_5": 0.49074074074074076,
+        "recall_at_5_strict": 0.5555555555555556
+      },
+      "per_query": [
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8761167481364122,
+          "query_id": "q-en-meravelle-doubled-watch",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.6666666666666666,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.2,
+          "ndcg_at_10": 0.24711688711205218,
+          "query_id": "q-en-meravelle-lost-eye",
+          "recall_at_10": 0.3333333333333333,
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-en-meravelle-eats-alone",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-amber-ring-vault",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7601875334318685,
+          "query_id": "q-en-amber-ring-legend",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "query_id": "q-en-amber-ring-theft",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.16666666666666666,
+          "ndcg_at_10": 0.13539213147917573,
+          "query_id": "q-en-thornwell-collapse",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.125,
+          "ndcg_at_10": 0.31546487678572877,
+          "query_id": "q-en-thornwell-border",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.14285714285714285,
+          "ndcg_at_10": 0.3333333333333333,
+          "query_id": "q-en-thornwell-haunted",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-locks-grain",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-frostbite",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-loans-coin",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-orin-bone-needles",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.5492749821134021,
+          "query_id": "q-en-orin-smugglers",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.6666666666666666,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-orin-sleep",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7373230204909161,
+          "query_id": "q-en-grain-mystery",
+          "recall_at_10": 0.6666666666666666,
+          "recall_at_5": 0.6666666666666666,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.125,
+          "ndcg_at_10": 0.23981246656813146,
+          "query_id": "q-en-blue-cloth-found",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-blue-cloth-secret",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8670870086853021,
+          "query_id": "q-en-lantern-loan",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9197207891481876,
+          "query_id": "q-en-orin-herbs-request",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.16666666666666666,
+          "ndcg_at_10": 0.39069049624241714,
+          "query_id": "q-en-crypt-key-found",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.6934264036172708,
+          "query_id": "q-en-crypt-key-holder",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.5338931479009518,
+          "query_id": "q-en-thessaly-letter",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.2,
+          "ndcg_at_10": 0.38685280723454163,
+          "query_id": "q-en-thessaly-patron",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.25,
+          "ndcg_at_10": 0.3273949503887395,
+          "query_id": "q-en-beacon-relay-mechanism",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.25,
+          "ndcg_at_10": 0.43067655807339306,
+          "query_id": "q-en-granary-siege-reason",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-en-warden-garrison-duty",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.125,
+          "ndcg_at_10": 0.31546487678572877,
+          "query_id": "q-de-albrecht-crystal-diggers",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-chapel-origin",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-amber-ring",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.125,
+          "ndcg_at_10": 0.23981246656813146,
+          "query_id": "q-de-albrecht-bridge-warning",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-disappearance",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-crypt-mark",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-books-sealed",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.2,
+          "ndcg_at_10": 0.12355844355602609,
+          "query_id": "q-de-albrecht-beacon-letter",
+          "recall_at_10": 0.3333333333333333,
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-ring-margin-note",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        }
+      ]
+    },
+    "reranked": {
+      "german": {
+        "mrr": 0.6481481481481481,
+        "ndcg_at_10": 0.5917249465089701,
+        "query_count": 9,
+        "recall_at_10": 0.6296296296296297,
+        "recall_at_5": 0.6296296296296297,
+        "recall_at_5_strict": 0.8888888888888888
+      },
+      "label": "reranked (production ActorContextRetriever)",
+      "overall": {
+        "mrr": 0.7824074074074074,
+        "ndcg_at_10": 0.7607558077415962,
+        "query_count": 36,
+        "recall_at_10": 0.8240740740740741,
+        "recall_at_5": 0.7916666666666666,
+        "recall_at_5_strict": 0.9444444444444444
+      },
+      "per_query": [
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7395454574298492,
+          "query_id": "q-en-meravelle-doubled-watch",
+          "recall_at_10": 0.6666666666666666,
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.4030302838010049,
+          "query_id": "q-en-meravelle-lost-eye",
+          "recall_at_10": 0.3333333333333333,
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-meravelle-eats-alone",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-amber-ring-vault",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7601875334318685,
+          "query_id": "q-en-amber-ring-legend",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-amber-ring-theft",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.543791241910304,
+          "query_id": "q-en-thornwell-collapse",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.25,
+          "ndcg_at_10": 0.43067655807339306,
+          "query_id": "q-en-thornwell-border",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-thornwell-haunted",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-locks-grain",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-frostbite",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-udo-loans-coin",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-orin-bone-needles",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.6470504156916099,
+          "query_id": "q-en-orin-smugglers",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.6666666666666666,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-orin-sleep",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-grain-mystery",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8746071583782724,
+          "query_id": "q-en-blue-cloth-found",
+          "recall_at_10": 1.0,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-blue-cloth-secret",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9050405422041714,
+          "query_id": "q-en-lantern-loan",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9197207891481876,
+          "query_id": "q-en-orin-herbs-request",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-crypt-key-found",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.6509209298071326,
+          "query_id": "q-en-crypt-key-holder",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8597186998521972,
+          "query_id": "q-en-thessaly-letter",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-thessaly-patron",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.25,
+          "ndcg_at_10": 0.3273949503887395,
+          "query_id": "q-en-beacon-relay-mechanism",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "query_id": "q-en-granary-siege-reason",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "en",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-en-warden-garrison-duty",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "query_id": "q-de-albrecht-crystal-diggers",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.38009376671593426,
+          "query_id": "q-de-albrecht-chapel-origin",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.4796249331362629,
+          "query_id": "q-de-albrecht-amber-ring",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7601875334318685,
+          "query_id": "q-de-albrecht-bridge-warning",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "query_id": "q-de-albrecht-disappearance",
+          "recall_at_10": 0.0,
+          "recall_at_5": 0.0,
+          "recall_at_5_strict": 0.0
+        },
+        {
+          "language": "de",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7601875334318685,
+          "query_id": "q-de-albrecht-crypt-mark",
+          "recall_at_10": 0.5,
+          "recall_at_5": 0.5,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "query_id": "q-de-albrecht-books-sealed",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7763433706236033,
+          "query_id": "q-de-albrecht-beacon-letter",
+          "recall_at_10": 0.6666666666666666,
+          "recall_at_5": 0.6666666666666666,
+          "recall_at_5_strict": 1.0
+        },
+        {
+          "language": "de",
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9072278740982787,
+          "query_id": "q-de-albrecht-ring-margin-note",
+          "recall_at_10": 1.0,
+          "recall_at_5": 1.0,
+          "recall_at_5_strict": 1.0
+        }
+      ]
+    }
+  }
+]

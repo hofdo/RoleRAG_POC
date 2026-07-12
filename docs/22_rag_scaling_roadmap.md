@@ -241,8 +241,10 @@ relevance judgments is the long pole; today's `embedding-ab` pool is only 9 item
 5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). —
 [~] offline half shipped (corpus, metrics, harness, CLI, `-m semantic` marker — see the
 shipped note above); runbook + one-command runner + floor calibration shipped (see
-[docs/24](24_semantic_benchmark_runbook.md)); real-model numbers still pending (see docs/24
-run log); item 4's transcript-derived queries also still open.
+[docs/24](24_semantic_benchmark_runbook.md)); **real-model numbers landed 2026-07-12**
+(`all-MiniLM-L6-v2`: reranked overall recall@10 0.824 / nDCG@10 0.761, German recall@10
+0.630 — docs/24 run log; floors calibrated to 0.75/0.70/0.55) — **the P1 gate is open**;
+item 4's transcript-derived queries still open.
 
 ---
 

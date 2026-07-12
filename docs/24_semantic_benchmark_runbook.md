@@ -1,6 +1,6 @@
 # 24 — Semantic Benchmark Runbook
 
-> Reviewed: 2026-07-12 @ ea31def
+> Reviewed: 2026-07-12 @ c2f4ecb
 
 How to run the first real-embedding-model pass through the graded semantic corpus. This is
 the measurement gate described in
@@ -142,7 +142,7 @@ alongside the row that references them.
 
 | date | commit | model | reranked overall recall@10 | reranked overall nDCG@10 | reranked german recall@10 | artifact | action taken |
 |------|--------|-------|-----------------------------|----------------------------|-----------------------------|----------|---------------|
-| | | | | | | | |
+| 2026-07-12 | c2f4ecb | `sentence-transformers/all-MiniLM-L6-v2` | 0.824 | 0.761 | 0.630 | [semantic-benchmark-2026-07-12.json](artifacts/semantic-benchmark-2026-07-12.json) | Floors calibrated 0.3/0.2/0.30 → 0.75/0.70/0.55; opt-in tier re-run green (4 passed). No P0.4 finding — all provisional floors cleared; reranked beats raw dense by +0.162 recall@10. P1 gate open. |
 
 ## Next: P1.2 candidates
 

@@ -18,10 +18,12 @@ semantic"` selection works once the env var is set; the skip itself is
 env-var-driven rather than purely marker-driven so that an unadorned `pytest` run
 -- which does not pass `-m` at all -- still never downloads anything.
 
-Floors below are PROVISIONAL and deliberately generous: this is the first real
-run this corpus has ever had (the offline half of P0.4 ships the corpus + harness
-without a real-model run, per the environment constraint above). Calibrate these
-floors on the owner's first real run and tighten them -- see docs/22 P0.4.
+Floors below are CALIBRATED from the first real run (2026-07-12, docs/24 run log:
+`all-MiniLM-L6-v2`, reranked overall recall@10 0.824 / nDCG@10 0.761 / German
+recall@10 0.630, artifact `docs/artifacts/semantic-benchmark-2026-07-12.json`),
+set via `scripts/lib/suggest_floors.py`'s margin below the measured values. A
+failure now means a real regression against that measured baseline -- investigate
+per docs/22 P0.4, do not lower the floor to pass.
 """
 
 from __future__ import annotations
@@ -48,17 +50,15 @@ pytestmark = [
     ),
 ]
 
-# Provisional, generous floors -- see the module docstring. A real MiniLM-class
-# model should clear these comfortably once run; if it doesn't, that is itself a
-# P0.4 finding worth recording in docs/22, not a reason to lower the floor further
-# without investigation.
-_MIN_RECALL_AT_10 = 0.3
-_MIN_NDCG_AT_10 = 0.2
+# Calibrated floors -- see the module docstring for the measured baseline they
+# derive from. A failure is a P0.4 finding worth recording in docs/22, not a
+# reason to lower the floor without investigation.
+_MIN_RECALL_AT_10 = 0.75
+_MIN_NDCG_AT_10 = 0.70
 # Lower than the overall floor -- the default `all-MiniLM-L6-v2` baseline is
-# English-only (docs/22 P1.2), so German queries are expected to score weaker. Still a
-# real, failable floor (not a vacuous >= 0.0): generous for a MiniLM-class model on
-# graded relevance, provisional exactly like the floors above pending the real-model run.
-_MIN_GERMAN_RECALL_AT_10 = 0.30
+# English-only (docs/22 P1.2), so German queries score weaker (measured 0.630 vs
+# 0.824 overall); closing that gap is P1.2's motivation. Still a real, failable floor.
+_MIN_GERMAN_RECALL_AT_10 = 0.55
 
 
 @pytest.fixture(scope="module")
