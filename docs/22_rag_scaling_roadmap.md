@@ -431,6 +431,28 @@ Effort S. — [ ]
 > from the checkpoint JSON: `persisted.consolidated_memory_count` /
 > `consolidation_summary_count` (proves consolidation fired) and the late-recall callback
 > misses (proves it didn't cost recall). The run itself is still pending.
+>
+> **First run 2026-07-12 — FAILED at turn 65 (finding recorded, docs/25 § If something
+> fails).** Full preset on `26b-mtp` (`THRESHOLD=40 MAX_IMPORTANCE=2 MIN_AGE=10 BATCH_CAP=15
+> DEDUP=0.92 RECENCY=0.02 LIVE_TURN_COUNT=100`, artifact `/tmp/rolerag-live-D`): 13/14 report
+> steps PASS, then `CheckpointError: event amber_ring_token has no persisted matching memory`
+> at the turn-65 callback inspection; checkpoint JSON `status: in_progress`, 64 turns.
+> **Root cause is probe vocabulary, not memory loss and not consolidation**: the turn-55 fact
+> was extracted, persisted (importance 2, `player`, un-consolidated), and its summary reads
+> *"The player gave Iria Vale an amber ring as a symbol of a pact/promise"* — `semantic_match`
+> requires one term from each group and the third group is `("wear","sign","token")`, none of
+> which survive the extractor's legitimate paraphrase ("symbol … pact/promise"). The pipeline
+> did its job; the harness's synonym list didn't anticipate the paraphrase. Positive evidence
+> from the same run before the abort: consolidation **fired** (15 rows tagged `consolidated` —
+> exactly one `BATCH_CAP=15` batch — plus 1 roll-up summary), all five pre-turn-50 probes
+> passed inspection, and the turn-17 `hollow_bookend_note` memory **survived the consolidation
+> pass un-folded and still probe-matchable** at turn 64 (its turn-95 callback never ran).
+> Open decision before re-running: widen `amber_ring_token`'s third term group (e.g. add
+> "symbol"/"pledge"/"promise") as a harness-vocabulary fix — the docs/25 no-loosening rule
+> targets assertions and thresholds; a synonym gap that misses a semantically intact memory is
+> a probe false-negative — or keep the vocabulary strict and accept paraphrase-sensitivity as
+> part of what the probe measures. Validate stays unchecked either way until a full 100-turn
+> pass exists.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
