@@ -108,7 +108,10 @@ persona header are exactly what gets shifted out first.
 
 **Validate.** Unit tests on the estimator + a live-smoke run with a deliberately oversized
 scenario; check the warning fires and llama-server logs show no context shift afterwards.
-Effort S–M. — [ ]
+Effort S–M. — [x] live-validated 2026-07-12 (docs/25 Phase B, `26b-mtp`): sanity run at
+`MODEL_CONTEXT_WINDOW_TOKENS=1024` fired 7 preflight + 5 actual-usage warnings (wiring
+proven); real run at `16384` (matching `-c`) fired 0/0 (prompts legitimately under the 85%
+ratio); `grep -i "context shift" raw/llama-server.log` empty on both runs.
 
 ### P0.2 Raise the local context window deliberately (and document the VRAM math)
 

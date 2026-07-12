@@ -484,12 +484,12 @@ Ordered by value. Effort S/M/L.
   ran, `None` when the actor fails before any generation, diagnostics-round-trip parity),
   `tests/unit/test_repositories.py` (a hand-written pre-#69 `diagnostics_json` payload with no
   `token_usage` key still deserializes), `tests/unit/test_config.py` (new-key defaults and
-  overrides). **PENDING:** the llama.cpp validation half of the acceptance criterion — comparing
-  the preflight warning against real llama-server logs on a deliberately oversized scenario — is
-  NOT yet done. The deterministic offline gate (ruff/mypy/pytest/regression_runner) cannot see
-  this; it requires `bash scripts/live-smoke.sh` against a real local model with
-  `MODEL_CONTEXT_WINDOW_TOKENS` set to that model's actual context size, which has not been run
-  for this change (validation procedure: docs/25).
+  overrides). **Live-validated 2026-07-12** (docs/25 Phase B, `26b-mtp`, two 8-turn live-smoke runs):
+  sanity run at `MODEL_CONTEXT_WINDOW_TOKENS=1024` → `context_preflight_warning_count=7`,
+  `context_actual_warning_count=5` (warning wiring fires against a real model); real run at
+  `MODEL_CONTEXT_WINDOW_TOKENS=16384` (matching the profile's `-c 16384`) → 0/0 (prompts
+  legitimately under the 85% warn ratio). `grep -i "context shift" raw/llama-server.log`
+  empty on both runs — no eviction. Both checkpoints `status: pass`, 0 recall misses.
 
 ### Testing
 
