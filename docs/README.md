@@ -1,6 +1,6 @@
 # RoleRAG Documentation
 
-> Reviewed: 2026-07-10 @ 24d4aab
+> Reviewed: 2026-07-12 @ ea31def
 
 Navigation hub for the RoleRAG docs. New here? Start with the root
 [README](../README.md) (setup, Docker, CLI/API usage), then use the diagrams and
@@ -114,6 +114,7 @@ flowchart TD
 | [21_fable_handoff_reasoning](21_fable_handoff_reasoning.md) | Predecessor-agent handoff (2026-07-07): reasoning chains behind the architecture, analysis method, decision record, working agreements for successor agents |
 | [22_rag_scaling_roadmap](22_rag_scaling_roadmap.md) | Verified RAG-core roadmap for larger scenarios on ~27B local models: token budget, eval assets, hybrid retrieval, chunking, long-campaign presets |
 | [23_embedding_migration_runbook](23_embedding_migration_runbook.md) | How to swap `EMBEDDING_MODEL` safely: reset-index → re-ingest → reindex-memories per session, fingerprint guards, failure modes, rollback |
+| [24_semantic_benchmark_runbook](24_semantic_benchmark_runbook.md) | First real-embedding-model semantic-benchmark run: prerequisites, the one-command runner, reading recall@k/nDCG/MRR numbers, floor calibration, run log |
 
 ## Planning & roadmap
 
@@ -155,8 +156,10 @@ mandatory-docs-sweep conventions.
 | [play-experience-v1.2](superpowers/plans/2026-07-01-play-experience-v1.2.md) | Durability, reroll, scene/persona switching, stage SSE, cross-session persona memory (merged 2026-07-01/02) |
 | [session-bound-provider](superpowers/plans/2026-07-02-session-bound-provider.md) | Provider bound once at session creation; automatic cloud paths removed (merged 2026-07-02/03) |
 
-`docs/artifacts/` holds supporting assets (e.g. the local-model-comparison run) referenced
-by [14_local_model_comparison_2026-06-08](14_local_model_comparison_2026-06-08.md).
+`docs/artifacts/` holds supporting assets: the local-model-comparison run referenced by
+[14_local_model_comparison_2026-06-08](14_local_model_comparison_2026-06-08.md), and the dated
+`semantic-benchmark-<date>.json` runs referenced by
+[24_semantic_benchmark_runbook](24_semantic_benchmark_runbook.md)'s run log.
 
 ---
 
@@ -198,7 +201,7 @@ headers it touches. See [superpowers/plans/README.md](superpowers/plans/README.m
 **Living docs** (the set the sweep covers, each carrying a `Reviewed:` header):
 
 - root `README.md`, root `CLAUDE.md` (agent entry point), and `frontend/README.md`
-- this hub (`docs/README.md`) and the numbered docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`22`
+- this hub (`docs/README.md`) and the numbered docs `01`–`06`, `08`, `09`, `10`, `12`, `17`–`24`
   (the reasoning chains in `21` are a point-in-time record; its pointers are living)
 - `docs/GLOSSARY.md`, `docs/BACKLOG.md`, `docs/SIDE_PROJECTS.md`
 

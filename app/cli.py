@@ -674,6 +674,14 @@ def semantic_benchmark(
     is the single command for a real embedding-model benchmark run, e.g.:
 
         rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2
+
+    Providers are tried independently: a provider that fails (unknown model name,
+    blocked/failed download, or any other error) is logged to stderr as
+    ``\[failed] <label>: <ExceptionType>: <message>`` and skipped, without aborting
+    providers still queued. stdout stays machine-pure (JSON array or table) for
+    whichever providers succeeded; the table is only emitted when at least one did.
+    The command still exits non-zero if any provider failed, even if others
+    succeeded, so scripting can detect partial failure from the exit code alone.
     """
     from dataclasses import asdict
 
@@ -701,6 +709,7 @@ def semantic_benchmark(
     )
 
     reports: list[SemanticBenchmarkReport] = []
+    failures: list[tuple[str, Exception]] = []
     for label, provider in providers:
         try:
             reports.append(
@@ -708,16 +717,30 @@ def semantic_benchmark(
                     embedding_provider=provider, provider_label=label, top_k=top_k
                 )
             )
-        except ImportError as exc:
-            typer.echo(str(exc))
-            raise typer.Exit(code=1) from exc
+        except Exception as exc:
+            # KeyboardInterrupt/SystemExit are BaseException, not Exception, so they
+            # still propagate -- only per-provider failures (bad model name, blocked
+            # download, ...) are tolerated here.
+            failures.append((label, exc))
+            typer.secho(
+                f"[failed] {label}: {type(exc).__name__}: {exc}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            continue
 
     if json_output:
-        typer.echo(
-            json.dumps([asdict(report) for report in reports], indent=2, sort_keys=True)
-        )
-    else:
+        typer.echo(json.dumps([asdict(report) for report in reports], indent=2, sort_keys=True))
+    elif reports:
         typer.echo(_render_semantic_benchmark_table(reports))
+
+    if failures:
+        typer.secho(
+            f"{len(failures)} of {len(providers)} providers failed.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
 
 def _render_semantic_benchmark_table(reports: Sequence[SemanticBenchmarkReport]) -> str:

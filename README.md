@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-> Reviewed: 2026-07-10 @ 9097877
+> Reviewed: 2026-07-12 @ ea31def
 
 Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
@@ -424,6 +424,15 @@ offline A/B; models download on first use):
 
 ```bash
 python -m app.cli embedding-ab --model BAAI/bge-small-en-v1.5
+```
+
+Score real FastEmbed embedding models on the graded semantic corpus — recall@k/nDCG/MRR,
+LLM-free, no Qdrant or API server needed (see [docs/24](docs/24_semantic_benchmark_runbook.md)
+for the first-run walkthrough):
+
+```bash
+bash scripts/semantic-benchmark.sh
+python -m app.cli semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2 --json
 ```
 
 Inspect ranked retrieval for a query without calling an LLM:

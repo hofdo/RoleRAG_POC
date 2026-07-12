@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-11 @ 4f6822b
+> Reviewed: 2026-07-12 @ ea31def
 >
 > **Update 2026-07-11 (P0.4, offline half).** Graded-relevance corpus + recall@k/nDCG
 > benchmark harness shipped (see the
@@ -202,6 +202,13 @@ Effort S. — [x]
 > the authoring environment (proxy 403), so no real numbers exist yet; floor calibration in the
 > opt-in tier once that run lands; item 4's transcript-derived query subset (needs real play
 > exports via `export-session`), explicitly out of scope for this commit.
+>
+> **Runbook shipped 2026-07-12** — [docs/24](24_semantic_benchmark_runbook.md) walks the first
+> real-model run end to end: a resilient `rolerag semantic-benchmark` CLI (per-provider failure
+> tolerance), the one-command `scripts/semantic-benchmark.sh` runner (writes the `--json`
+> artifact, prints suggested floors via `scripts/lib/suggest_floors.py`, optionally runs the
+> opt-in pytest tier), and the floor-calibration procedure for
+> `tests/evals/test_semantic_benchmark_opt_in.py`.
 
 **Problem.** The deterministic harness uses keyword embeddings + `InMemoryVectorStore` — it
 pins engine logic, **not semantic quality**; `embedding-ab` ranks a small seeded event set
@@ -226,8 +233,9 @@ unmeasured (not unmeasurable) until the owner runs a real embedding model throug
 relevance judgments is the long pole; today's `embedding-ab` pool is only 9 items —
 5 seeded events + 2 smalltalk + 2 lore chunks — which is why BACKLOG #10 "tied"). —
 [~] offline half shipped (corpus, metrics, harness, CLI, `-m semantic` marker — see the
-shipped note above); still open: the real-model run itself, floor calibration from it, and
-item 4's transcript-derived queries.
+shipped note above); runbook + one-command runner + floor calibration shipped (see
+[docs/24](24_semantic_benchmark_runbook.md)); real-model numbers still pending (see docs/24
+run log); item 4's transcript-derived queries also still open.
 
 ---
 
