@@ -1,6 +1,6 @@
 # 19 — Verification & Eval Tooling
 
-> Reviewed: 2026-07-12 @ ea31def
+> Reviewed: 2026-07-12 @ b854814
 
 ## Purpose
 
@@ -221,6 +221,9 @@ copy names the same `EVAL_RESULTS_DIR` layout. Full endpoint shapes and error co
 
 - root [README — Runtime Verification](../README.md#runtime-verification) — the quickstart
   summary and safe diagnostics.
+- [25_live_validation_runbook.md](25_live_validation_runbook.md) — chains the pending
+  live-validation passes (#48/#67 baseline, #69 context accounting, #6 recency, the P2.2
+  long-campaign preset) into one guided sitting on top of the tooling described here.
 - [12_api_contract.md](12_api_contract.md#eval-runs) — the Eval Runs HTTP surface.
 - [16_mtp_speculative_decoding_2026-06-29.md](16_mtp_speculative_decoding_2026-06-29.md) —
   the `26b-mtp` speculative-decoding measurement.

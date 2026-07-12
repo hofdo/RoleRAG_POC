@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-> Reviewed: 2026-07-12 @ ea31def
+> Reviewed: 2026-07-12 @ b854814
 
 Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
@@ -481,6 +481,10 @@ managed-server command and shutdown behavior, the `LOCAL_MODEL_PROFILE` matrix
 (`small`/`26b`/`26b-mtp`), the `LLAMA_CPP_*` overrides, `LIVE_TURN_COUNT` (`5`–`100`),
 `LIVE_FAIL_ON_STRUCTURED_WARNINGS`, and the model bake-off / secret-probe / RAG A/B harnesses —
 live in [docs/19_verification_and_eval_tooling.md](docs/19_verification_and_eval_tooling.md).
+Once you have a real `llama-server` + Qdrant stack available,
+[docs/25_live_validation_runbook.md](docs/25_live_validation_runbook.md) chains the pending
+live-validation passes (#48/#67 CLI/API parity, #69 context accounting, #6 recency, the P2.2
+long-campaign preset) into one guided sitting.
 
 Operational rules:
 

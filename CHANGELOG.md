@@ -47,6 +47,15 @@ records; this file is the quick delta between versions.
   New runbook [docs/24](docs/24_semantic_benchmark_runbook.md) walks the first real-model run
   end to end and the floor-calibration procedure for
   `tests/evals/test_semantic_benchmark_opt_in.py` (ea31def).
+- **Live-checkpoint evidence for consolidation + context accounting** (prep for the docs/22
+  P2.2 long-campaign preset and #69's live validation): the live checkpoint JSON now reports
+  `persisted.consolidated_memory_count` / `persisted.consolidation_summary_count` (SQLite rows
+  tagged `CONSOLIDATED_TAG`/`SUMMARY_TAG`, proving a long run actually rolled memories up) and
+  `quality_metrics.context_preflight_warning_count` / `context_actual_warning_count`
+  (aggregated #69 context-accounting warnings) — all report-only, zero on any run with
+  consolidation or the context ceiling left off (b854814). New runbook
+  [docs/25](docs/25_live_validation_runbook.md) chains this evidence with the three other
+  pending live validations (#48/#67, #69, #6) into one guided sitting.
 
 ### Changed
 

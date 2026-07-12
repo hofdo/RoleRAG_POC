@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-12 @ ea31def
+> Reviewed: 2026-07-12 @ b854814
 >
 > **Update 2026-07-11 (P0.4, offline half).** Graded-relevance corpus + recall@k/nDCG
 > benchmark harness shipped (see the
@@ -71,6 +71,13 @@ claim after it is unverifiable without better eval assets.
 ## P0 — before authoring bigger scenarios
 
 ### P0.1 Token-aware context accounting (today: zero token counting anywhere)
+
+> **Validation procedure ready 2026-07-12** —
+> [docs/25](25_live_validation_runbook.md) Phase B chains the sanity run (deliberately tiny
+> `MODEL_CONTEXT_WINDOW_TOKENS`, proving the warning fires) and the real-ctx run (matching the
+> profile's actual context window) this item's own Validate step calls for, and states exactly
+> what to read from the checkpoint JSON and the llama-server log. The runs themselves are
+> still pending (docs/BACKLOG.md #69).
 
 **Problem.** Every budget in the engine is characters or item counts
 ([app/orchestration/context_budget.py](../app/orchestration/context_budget.py),
@@ -412,6 +419,13 @@ detail of filtering, semantics identical — parity holds).
 Effort S. — [ ]
 
 ### P2.2 Long-campaign preset (enable the shipped-but-off machinery, with evidence)
+
+> **Validation procedure ready 2026-07-12** —
+> [docs/25](25_live_validation_runbook.md) Phase D chains the full preset (including § C2's
+> min-age/batch-cap knobs) with `LIVE_TURN_COUNT=100`, and states exactly what evidence to read
+> from the checkpoint JSON: `persisted.consolidated_memory_count` /
+> `consolidation_summary_count` (proves consolidation fired) and the late-recall callback
+> misses (proves it didn't cost recall). The run itself is still pending.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
