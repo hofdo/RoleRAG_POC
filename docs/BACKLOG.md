@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-11 @ a20bfc5
+> Reviewed: 2026-07-12 @ b854814
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -48,7 +48,7 @@ no longer exists. Order was value + independence, decisions last; each item was 
   scores + boosts). Historical per-turn via #8's endpoint = future extension
 - [x] **#6** importance-aware recency boost — **opt-in** (`RAG_RECENCY_WEIGHT`, default 0.0,
   byte-identical); recency scaled by importance so it can't displace older high-importance memories;
-  offline sweep 85/85, validate via live-smoke before enabling
+  offline sweep 85/85, validate via live-smoke before enabling (validation procedure: docs/25)
 - [x] **#19** structured turn errors — additive `errors` (category/stage/message/suggestion) on the
   API/SSE turn responses, derived from the warning strings via `classify_warnings()`; non-breaking
   (warnings preserved, TurnResult unchanged, no 78-site churn). Frontend display = future extension
@@ -177,7 +177,8 @@ validation gate in docs/22.
   **Shipped:** the CLI now delegates to `build_orchestrator_config` and passes the two
   `MemoryIndexer` kwargs (`importance_floor`, `session_memory_max_episodes`);
   `tests/unit/test_composition_config_parity.py` pins that both roots produce the same config.
-  Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget).
+  Gate green. Still worth a live-smoke pass (it changes the CLI structured-token budget)
+  (validation procedure: docs/25).
 
 - [x] **#49** **Auto-snapshot before destructive CLI ops is mocked but never asserted-called.**
   `tests/integration/test_cli.py` patched `app.cli._backup_database` for `delete-session` /
@@ -422,7 +423,7 @@ Ordered by value. Effort S/M/L.
   this changes real CLI turn behavior (canon facts now injected, structured failures now logged,
   semantic dedup now reachable) — a live `bash scripts/live-smoke.sh` pass is advisable before
   relying on it in a real session, since the deterministic gate can't exercise real canon-fact
-  retrieval quality or a live embedding backend.
+  retrieval quality or a live embedding backend (validation procedure: docs/25).
 
 ### Decision
 
@@ -488,7 +489,7 @@ Ordered by value. Effort S/M/L.
   NOT yet done. The deterministic offline gate (ruff/mypy/pytest/regression_runner) cannot see
   this; it requires `bash scripts/live-smoke.sh` against a real local model with
   `MODEL_CONTEXT_WINDOW_TOKENS` set to that model's actual context size, which has not been run
-  for this change.
+  for this change (validation procedure: docs/25).
 
 ### Testing
 
