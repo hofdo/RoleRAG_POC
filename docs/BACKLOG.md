@@ -48,7 +48,13 @@ no longer exists. Order was value + independence, decisions last; each item was 
   scores + boosts). Historical per-turn via #8's endpoint = future extension
 - [x] **#6** importance-aware recency boost — **opt-in** (`RAG_RECENCY_WEIGHT`, default 0.0,
   byte-identical); recency scaled by importance so it can't displace older high-importance memories;
-  offline sweep 85/85, validate via live-smoke before enabling (validation procedure: docs/25)
+  offline sweep 85/85. Live-validated 2026-07-12 (docs/25 Phase C, `26b-mtp`, 8-turn runs at
+  `RAG_RECENCY_WEIGHT=0.02` and `0.04`): both pass with 0 callback-recall / 0
+  retrieval-selection misses, `retrieval_miss_ranks=[]` — identical to the Phase A baseline
+  (which is already miss-free at 8 turns, so no measurable *benefit* either at this length;
+  the 100-turn Phase D run carries `0.02` and is the meaningful long-session signal).
+  Decision: shipped default stays `0.0`; `0.02` is validated safe to enable per-campaign in
+  a personal `.env` (not `.env.example`)
 - [x] **#19** structured turn errors — additive `errors` (category/stage/message/suggestion) on the
   API/SSE turn responses, derived from the warning strings via `classify_warnings()`; non-breaking
   (warnings preserved, TurnResult unchanged, no 78-site churn). Frontend display = future extension
