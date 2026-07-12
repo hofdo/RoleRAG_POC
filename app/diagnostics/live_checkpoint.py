@@ -19,7 +19,7 @@ from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, Visibility
-from app.memory.consolidation import CONSOLIDATED_TAG
+from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
 from app.rag.retriever import build_retrieval_query
@@ -202,6 +202,19 @@ STRICT_WARNING_PREFIXES = {
     "indexing": "memory indexing skipped:",
     "retrieval": "retrieval skipped:",
 }
+# Report-only (#69 evidence): the context-accounting warnings from
+# app.orchestration.context_budget.context_preflight_warning /
+# .context_usage_warning. Both literally start with "context preflight: " --
+# context_usage_warning's post-hoc string reuses that prefix by name (see its
+# docstring) -- so they are told apart by what follows it, not by the shared
+# lead-in. Deliberately kept out of STRICT_WARNING_PREFIXES: these never gate
+# fail_on_structured_warnings, and are zero on any run with
+# MODEL_CONTEXT_WINDOW_TOKENS unset (the default), since neither function ever
+# fires then.
+CONTEXT_WARNING_PREFIXES = {
+    "preflight": "context preflight: estimated",
+    "actual": "context preflight: actual prompt_tokens",
+}
 SECRET_KEY_FRAGMENTS = ("api_key", "apikey", "authorization", "password", "secret", "token")
 NON_SECRET_PLACEHOLDERS = {"", "local", "replace_me"}
 PROPER_NOUN_PATTERN = re.compile(r"\b[A-Z][a-z]{2,}\b")
@@ -261,6 +274,15 @@ class PersistenceInspection:
     persisted_memory_count: int
     canon_lore_count: int
     session_memory_count: int
+    # Report-only (P2.2 evidence): SQLite rows tagged CONSOLIDATED_TAG / SUMMARY_TAG,
+    # confirming consolidation actually fired during the run and how much it rolled
+    # up. Counted separately from persisted_memory_count above (which excludes
+    # CONSOLIDATED_TAG rows for the SQLite/Qdrant parity check) so this stays purely
+    # additive evidence. Zero on any run with consolidation off
+    # (memory_consolidation_threshold <= 0, the default) -- select_consolidatable
+    # never marks anything then.
+    consolidated_memory_count: int = 0
+    consolidation_summary_count: int = 0
 
 
 Inspector = Callable[[str], PersistenceInspection]
@@ -354,6 +376,28 @@ def warning_counts(warnings: Sequence[Any]) -> dict[str, int]:
             "other",
         )
         counts[category] += 1
+    return counts
+
+
+def context_warning_counts(warnings: Sequence[Any]) -> dict[str, int]:
+    """Report-only counterpart to warning_counts: counts the #69 context-accounting
+    warnings (CONTEXT_WARNING_PREFIXES) by category. Unlike warning_counts, an
+    unmatched warning increments nothing -- there is no "other" bucket, since this
+    is purely additive evidence and never feeds validate_warnings/
+    fail_on_structured_warnings."""
+    counts = {category: 0 for category in CONTEXT_WARNING_PREFIXES}
+    for warning in warnings:
+        text = str(warning)
+        category = next(
+            (
+                name
+                for name, prefix in CONTEXT_WARNING_PREFIXES.items()
+                if text.startswith(prefix)
+            ),
+            None,
+        )
+        if category is not None:
+            counts[category] += 1
     return counts
 
 
@@ -535,6 +579,14 @@ def run_checkpoint(
         category: sum(turn["warning_counts"][category] for turn in turns)
         for category in (*STRICT_WARNING_PREFIXES, "other")
     }
+    # Report-only (#69 evidence): aggregated across the same per-turn "warnings"
+    # already collected above (turn.get("warnings", []) from each turn's API
+    # response, the source total_warning_counts reads too) -- kept separate from
+    # warning_counts/STRICT_WARNING_PREFIXES so it never affects the
+    # fail_on_structured_warnings gate.
+    context_warning_totals = context_warning_counts(
+        [warning for turn in turns for warning in turn["warnings"]]
+    )
     durations = [float(turn["duration_seconds"]) for turn in turns]
     stage_samples: dict[str, list[float]] = {}
     for turn in turns:
@@ -572,6 +624,8 @@ def run_checkpoint(
         "persisted": {
             "turn_count": inspection.persisted_turn_count,
             "memory_count": inspection.persisted_memory_count,
+            "consolidated_memory_count": inspection.consolidated_memory_count,
+            "consolidation_summary_count": inspection.consolidation_summary_count,
         },
         "qdrant": {
             "canon_lore_count": inspection.canon_lore_count,
@@ -585,6 +639,10 @@ def run_checkpoint(
             "controlled_failure_count": sum(
                 1 for turn in turns if turn["outcome"] != "success"
             ),
+            # Report-only (#69 evidence): 0 on any run with MODEL_CONTEXT_WINDOW_TOKENS
+            # unset (the default) -- see CONTEXT_WARNING_PREFIXES.
+            "context_preflight_warning_count": context_warning_totals["preflight"],
+            "context_actual_warning_count": context_warning_totals["actual"],
             "memory_extraction_misses": sum(not event["extracted"] for event in event_payloads),
             "callback_recall_misses": sum(not event["recalled"] for event in event_payloads),
             "retrieval_selection_misses": sum(
@@ -660,11 +718,12 @@ def inspect_live_state(
     # diverge from the Qdrant-indexed session_memory_count as soon as one roll-up runs
     # (docs/22 P2, fixed 2026-07-11). Excluding consolidated-marked rows keeps the two
     # sides comparable.
-    persisted_memory_count = sum(
-        1
-        for (tags_json,) in memory_tag_rows
-        if CONSOLIDATED_TAG not in json.loads(tags_json)
-    )
+    parsed_tags = [json.loads(tags_json) for (tags_json,) in memory_tag_rows]
+    persisted_memory_count = sum(1 for tags in parsed_tags if CONSOLIDATED_TAG not in tags)
+    # Report-only (P2.2 evidence): counted separately from the parity-preserving
+    # persisted_memory_count above -- see PersistenceInspection's docstring comment.
+    consolidated_memory_count = sum(1 for tags in parsed_tags if CONSOLIDATED_TAG in tags)
+    consolidation_summary_count = sum(1 for tags in parsed_tags if SUMMARY_TAG in tags)
     vector_store = QdrantVectorStore(url=settings.qdrant_url)
     return PersistenceInspection(
         persisted_turn_count=persisted_turn_count,
@@ -675,6 +734,8 @@ def inspect_live_state(
             RagCollection.SESSION_MEMORY,
             session_id=session_id,
         ),
+        consolidated_memory_count=consolidated_memory_count,
+        consolidation_summary_count=consolidation_summary_count,
     )
 
 

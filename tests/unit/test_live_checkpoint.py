@@ -14,6 +14,7 @@ from app.diagnostics.live_checkpoint import (
     EventAttribution,
     PersistenceInspection,
     build_event_attribution,
+    context_warning_counts,
     conversation_messages,
     events_for_turn_count,
     resolve_turn_count,
@@ -95,12 +96,20 @@ class FakeClient:
         raise AssertionError(f"unexpected POST {url}")
 
 
-def _inspection(turn_count: int, memory_count: int = 1) -> PersistenceInspection:
+def _inspection(
+    turn_count: int,
+    memory_count: int = 1,
+    *,
+    consolidated_memory_count: int = 0,
+    consolidation_summary_count: int = 0,
+) -> PersistenceInspection:
     return PersistenceInspection(
         persisted_turn_count=turn_count,
         persisted_memory_count=memory_count,
         canon_lore_count=1,
         session_memory_count=memory_count,
+        consolidated_memory_count=consolidated_memory_count,
+        consolidation_summary_count=consolidation_summary_count,
     )
 
 
@@ -247,6 +256,23 @@ def test_structured_warnings_are_strict_or_report_only() -> None:
     with pytest.raises(CheckpointError, match="checkpoint warnings"):
         validate_warnings(warnings, strict=True, turn_index=2)
     assert validate_warnings(warnings, strict=False, turn_index=2)["retrieval"] == 1
+
+
+def test_context_warning_counts_counts_both_prefixes_and_zero_case() -> None:
+    # #69 evidence: context_preflight_warning and context_usage_warning both start
+    # with "context preflight: " (see CONTEXT_WARNING_PREFIXES) but are told apart
+    # by what follows -- "estimated" for the preflight estimate, "actual
+    # prompt_tokens" for the post-hoc real-usage warning.
+    warnings = [
+        "context preflight: estimated 9000 tokens vs window 8000 (warn ratio 0.85)",
+        "context preflight: actual prompt_tokens 8500 exceeded 0.85 * window 8000",
+        "context preflight: actual prompt_tokens 8600 exceeded 0.85 * window 8000",
+        "retrieval skipped: qdrant offline",
+        "some unrelated warning",
+    ]
+    assert context_warning_counts(warnings) == {"preflight": 1, "actual": 2}
+    # Zero case: MODEL_CONTEXT_WINDOW_TOKENS unset means neither warning ever fires.
+    assert context_warning_counts([]) == {"preflight": 0, "actual": 0}
 
 
 def test_build_event_attribution_tracks_exact_memory_ids() -> None:
@@ -410,6 +436,51 @@ def test_memory_count_mismatch_fails() -> None:
                 session_memory_count=1,
             )
         )
+
+
+def test_report_includes_consolidation_and_context_warning_evidence_fields() -> None:
+    # Step-2 prep (P2.2 consolidation + #69 context-accounting): all four fields are
+    # report-only -- they must appear in the summary without perturbing anything
+    # strict mode already checks (none of the injected strings match
+    # STRICT_WARNING_PREFIXES, so this runs under the default strict=True).
+    overrides = {
+        2: {
+            "warnings": [
+                "context preflight: estimated 9000 tokens vs window 8000 (warn ratio 0.85)",
+            ],
+        },
+        4: {
+            "warnings": [
+                "context preflight: actual prompt_tokens 8500 exceeded 0.85 * window 8000",
+                "context preflight: actual prompt_tokens 8600 exceeded 0.85 * window 8000",
+            ],
+        },
+    }
+    summary = _run(
+        turn_overrides=overrides,
+        inspection=_inspection(
+            13,
+            memory_count=2,
+            consolidated_memory_count=5,
+            consolidation_summary_count=2,
+        ),
+    )
+
+    assert summary["persisted"]["consolidated_memory_count"] == 5
+    assert summary["persisted"]["consolidation_summary_count"] == 2
+    assert summary["quality_metrics"]["context_preflight_warning_count"] == 1
+    assert summary["quality_metrics"]["context_actual_warning_count"] == 2
+
+
+def test_report_context_warning_counts_are_zero_without_any_context_warnings() -> None:
+    # Zero-case, full pipeline: no turn emits a context-accounting warning (the
+    # MODEL_CONTEXT_WINDOW_TOKENS-unset default), so both aggregates stay 0.
+    summary = _run()
+
+    assert summary["quality_metrics"]["context_preflight_warning_count"] == 0
+    assert summary["quality_metrics"]["context_actual_warning_count"] == 0
+    assert summary["persisted"]["consolidated_memory_count"] == 0
+    assert summary["persisted"]["consolidation_summary_count"] == 0
 
 
 def test_report_serialization_redacts_secrets(tmp_path: Path) -> None:
@@ -636,6 +707,103 @@ def test_inspect_live_state_excludes_consolidated_rows_from_persisted_memory_cou
     # side, which no longer indexes it (patched above to 3: mem-1, mem-2, mem-4).
     assert inspection.persisted_memory_count == 3
     assert inspection.session_memory_count == 3
+
+
+def test_inspect_live_state_reports_consolidated_and_summary_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Step-2 prep (P2.2 evidence): consolidated_memory_count/consolidation_summary_count
+    # are report-only counts of CONSOLIDATED_TAG/SUMMARY_TAG rows, counted separately
+    # from the parity-preserving persisted_memory_count so a P2.2 run (consolidation
+    # preset) can confirm consolidation actually fired and how much it rolled up.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_live_state
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-11T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "world", "scene", "persona", "Player", now, now),
+    )
+    rows = [
+        ("mem-1", "[]"),  # ordinary, still retrievable
+        ("mem-2", json.dumps(["consolidated"])),  # folded original #1
+        ("mem-3", json.dumps(["consolidated"])),  # folded original #2
+        ("mem-4", json.dumps(["consolidation_summary"])),  # the one roll-up summary
+    ]
+    for memory_id, tags_json in rows:
+        connection.execute(
+            "INSERT INTO memory_episodes "
+            "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+            "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (memory_id, "session-1", "scene", "persona", "summary", 1, "player", tags_json, now),
+        )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_count",
+        lambda vector_store, collection, session_id=None: 2,
+    )
+
+    inspection = inspect_live_state(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path)),
+        session_id="session-1",
+    )
+
+    assert inspection.consolidated_memory_count == 2
+    assert inspection.consolidation_summary_count == 1
+
+
+def test_inspect_live_state_consolidation_counts_are_zero_without_tagged_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Zero case: a run with consolidation off (memory_consolidation_threshold <= 0,
+    # the default) never tags anything, so both counts stay 0.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_live_state
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-11T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "world", "scene", "persona", "Player", now, now),
+    )
+    connection.execute(
+        "INSERT INTO memory_episodes "
+        "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+        "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        ("mem-1", "session-1", "scene", "persona", "summary", 1, "player", "[]", now),
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_count",
+        lambda vector_store, collection, session_id=None: 1,
+    )
+
+    inspection = inspect_live_state(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path)),
+        session_id="session-1",
+    )
+
+    assert inspection.consolidated_memory_count == 0
+    assert inspection.consolidation_summary_count == 0
 
 
 def test_qdrant_count_session_filter_still_excludes_sentinel() -> None:
