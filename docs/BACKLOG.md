@@ -608,6 +608,19 @@ Ordered by value. Effort S/M/L.
   this pool must place the blue-seal memory in the selected set; then re-run the full
   docs/25 Phase D preset, which is blocked on this item.
 
+- [ ] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
+  turn as a recall miss 10 turns later.** docs/25 Phase D run 4: turn 55 (amber_ring_token's
+  definition turn) ended `outcome: controlled_failure` (critic rejection, invariant #4 —
+  correctly no memory written), and the checkpoint marched on, then failed at the turn-65
+  callback with "no persisted matching memory" — a misleading message that cost a forensic
+  round to trace back. Fix: when a probe's `definition_turn` ends in `controlled_failure`,
+  fail fast at that turn with the real cause named (or record the probe as vacuous and fail
+  the run with a distinct message). This is a *precision* fix, not a loosening — the run
+  still fails; it just says why. Note the systemic implication recorded in docs/22 § P2.2:
+  at the known ~6.7% local fail-closed rate, one of the 8 probe-definition turns is hit in
+  a substantial fraction of 100-turn runs, so green P2.2 runs also depend on this
+  distinction being visible.
+
 ## Not doing (personal-use scope)
 
 StageGraph/DAG/plugin extensibility · hard memory-episode cap default (regressed recall) ·

@@ -490,6 +490,22 @@ Effort S. — [ ]
 > The preset machinery itself validated fine across the three runs: consolidation fired
 > (15 folded + 1 summary, run 1), SQLite/Qdrant parity held, the turn-17 probe survived a
 > consolidation pass. Re-run P2.2 after P1.1 lands.
+>
+> **Fourth run 2026-07-13 — FAILED at turn 65; not a recall defect (harness-clarity gap
+> filed as #74).** Run 4 cleared every probe that killed runs 2–3 (compass, blue seal, key,
+> three-tap all passed; consolidation fired at turn 54, "rolled up 15 memories into 1
+> summary"), then `amber_ring_token has no persisted matching memory` — because turn 55,
+> the probe's *definition* turn, ended as a **controlled failure** (critic rejected the
+> draft; `outcome: controlled_failure`, "No memory or world state was changed"). Invariant
+> #4 working exactly as designed: the fact never entered the world, so the turn-65 callback
+> correctly found nothing. This is the known ~6.7% local fail-closed rate landing on one of
+> the 8 probe-definition turns — placement luck, expected to hit a definition turn in a
+> substantial fraction of 100-turn runs. Two consequences: (1) a fully-green 100-turn P2.2
+> run needs P1.1 (#73) *plus* either placement luck or #74's precise handling; re-rolling
+> until green is exactly what docs/25 forbids, so P2.2 stays blocked on P1.1 with #74 as
+> the harness-accuracy fix. (2) The checkpoint's current report for this case — a recall
+> miss at the callback, 10 turns after the actual event — is misleading; #74 makes it fail
+> fast at the definition turn with the real cause named.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
