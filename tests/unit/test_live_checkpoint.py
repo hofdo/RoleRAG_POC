@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from itertools import count as _unbounded_count
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,9 @@ from app.diagnostics.live_checkpoint import (
     STORY_EVENTS,
     CheckpointError,
     EventAttribution,
+    EventInspector,
     PersistenceInspection,
+    StoryEvent,
     build_event_attribution,
     context_warning_counts,
     conversation_messages,
@@ -133,16 +136,25 @@ def _run(
     inspection: PersistenceInspection | None = None,
     attribution: EventAttribution | None = None,
     strict: bool = True,
+    definition_retries: int = 0,
+    event_inspector: EventInspector | None = None,
 ) -> dict[str, Any]:
     client = FakeClient(turn_overrides=turn_overrides)
-    clock = iter(float(index) for index in range(turn_count * 2))
+    # Unbounded: each definition-turn retry consumes two extra monotonic() calls
+    # (send_turn's started/duration_seconds pair) on top of the scripted
+    # turn_count * 2, so a fixed-size range is fragile once retries are in play.
+    clock = (float(value) for value in _unbounded_count())
+    resolved_event_inspector: EventInspector = event_inspector or (
+        lambda _session_id, _event, _definition_turn_index: attribution or _attribution()
+    )
     return run_checkpoint(
         client_factory=lambda: client,
         inspector=lambda _session_id: inspection or _inspection(turn_count),
-        event_inspector=lambda _session_id, _event: attribution or _attribution(),
+        event_inspector=resolved_event_inspector,
         expected_model="model-1",
         turn_count=turn_count,
         fail_on_structured_warnings=strict,
+        definition_retries=definition_retries,
         monotonic=lambda: next(clock),
     )
 
@@ -547,13 +559,13 @@ def test_non_definition_turn_controlled_failure_does_not_fail_fast() -> None:
 def test_definition_turn_controlled_failure_stops_before_later_turns() -> None:
     snapshots: list[dict[str, Any]] = []
     client = FakeClient(turn_overrides={3: {"outcome": "controlled_failure"}})
-    clock = iter(float(index) for index in range(13 * 2))
+    clock = (float(value) for value in _unbounded_count())
 
     with pytest.raises(CheckpointError, match="definition turn 3"):
         run_checkpoint(
             client_factory=lambda: client,
             inspector=lambda _session_id: _inspection(13),
-            event_inspector=lambda _session_id, _event: _attribution(),
+            event_inspector=lambda _session_id, _event, _definition_turn_index: _attribution(),
             expected_model="model-1",
             turn_count=13,
             fail_on_structured_warnings=True,
@@ -566,6 +578,363 @@ def test_definition_turn_controlled_failure_stops_before_later_turns() -> None:
     assert len(snapshots) == 3
     assert snapshots[-1]["turns"][-1]["turn_index"] == 3
     assert snapshots[-1]["turns"][-1]["outcome"] == "controlled_failure"
+
+
+# --- #80 definition-turn retry (docs/26 §6 Stage 5 / §8 Q4) ---
+#
+# LIVE_DEFINITION_RETRIES / definition_retries stays harness-local (never a
+# Settings/.env.example field, per Q4). Default 0 must reproduce #75's fail-fast
+# byte-identically -- every test above this section already pins that (none of
+# them pass definition_retries, so they all exercise the default). These tests
+# cover the offset hazard a consumed retry introduces: a retry inserts an EXTRA
+# persisted DB turn, so scripted step N no longer reliably lands on DB
+# turn_index N. FakeClient's own self.turn_index (incremented once per POST,
+# regardless of outcome) models the real DB turn_index behavior exactly, so
+# turn_overrides below are deliberately keyed by the ACTUAL POST ordinal
+# (post-offset), not the scripted step -- working through that arithmetic by
+# hand is the point of these tests.
+
+
+def test_definition_retries_fields_present_and_zero_by_default() -> None:
+    summary = _run()
+
+    assert summary["configuration"]["definition_retries_allowed"] == 0
+    assert summary["quality_metrics"]["definition_retries_allowed"] == 0
+    assert summary["quality_metrics"]["definition_retries_used"] == {"before_dawn_promise": 0}
+    assert summary["events"][0]["definition_retries_used"] == 0
+    assert all(not turn["is_definition_retry"] for turn in summary["turns"])
+
+
+def test_definition_retries_do_not_apply_to_non_definition_turn_failures() -> None:
+    # Retries are scoped to DEFINITION turns only -- a controlled failure on
+    # turn 5 (neither a definition nor a callback turn in a 13-turn run) must
+    # not consume any retry budget or add any extra POST, even with
+    # definition_retries > 0.
+    summary = _run(
+        turn_count=13,
+        definition_retries=3,
+        turn_overrides={5: {"outcome": "controlled_failure"}},
+    )
+
+    assert summary["status"] == "pass"
+    assert len(summary["turns"]) == 13
+    assert all(not turn["is_definition_retry"] for turn in summary["turns"])
+    assert summary["quality_metrics"]["definition_retries_used"] == {"before_dawn_promise": 0}
+
+
+def test_definition_turn_retry_recovers_run_continues_and_resolves_offset() -> None:
+    # before_dawn_promise: definition_turn=3, callback_turn=13. Original attempt
+    # (raw POST #3) fails; the retry (raw POST #4) succeeds -- one extra
+    # persisted row, so scripted step 13's callback becomes raw POST #14.
+    captured_definition_turn_indexes: list[int | None] = []
+
+    def spy_event_inspector(
+        _session_id: str, _event: StoryEvent, definition_turn_index: int | None
+    ) -> EventAttribution:
+        captured_definition_turn_indexes.append(definition_turn_index)
+        return _attribution()
+
+    summary = _run(
+        turn_count=13,
+        definition_retries=1,
+        turn_overrides={
+            3: {"outcome": "controlled_failure", "memory_written": False},
+            14: {"text": "I remember your promise to return before dawn."},
+        },
+        inspection=_inspection(14),
+        event_inspector=spy_event_inspector,
+    )
+
+    assert summary["status"] == "pass"
+
+    # (b) provenance attribution resolves to the SUCCESSFUL retry's ACTUAL DB
+    # ordinal (4 = 2 earlier turns + the failed original + the retry) -- never
+    # the raw scripted step (3) and never the failed original's own ordinal.
+    assert captured_definition_turn_indexes == [4]
+
+    # (a) the callback still evaluates at the right scripted step (13), reading
+    # the retry's response via step-keyed lookup rather than a shifted list
+    # position.
+    assert summary["events"][0]["event_key"] == "before_dawn_promise"
+    assert summary["events"][0]["recalled"] is True
+    assert summary["quality_metrics"]["callback_recall_misses"] == 0
+
+    # (c) the persisted-turn-count assertion passed with the +1 offset baked in
+    # (inspection=_inspection(14) above; run_checkpoint would have raised
+    # otherwise) -- confirm the summary reports the offset count too.
+    assert summary["persisted"]["turn_count"] == 14
+
+    # turns list gains the retry, clearly labeled (docs/25 forensics style).
+    assert len(summary["turns"]) == 14
+    original_attempt = next(
+        turn
+        for turn in summary["turns"]
+        if turn["turn_index"] == 3 and turn["retry_attempt"] == 0
+    )
+    retried_attempt = next(
+        turn
+        for turn in summary["turns"]
+        if turn["turn_index"] == 3 and turn["retry_attempt"] == 1
+    )
+    assert original_attempt["outcome"] == "controlled_failure"
+    assert original_attempt["is_definition_retry"] is False
+    assert retried_attempt["outcome"] == "success"
+    assert retried_attempt["is_definition_retry"] is True
+
+    # (d) quality_metrics records the retry, both aggregate and per-event.
+    assert summary["quality_metrics"]["definition_retries_allowed"] == 1
+    assert summary["quality_metrics"]["definition_retries_used"] == {"before_dawn_promise": 1}
+    assert summary["events"][0]["definition_retries_used"] == 1
+
+
+def test_definition_turn_retry_stops_as_soon_as_a_retry_succeeds() -> None:
+    # Budget of 2, but the FIRST retry already succeeds -- only 1 retry may be
+    # consumed; the loop must not keep retrying past a success.
+    summary = _run(
+        turn_count=13,
+        definition_retries=2,
+        turn_overrides={
+            3: {"outcome": "controlled_failure"},
+            14: {"text": "I remember your promise to return before dawn."},
+        },
+        inspection=_inspection(14),
+    )
+
+    retried_entries = [turn for turn in summary["turns"] if turn["is_definition_retry"]]
+    assert len(retried_entries) == 1
+    assert retried_entries[0]["retry_attempt"] == 1
+    assert summary["quality_metrics"]["definition_retries_allowed"] == 2
+    assert summary["quality_metrics"]["definition_retries_used"] == {"before_dawn_promise": 1}
+
+
+def test_definition_turn_retry_exhausted_fails_fast_naming_both_causes() -> None:
+    # Both the original attempt (raw POST #3) and the single permitted retry
+    # (raw POST #4) end in controlled_failure -- budget exhausted, so the run
+    # must fail fast naming BOTH the original cause and the consumed retry.
+    with pytest.raises(CheckpointError) as excinfo:
+        _run(
+            turn_count=13,
+            definition_retries=1,
+            turn_overrides={
+                3: {"outcome": "controlled_failure"},
+                4: {"outcome": "controlled_failure"},
+            },
+        )
+
+    message = str(excinfo.value)
+    assert "definition turn 3 for event before_dawn_promise ended in controlled_failure" in message
+    assert "1 definition-turn retry(ies) consumed" in message
+    assert "still ended in controlled_failure" in message
+
+
+def test_definition_turn_retry_persisted_count_mismatch_still_fails() -> None:
+    # The offset-aware persisted-turn-count assertion must still catch a real
+    # mismatch -- it must not silently pass just because a retry was consumed.
+    # Passing the UN-offset inspection (13, not 14) here models the DB not
+    # actually showing the extra retried row.
+    with pytest.raises(CheckpointError, match="persisted-turn count mismatch"):
+        _run(
+            turn_count=13,
+            definition_retries=1,
+            turn_overrides={
+                3: {"outcome": "controlled_failure"},
+                14: {"text": "I remember your promise to return before dawn."},
+            },
+            inspection=_inspection(13),
+        )
+
+
+def test_write_reports_labels_definition_retry_turns_in_markdown(tmp_path: Path) -> None:
+    summary = _run(
+        turn_count=13,
+        definition_retries=1,
+        turn_overrides={
+            3: {"outcome": "controlled_failure"},
+            14: {"text": "I remember your promise to return before dawn."},
+        },
+        inspection=_inspection(14),
+    )
+    json_path = tmp_path / "checkpoint.json"
+    markdown_path = tmp_path / "checkpoint.md"
+
+    write_reports(summary, json_path=json_path, markdown_path=markdown_path)
+
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "#### Turn 3\n\n- outcome: controlled_failure" in markdown
+    assert "#### Turn 3 (definition retry 1)\n\n- outcome: success" in markdown
+
+
+def test_turn_id_for_index_resolves_by_actual_ordinal_not_naive_scripted_step() -> None:
+    # Pure-function pin of the offset hazard's resolution mechanics: the value
+    # passed in must be the ACTUAL persisted DB ordinal at the moment the
+    # definition turn succeeded, not a StoryEvent's raw scripted step number,
+    # once an earlier consumed retry has shifted DB turn_index away from it.
+    from datetime import UTC, datetime
+
+    from app.diagnostics.live_checkpoint import _turn_id_for_index
+    from app.domain import StoredTurn
+    from app.llm.router import ModelProviderName, ModelRoute
+
+    def _stored_turn(*, turn_id: int, turn_index: int) -> StoredTurn:
+        return StoredTurn(
+            id=turn_id,
+            session_id="session-1",
+            turn_index=turn_index,
+            scene_id="rose-gallery",
+            persona_id="archivist",
+            user_message="msg",
+            assistant_message="reply",
+            route=ModelRoute(
+                provider=ModelProviderName.LOCAL,
+                model="model-1",
+                max_tokens=256,
+                temperature=0.7,
+                reason="test",
+            ),
+            created_at=datetime(2026, 7, 14, tzinfo=UTC),
+        )
+
+    turns = [
+        _stored_turn(turn_id=201, turn_index=1),
+        _stored_turn(turn_id=202, turn_index=2),  # e.g. a FAILED original attempt
+        _stored_turn(turn_id=203, turn_index=3),  # the SUCCESSFUL retry, offset by +1
+    ]
+
+    # The naive/un-offset scripted-step value (2) resolves to the WRONG id --
+    # exactly the hazard docs/26 §8 Q4 names ("not a shifted wrong turn").
+    assert _turn_id_for_index(turns, 2) == 202
+    # The ACTUAL tracked DB ordinal resolves to the successful retry's id.
+    assert _turn_id_for_index(turns, 3) == 203
+    assert _turn_id_for_index(turns, 99) is None
+
+
+def test_inspect_story_event_resolves_provenance_via_tracked_definition_turn_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # End-to-end pin (SQLite + build_event_attribution, retrieval stubbed since
+    # it inherently needs live Qdrant/embeddings -- see build_actor_context_
+    # retriever): inspect_story_event must resolve provenance against the
+    # supplied definition_turn_index (the ACTUAL tracked ordinal), never the
+    # raw event.definition_turn once that has drifted from a consumed retry.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_story_event
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-14T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "demo_world", "rose-gallery", "archivist", "Player", now, now),
+    )
+    # Three persisted turns: an unrelated earlier turn (index 1), the FAILED
+    # original definition-turn attempt (index 2 -- persisted despite failing,
+    # per invariant #4), and the SUCCESSFUL retry (index 3). The synthetic
+    # event's definition_turn is deliberately 2 (the naive/un-offset value) so
+    # the override -- not the raw scripted step -- is what proves resolution.
+    for turn_index, outcome in ((1, "success"), (2, "controlled_failure"), (3, "success")):
+        connection.execute(
+            "INSERT INTO turns "
+            "(session_id, turn_index, scene_id, persona_id, user_message, "
+            "assistant_message, route_provider, route_model, route_reason, "
+            "route_max_tokens, route_temperature, route_requires_user_confirmation, "
+            "created_at, outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "session-1",
+                turn_index,
+                "rose-gallery",
+                "archivist",
+                f"user message {turn_index}",
+                f"assistant message {turn_index}",
+                "local",
+                "model-1",
+                "test",
+                512,
+                0.7,
+                0,
+                now,
+                outcome,
+            ),
+        )
+    successful_retry_id = connection.execute(
+        "SELECT id FROM turns WHERE session_id = ? AND turn_index = 3", ("session-1",)
+    ).fetchone()[0]
+    # A memory whose paraphrase does NOT phrasing-match the probe, provenance-
+    # linked ONLY to the successful retry's id -- exactly the case #76's
+    # OR-attribution exists for.
+    connection.execute(
+        "INSERT INTO memory_episodes "
+        "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+        "tags_json, created_at, source_turn_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            "mem-1",
+            "session-1",
+            "rose-gallery",
+            "archivist",
+            "A pact was sealed regarding a future return.",
+            4,
+            "player",
+            "[]",
+            now,
+            successful_retry_id,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    event = StoryEvent(
+        key="synthetic_probe",
+        definition_turn=2,  # naive/un-offset value; the real successful turn is 3
+        callback_turn=5,
+        term_groups=(("no-match-term-xyz",),),
+    )
+
+    class _StubDiagnostics:
+        def model_dump(self, *, mode: str) -> dict[str, Any]:
+            return {"selected": [], "rejected": []}
+
+    class _StubRetrievalResult:
+        diagnostics = _StubDiagnostics()
+
+    class _StubRetriever:
+        def retrieve_for_actor_with_diagnostics(self, **kwargs: Any) -> _StubRetrievalResult:
+            return _StubRetrievalResult()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint.build_actor_context_retriever",
+        lambda settings: _StubRetriever(),
+    )
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_memory_ids",
+        lambda vector_store, *, session_id: (),
+    )
+
+    settings = Settings(database_path=str(db_path))
+
+    # Without the override: falls back to event.definition_turn (2) -- resolves
+    # to the FAILED original's id, so the provenance-only memory does NOT match.
+    attribution_without_override = inspect_story_event(
+        database_path=db_path,
+        settings=settings,
+        session_id="session-1",
+        event=event,
+    )
+    assert attribution_without_override.matching_memory_ids == ()
+
+    # With the tracked actual ordinal (3): resolves to the SUCCESSFUL retry's
+    # id, so the provenance-linked (phrasing-mismatched) memory now matches.
+    attribution_with_override = inspect_story_event(
+        database_path=db_path,
+        settings=settings,
+        session_id="session-1",
+        event=event,
+        definition_turn_index=3,
+    )
+    assert attribution_with_override.matching_memory_ids == ("mem-1",)
 
 
 def test_stage_latency_means_are_reported_from_turn_stage_timings() -> None:
@@ -686,11 +1055,11 @@ def test_run_checkpoint_reports_progress_after_each_turn() -> None:
     snapshots: list[dict[str, Any]] = []
 
     client = FakeClient()
-    clock = iter(float(index) for index in range(13 * 2))
+    clock = (float(value) for value in _unbounded_count())
     summary = run_checkpoint(
         client_factory=lambda: client,
         inspector=lambda _session_id: _inspection(13),
-        event_inspector=lambda _session_id, _event: _attribution(),
+        event_inspector=lambda _session_id, _event, _definition_turn_index: _attribution(),
         expected_model="model-1",
         turn_count=13,
         fail_on_structured_warnings=True,
@@ -715,13 +1084,13 @@ def test_run_checkpoint_reports_progress_after_each_turn() -> None:
 def test_run_checkpoint_preserves_progress_when_a_turn_fails() -> None:
     snapshots: list[dict[str, Any]] = []
     client = FakeClient(turn_overrides={5: {"text": ""}})
-    clock = iter(float(index) for index in range(13 * 2))
+    clock = (float(value) for value in _unbounded_count())
 
     with pytest.raises(CheckpointError):
         run_checkpoint(
             client_factory=lambda: client,
             inspector=lambda _session_id: _inspection(13),
-            event_inspector=lambda _session_id, _event: _attribution(),
+            event_inspector=lambda _session_id, _event, _definition_turn_index: _attribution(),
             expected_model="model-1",
             turn_count=13,
             fail_on_structured_warnings=True,
@@ -752,6 +1121,23 @@ def test_run_checkpoint_records_turn_retrieval_diagnostics() -> None:
 
     assert summary["turns"][0]["retrieval"] is None
     assert summary["turns"][1]["retrieval"] == retrieval_payload
+
+
+def test_run_checkpoint_records_standing_facts_diagnostics() -> None:
+    # Lane A canon-pinning evidence (docs/26 §3.3, #78): CreateTurnResponse
+    # already returns standing_facts_count/chars on every turn; this pins that
+    # the checkpoint harness actually surfaces them (docs/25 Phase E reads this
+    # per-turn to confirm the pinned block never drops to 0 once established).
+    summary = _run(
+        turn_overrides={
+            2: {"standing_facts_count": 3, "standing_facts_chars": 352},
+        }
+    )
+
+    assert summary["turns"][0]["standing_facts_count"] is None
+    assert summary["turns"][0]["standing_facts_chars"] is None
+    assert summary["turns"][1]["standing_facts_count"] == 3
+    assert summary["turns"][1]["standing_facts_chars"] == 352
 
 
 def test_write_json_atomic_replaces_target_without_leftover_temp(tmp_path: Path) -> None:

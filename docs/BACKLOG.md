@@ -913,6 +913,24 @@ world-chronicle section below (#81–#83).
   reinterpretation explicitly in docs/22. P1.1 hybrid stays the conditional escalation rung
   ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)) — pulled by
   a live miss neither lane covers, never pushed. 1–2 elapsed days.
+  **Update 2026-07-14 (session-side wiring shipped):** the harness-local
+  `LIVE_DEFINITION_RETRIES`/`--definition-retries` retry mechanism landed in
+  `app/diagnostics/live_checkpoint.py` — a probe's failed DEFINITION turn is re-sent up to N
+  times before the run fails fast, default `0` byte-identical to pre-#80 behavior — together
+  with the offset-aware bookkeeping a consumed retry requires (step-keyed `turn_by_step` for
+  callback/event lookups, `definition_turn_db_index` tracking the actual persisted DB ordinal
+  so #76's provenance attribution resolves to the successful retried turn rather than the
+  failed original or a naively-assumed step==index value, an offset-adjusted persisted-turn-
+  count assertion, and `quality_metrics.definition_retries_allowed`/`definition_retries_used`
+  labeling). `scripts/live-smoke.sh` plumbs `LIVE_DEFINITION_RETRIES` through the same four
+  points as `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. The
+  [docs/25 Phase E](25_live_validation_runbook.md#phase-e--docs26-stage-5-lanes-ab-live-validation-80)
+  runbook section (command, two-clean-runs requirement, what to read per run, owner-side
+  extras, on-success checklist) is written. Full deterministic gate green; +10 unit tests
+  pinning the retry/offset behavior. **Still open**: the live 100-turn Phase E runs themselves,
+  the measured survival delta, the derived `min_slice_score`, and the resulting default flip /
+  docs/22 confirmation all remain on the owner's machine — this item stays unchecked until
+  those land.
 
 ## Planned 2026-07-14 — docs/27 world chronicle (Q6 design conversation)
 

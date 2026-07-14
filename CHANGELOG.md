@@ -93,6 +93,30 @@ records; this file is the quick delta between versions.
   memory `354b8d98` — pinned block measures 352/900 chars, 0 safeguard warnings (no amendment
   pairs in this transcript). `select_retrieved_chunks_for_prompt`, write-dedup, and the
   ranking/boost math are untouched.
+- **docs/26 Stage 5 session-side wiring** (#80, harness-local, byte-identical default): new
+  `--definition-retries`/`LIVE_DEFINITION_RETRIES` knob (default 0) re-sends a probe's
+  DEFINITION turn message up to N times when it ends in a non-success outcome, before
+  `run_checkpoint` falls back to #75's fail-fast — modeling a real player's retry on an errored
+  turn (docs/26 §8 Q4), never an app.config.Settings field. A consumed retry inserts an extra
+  persisted DB turn, so scripted step no longer equals DB `turn_index`; every turn-number-keyed
+  computation is made offset-aware: `event_by_callback`/`event_by_definition_turn` stay
+  step-keyed, a new step-keyed `turn_by_step` map replaces positional indexing into the raw
+  `turns` log (which itself gains one extra, clearly labeled `is_definition_retry`/
+  `retry_attempt` entry per consumed retry), and a new `definition_turn_db_index` map tracks
+  the ACTUAL persisted ordinal at the moment each event's definition turn succeeds, threaded
+  into `inspect_story_event`'s new `definition_turn_index` parameter so #76's provenance
+  attribution resolves to the successful retried turn's DB id, never the failed original's or
+  a naively-assumed step==index value. The persisted-turn-count assertion is offset-adjusted;
+  `quality_metrics` gains `definition_retries_allowed`/`definition_retries_used` (aggregate and
+  per-event) so the actual survival delta can be measured, not assumed, across the docs/25
+  Phase E live runs — the rejected `0.067² ≈ 0.45%`/`~96.5%` independence math is not computed
+  here. Also closes a pre-existing gap: `standing_facts_count`/`standing_facts_chars` (#78) were
+  already returned by `CreateTurnResponse` but never surfaced in the checkpoint's own turn
+  records — now captured so docs/25 Phase E can read pinning evidence per turn.
+  `scripts/live-smoke.sh` plumbs `LIVE_DEFINITION_RETRIES` through the same four points as
+  `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. New docs/25 Phase E runbook section. +10 unit tests
+  pinning the offset/retry mechanics. The live 100-turn validation runs and any resulting
+  default flip remain on the owner's machine (#80 stays open in docs/BACKLOG.md).
 
 ## 1.3.0 — 2026-07-12
 
