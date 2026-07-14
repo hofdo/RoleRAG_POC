@@ -12,6 +12,7 @@ from app.agents.critic_agent import CriticAgentOutputError
 from app.agents.memory_curator import MemoryCuratorOutputError
 from app.domain import (
     CriticResult,
+    MemoryCandidate,
     MemoryCuratorResult,
     PersonaCard,
     RetrievedChunk,
@@ -25,6 +26,7 @@ from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
 from app.memory import MemoryEpisodeStore
 from app.memory.consolidation import CONSOLIDATED_TAG
+from app.memory.deterministic_extractor import DETERMINISTIC_EVENT_IMPORTANCE
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages import (
     LoadedTurnContext,
@@ -1860,6 +1862,210 @@ async def test_memory_stage_does_not_duplicate_event_already_curated() -> None:
     assert result.memory_written is True
     assert len(store.persisted) == 1
     assert store.persisted[0].summary == "The player promised to return before dawn."
+
+
+class _ScriptedCurator:
+    """Fake curator returning a fixed, pre-scripted MemoryCuratorResult. Unlike
+    CoveringCurator/DecliningCurator (one hard-coded shape each), this lets a test
+    control exactly what "the curator curated this turn" while the REAL deterministic
+    extractor still runs for real against user_message -- docs/26 §3.2 (#77)'s
+    best-match fold needs both sides genuine to be meaningfully tested."""
+
+    def __init__(self, memories: list[MemoryCandidate]) -> None:
+        self._memories = memories
+
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
+    async def curate(self, **_: object) -> MemoryCuratorResult:
+        return MemoryCuratorResult(
+            write_memory=bool(self._memories),
+            memories=list(self._memories),
+            reason="scripted",
+        )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_folds_deterministic_tag_onto_covering_curated_summary() -> None:
+    # docs/26 §3.2 (#77): reuses the EXACT #72 dawn-promise string pinned verbatim in
+    # tests/unit/test_deterministic_extractor.py and app/evals/memory_write_lifecycle.py.
+    # The real deterministic extractor turns an explicit entrust sentence into a
+    # candidate that shares exactly the frame vocabulary {iria, vale, keep, return}
+    # documented in deterministic_extractor.py's WRITE_DEDUP_COVERAGE_THRESHOLD
+    # comment -- 0.50 coverage against a curated summary that never mentions the
+    # compass at all. Pre-#77 that candidate (and its "entrusted" tag, importance=4)
+    # would be silently discarded; the fold must land it on the curator's summary
+    # instead of dropping it.
+    dawn_promise_summary = (
+        "The player promised to return to the archive before dawn, provided "
+        "Iria Vale keeps the archive door unbarred."
+    )
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=dawn_promise_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=[],  # the curator forgot to tag this durable fact
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I entrust my silver compass to Iria Vale, to keep until my return.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    # Folded, not appended: still exactly one persisted memory.
+    assert len(store.persisted) == 1
+    folded = store.persisted[0]
+    assert folded.summary == dawn_promise_summary
+    assert "entrusted" in folded.tags
+    assert folded.importance == DETERMINISTIC_EVENT_IMPORTANCE  # raised from 2 to 4
+    fold_warning = next(
+        (w for w in result.warnings if w.startswith("deterministic candidate folded")), None
+    )
+    assert fold_warning is not None
+    assert "coverage=0.50" in fold_warning
+    assert "silver compass" in fold_warning
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_folds_onto_argmax_not_first_listed_summary() -> None:
+    # docs/26 §3.2 (#77), the judge-constructed wrong-donation scenario: TWO curated
+    # summaries both clear the 0.5 coverage threshold for the SAME deterministic
+    # candidate, with different scores. A first-match implementation would fold onto
+    # curated[0] (the lower-scoring summary that merely mentions the event, checked
+    # first, coverage=0.50); best-match must fold onto curated[1] instead (the
+    # higher-scoring summary that is actually about the same event, coverage=0.83).
+    # This test fails under a first-match implementation.
+    low_match_summary = "The player mentioned guarding something before midnight, vaguely."
+    high_match_summary = "The player swore to guard the amber vault before midnight without fail."
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=low_match_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=[],
+                    scene_id="scene",
+                    actor_id="persona",
+                ),
+                MemoryCandidate(
+                    summary=high_match_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=3,
+                    tags=["oath"],
+                    scene_id="scene",
+                    actor_id="persona",
+                ),
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to guard the amber vault before midnight.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 2
+    low = next(m for m in store.persisted if m.summary == low_match_summary)
+    high = next(m for m in store.persisted if m.summary == high_match_summary)
+    # The lower-scoring, first-listed summary is untouched -- a first-match
+    # implementation would have folded onto this one instead of curated[1].
+    assert low.tags == []
+    assert low.importance == 2
+    # The higher-scoring summary received the fold; its own curator-assigned tag
+    # ("oath") survives alongside the donated ones (ordered_union, no dupes).
+    assert high.tags == ["oath", "promise", "deadline"]
+    assert high.importance == DETERMINISTIC_EVENT_IMPORTANCE
+    fold_warning = next(
+        (w for w in result.warnings if w.startswith("deterministic candidate folded")), None
+    )
+    assert fold_warning is not None
+    assert "coverage=0.83" in fold_warning
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_extras_path_unchanged_when_nothing_covers_candidate() -> None:
+    # docs/26 §3.2 (#77): when nothing in this turn's curated output clears the 0.5
+    # coverage threshold, the deterministic candidate must still go to extras exactly
+    # as pre-#77 -- byte-identical path, no fold warning.
+    unrelated_summary = "The regent's banquet was postponed to next week."
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=unrelated_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=["lore"],
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to guard the amber vault before midnight.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 2
+    unrelated = next(m for m in store.persisted if m.summary == unrelated_summary)
+    assert unrelated.tags == ["lore"]
+    assert unrelated.importance == 2
+    extra = next(m for m in store.persisted if m.summary != unrelated_summary)
+    assert "promise" in extra.tags
+    assert "deadline" in extra.tags
+    assert extra.importance == DETERMINISTIC_EVENT_IMPORTANCE
+    assert any(
+        w == "deterministic memory fallback added 1 explicit durable event(s)"
+        for w in result.warnings
+    )
+    assert not any(w.startswith("deterministic candidate folded") for w in result.warnings)
 
 
 class AcceptingCriticAgent(FailingCriticAgent):

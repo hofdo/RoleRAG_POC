@@ -30,6 +30,18 @@ records; this file is the quick delta between versions.
   definition-turn over-attribution this implies is documented and tested, not silently
   tightened away. Attribution-only: not a fact-identity or dedup key. No runtime engine,
   ranking, or retrieval behavior changed.
+- **docs/26 Stage 2 best-match tag/importance fold** (#77): at the curator-coverage-drop
+  site, a deterministic fallback candidate (promise/entrusted/agreement/deadline,
+  importance=4) covered by one of this turn's own curated summaries is no longer silently
+  discarded — it now folds its tag(s) and importance onto the **best-matching** (argmax
+  coverage, not first-match; deterministic lowest-index tie-break) curated summary, with an
+  audited `"deterministic candidate folded (best-match, coverage=X.XX): ..."` warning. A
+  candidate covered by no curated summary still goes to `extras` exactly as before
+  (byte-identical). New pure helpers `best_covering_summary`/`ordered_union`
+  (`app/orchestration/stages/memory_dedup.py`); `is_covered_by_summaries`, the 0.75/0.5
+  thresholds, reversal markers, and framing-strip are unmodified. This is a real, narrow
+  runtime behavior change (a previously-silent tag/importance loss is now recovered and
+  audited); write-dedup, ranking, and retrieval are untouched.
 
 ## 1.3.0 — 2026-07-12
 

@@ -15,7 +15,11 @@ compass/dawn adversarial pair -- pinned verbatim from
 ``tests/unit/test_deterministic_extractor.py`` -- still behaves exactly as #72 left
 it at the ``TurnMemoryStage`` integration level: the distinct terse compass-gift
 candidate SURVIVES the 0.75 write-dedup threshold, a near-verbatim restatement of it
-is DROPPED, and the drop is auditable (the warning names the dropped summary).
+is DROPPED, and the drop is auditable (the warning names the dropped summary). Also
+proves (d) the Stage 2 best-match tag/importance fold (docs/26 §3.2, backlog #77): a
+deterministic candidate covered (at the separate, unchanged 0.5 coverage-drop
+threshold) by this turn's own curated summary donates its tag and importance=4 onto
+that summary instead of being silently discarded.
 """
 
 from __future__ import annotations
@@ -55,10 +59,32 @@ _PROMISE_TURN_MESSAGE = "I promise to guard the eastern vault before midnight."
 _PROMISE_FRAMED_SUMMARY = f'The player stated: "{_PROMISE_TURN_MESSAGE}"'
 _ASSISTANT_MESSAGE = "Iria considers this quietly."
 
+# Stage 2 (#77, docs/26 §3.2): a turn where BOTH sides fire for real -- the message
+# matches a real deterministic trigger (a distinct bridge/sunrise event, so it cannot
+# collide with the vault/dawn/compass facts above at either coverage threshold; see
+# the scores recorded below) while the curator, keyed on its own marker, curates a
+# paraphrase of the SAME event that omits the tag entirely and under-scores its
+# importance. This is what proves the coverage-drop fold, not just the write-dedup
+# path proven by (b)/(c) above.
+_FOLD_TARGET_MARKER = "FOLD_TARGET_TURN"
+_FOLD_TARGET_MESSAGE = (
+    f"{_FOLD_TARGET_MARKER}. I promise to meet at the northern bridge before sunrise."
+)
+_FOLD_TARGET_FRAMED_SUMMARY = (
+    'The player stated: "I promise to meet at the northern bridge before sunrise."'
+)
+# Coverage of the deterministic candidate above against this curated paraphrase is
+# 0.83 (well clear of the 0.5 coverage-drop threshold) via best_covering_summary;
+# coverage of this same paraphrase against the three PRE-EXISTING persisted summaries
+# above is 0.0 at the (separate, unchanged) 0.75 write-dedup threshold, so the fold
+# survives into a persisted memory rather than being write-deduped away.
+_FOLD_CURATOR_SUMMARY = "The player swore to meet at the northern bridge before sunrise."
+
 # Markers select the fake curator's scripted response (mirrors memory_continuity's
-# _EARLY_DIALOGUE_MARKER pattern); none of them match the extractor's promise/
-# entrust/agreement/deadline patterns, so fallback_candidates stays empty on turns
-# 2-4 and the curator alone controls what gets persisted there.
+# _EARLY_DIALOGUE_MARKER pattern); none of the first three match the extractor's
+# promise/entrust/agreement/deadline patterns, so fallback_candidates stays empty on
+# turns 2-4 and the curator alone controls what gets persisted there. The fold-target
+# marker is the one exception: its message deliberately DOES match a trigger pattern.
 _SEED_DAWN_PROMISE_MARKER = "SEED_DAWN_PROMISE_TURN"
 _COMPASS_GIFT_MARKER = "COMPASS_GIFT_TURN"
 _COMPASS_RESTATEMENT_MARKER = "COMPASS_RESTATEMENT_TURN"
@@ -132,6 +158,11 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
             _COMPASS_RESTATEMENT_MARKER: _curated_json(
                 _COMPASS_RESTATEMENT_SUMMARY, importance=2, tags=["entrusted"]
             ),
+            # Stage 2 (#77): curator paraphrases the fold-target event but forgets
+            # the tag and under-scores importance -- the fold must repair both.
+            _FOLD_TARGET_MARKER: _curated_json(
+                _FOLD_CURATOR_SUMMARY, importance=2, tags=["reaction"]
+            ),
         }
     )
     routing_stage = TurnRoutingStage(
@@ -170,6 +201,7 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
             "her to keep it until I return.",
             f"{_COMPASS_RESTATEMENT_MARKER}: I check that Iria Vale still has "
             "the silver compass I gave her.",
+            _FOLD_TARGET_MESSAGE,
         )
         turn_results = [
             await stage.run(
@@ -186,7 +218,7 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
         memories = memory_store.list_memories_for_session(fixture.session.id)
         connection.close()
 
-    promise_turn, _seed_turn, compass_turn, restatement_turn = turn_results
+    promise_turn, _seed_turn, compass_turn, restatement_turn, fold_target_turn = turn_results
     promise_memory = _find_memory(memories, _PROMISE_FRAMED_SUMMARY)
     compass_memory = _find_memory(memories, _COMPASS_GIFT_SUMMARY)
     restatement_memory = _find_memory(memories, _COMPASS_RESTATEMENT_SUMMARY)
@@ -199,14 +231,22 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
         None,
     )
 
-    # --- Stage 2 extension point (#77, docs/26 Section 3.2 best-match tag/
-    # importance fold): once the curator-coverage-drop site
-    # (stages/memory.py:169-177) folds a covered deterministic candidate's
-    # tags/importance onto the best-matching curated summary instead of
-    # discarding them, add an assertion here that a curator-covered fallback
-    # candidate's promise/entrusted/agreement/deadline tag survives on the
-    # folded-onto memory. Not implemented yet -- Stage 0 is instrumentation
-    # only, no runtime behavior change. ---
+    # Stage 2 (#77, docs/26 §3.2 best-match tag/importance fold): the fold-target
+    # turn's message matches a real deterministic trigger AND the (fake) curator
+    # independently curates a paraphrase of the same event that carries neither the
+    # tag nor importance=4. The curator-coverage-drop site folds the deterministic
+    # candidate onto that curated summary instead of discarding it, so the persisted
+    # memory is the curator's paraphrase (_FOLD_CURATOR_SUMMARY, not the deterministic
+    # framing) enriched with the donated tag(s) and importance.
+    fold_target_memory = _find_memory(memories, _FOLD_CURATOR_SUMMARY)
+    fold_warning = next(
+        (
+            warning
+            for warning in fold_target_turn.warnings
+            if warning.startswith("deterministic candidate folded")
+        ),
+        None,
+    )
 
     # --- Stage 3 extension point (#78, docs/26 Section 3.3 Lane A tag-eligible
     # canon pinning): once CANON_TAG_PINNING widens build_standing_facts
@@ -232,6 +272,20 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
         ),
         "dropped_restatement_is_auditable": (
             dropped_warning is not None and "silver compass to keep" in dropped_warning
+        ),
+        "deterministic_tag_and_importance_fold_onto_curated_summary": (
+            fold_target_turn.memory_written is True
+            and fold_target_memory is not None
+            and "promise" in fold_target_memory.tags
+            and "deadline" in fold_target_memory.tags
+            and "reaction" in fold_target_memory.tags  # curator's own tag survives
+            and fold_target_memory.importance == DETERMINISTIC_EVENT_IMPORTANCE
+            # Folded, not duplicated: the deterministic extractor's own framed text
+            # must NOT also appear as a separate persisted memory.
+            and _find_memory(memories, _FOLD_TARGET_FRAMED_SUMMARY) is None
+        ),
+        "fold_is_auditable": (
+            fold_warning is not None and "northern bridge before sunrise" in fold_warning
         ),
     }
     return MemoryWriteLifecycleResult(passed=all(checks.values()), checks=checks)

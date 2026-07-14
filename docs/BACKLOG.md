@@ -744,12 +744,49 @@ world-chronicle section below (#81–#83).
   multi-memory-turn residual (`tests/unit/test_live_checkpoint.py`). No Settings/
   `.env.example`, ranking, retrieval, or write-dedup changes. Gate green (ruff, mypy
   --strict, 801 pytest, 91-check regression runner); `docs/artifacts/` untouched.
-- [ ] **#77** *(correctness, S)* **Stage 2 — best-match tag/importance fold.** At the
+- [x] **#77** *(correctness, S)* **Stage 2 — best-match tag/importance fold.** At the
   curator-coverage-drop site (`stages/memory.py:169-177`), fold a covered deterministic
   candidate's tags/importance onto the **best-matching** (argmax coverage, not first-match)
   curated summary instead of silently discarding them — any player-first-person-stated durable
   event stays canon-taggable and clears the importance floor even when the curator forgets the
-  tag. [docs/26 §3.2](26_memory_retrieval_redesign.md#32-deterministic-tagimportance-fold-best-match-not-first-match). ~0.5–1 day.
+  tag. [docs/26 §3.2](26_memory_retrieval_redesign.md#32-deterministic-tagimportance-fold-best-match-not-first-match).
+  **Shipped:** two pure helpers in `app/orchestration/stages/memory_dedup.py` —
+  `best_covering_summary` (argmax-coverage variant of `is_covered_by_summaries`, itself
+  unmodified: returns the index/score of the highest-coverage curated summary among those
+  clearing the existing 0.5 `COVERAGE_THRESHOLD`, deterministic tie-break to the **lowest
+  index** on an exact-score tie) and `ordered_union` (order-preserving, dedup'd tag union) —
+  wired into the coverage-drop loop in `memory.py::_run_extraction`, which now folds
+  (`curated[idx].model_copy(update={"tags": ordered_union(...), "importance":
+  max(...)})`) instead of dropping, appending an audited `"deterministic candidate folded
+  (best-match, coverage=X.XX): <summary[:80]>"` warning per fold. No coverage → unchanged
+  `extras.append(candidate)` path, byte-identical. The fold runs before `_persist_and_index`,
+  so #76's `source_turn_id` stamping composes untouched; `is_covered_by_summaries` itself, the
+  0.75/0.5 thresholds, reversal markers, and framing-strip are byte-identical (the new helper
+  reuses `deterministic_extractor`'s private `_strip_framing`/`_reversal_markers`, not a
+  reimplementation, so the "does X cover Y" decision cannot silently drift from
+  `is_covered_by_summaries`'s own — pinned by an explicit agreement test). Tests: 6
+  pure-function unit tests (`tests/unit/orchestration/stages/test_memory_dedup.py`) covering
+  argmax-vs-first-match, the lowest-index tie-break, the no-coverage/None case, agreement with
+  `is_covered_by_summaries`, and the reversal-marker escape; 3 `TurnMemoryStage`-level tests
+  with a scripted curator (`tests/unit/orchestration/stages/test_core_stages.py`) — the pinned
+  #72 dawn-promise string folding a real entrust-triggered candidate (coverage=0.50), the
+  judge-constructed argmax-vs-first-match scenario (two curated summaries both clear 0.5 for
+  one candidate at different scores, listed low-score-first; **verified** by temporarily
+  reverting `best_covering_summary` to first-match that this exact test fails, then reverting
+  — diff-clean), and the no-coverage extras-path-unchanged case. Extended
+  `app/evals/memory_write_lifecycle.py`'s marked Stage 2 extension point with a fifth scripted
+  turn (a real deterministic trigger plus a curator paraphrase that forgets the tag and
+  under-scores importance) and two new checks
+  (`deterministic_tag_and_importance_fold_onto_curated_summary`, `fold_is_auditable`), pinned
+  in `tests/evals/test_memory_write_lifecycle.py`. Also fixed 3 pre-existing
+  `tests/unit/test_turn_orchestrator.py` tests whose shared fixture (a "return before dawn"
+  promise message plus a curator summary already about returning before dawn) incidentally
+  cleared the coverage threshold (0.67): their exact `warnings ==` assertions now include the
+  new fold-audit warning that this previously-silent drop now emits — a real, expected
+  behavior change (a tag that used to vanish with zero trace is now visible), not a test
+  weakening. No Settings/`.env.example`, ranking, retrieval, threshold, or write-dedup
+  changes. Gate green (ruff, mypy --strict, 810 pytest, 93-check regression runner);
+  `docs/artifacts/` untouched.
 - [ ] **#78** *(retrieval, M — fixes #73's canon-tagged instance)* **Stage 3 / Lane A —
   tag-eligible canon pinning.** `CANON_TAG_PINNING=false` (byte-identical default) widens
   `build_standing_facts` eligibility to CANON_TAG-carrying sub-floor memories — the blue-seal

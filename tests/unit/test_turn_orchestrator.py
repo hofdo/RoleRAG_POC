@@ -489,7 +489,14 @@ async def test_turn_orchestrator_sets_memory_written_when_curator_persists_memor
     )
 
     assert result.memory_written is True
-    assert result.warnings == []
+    # docs/26 §3.2 (#77): the message's own deterministic candidate (tags=[promise,
+    # deadline]) is covered (0.67) by the curator's summary above, so it folds onto
+    # it -- "deadline" donated (curated already carried "promise") -- instead of
+    # being silently dropped; the fold is audited as a warning.
+    assert result.warnings == [
+        'deterministic candidate folded (best-match, coverage=0.67): '
+        'The player stated: "I promise I will return before dawn to face the regent."'
+    ]
     # #76 (docs/26 §3.1) inline call site: the turn's memories are stamped with
     # the just-persisted turn's own id (turn_orchestrator.py's memory-stage call
     # passes persistence.turn.id).
@@ -564,7 +571,15 @@ async def test_turn_orchestrator_returns_response_when_memory_indexing_fails(
 
     assert result.text == "I have heard enough to know the regent fears open daylight."
     assert result.memory_written is True
-    assert result.warnings == ["memory indexing skipped: qdrant offline"]
+    # docs/26 §3.2 (#77): same shared fixture as the curator-persists-memory test
+    # above -- the message's deterministic candidate folds onto the curator's
+    # summary (coverage=0.67) before indexing ever runs, so its audit warning
+    # precedes the (unrelated) indexing-failure warning.
+    assert result.warnings == [
+        'deterministic candidate folded (best-match, coverage=0.67): '
+        'The player stated: "I promise I will return before dawn to face the regent."',
+        "memory indexing skipped: qdrant offline",
+    ]
     assert len(memory_indexer.calls) == 1
 
 
@@ -614,7 +629,13 @@ async def test_turn_orchestrator_treats_embedding_model_mismatch_as_write_blocki
     assert result.text == "I have heard enough to know the regent fears open daylight."
     # The SQLite write (authoritative state) still succeeds; only vector indexing is blocked.
     assert result.memory_written is True
-    assert result.warnings == [f"memory indexing skipped: {mismatch}"]
+    # docs/26 §3.2 (#77): same shared fixture as the other two tests above -- the
+    # fold's audit warning precedes the (unrelated) indexing-mismatch warning.
+    assert result.warnings == [
+        'deterministic candidate folded (best-match, coverage=0.67): '
+        'The player stated: "I promise I will return before dawn to face the regent."',
+        f"memory indexing skipped: {mismatch}",
+    ]
     assert len(memory_indexer.calls) == 1
 
 

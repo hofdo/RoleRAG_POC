@@ -13,12 +13,15 @@ from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import (
     contains_durable_event_terms,
     extract_explicit_durable_events,
-    is_covered_by_summaries,
 )
 from app.orchestration.stages.critique import record_structured_failure, validate_gating
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.memory_consolidation import MemoryConsolidator
-from app.orchestration.stages.memory_dedup import MemoryDeduplicator
+from app.orchestration.stages.memory_dedup import (
+    MemoryDeduplicator,
+    best_covering_summary,
+    ordered_union,
+)
 from app.orchestration.stages.memory_protocols import (
     MemoryCuratingAgent,
     MemoryIndexing,
@@ -168,12 +171,33 @@ class TurnMemoryStage:
                 assistant_message=assistant_message,
             )
             curated = list(memory_result.memories) if memory_result.write_memory else []
+            # curated_summaries is computed once: folding below only ever updates a
+            # curated candidate's tags/importance, never its .summary, so the term
+            # coverage it is checked against does not change across iterations.
             curated_summaries = [candidate.summary for candidate in curated]
-            extras = [
-                candidate
-                for candidate in fallback_candidates
-                if not is_covered_by_summaries(candidate.summary, curated_summaries)
-            ]
+            extras: list[MemoryCandidate] = []
+            for candidate in fallback_candidates:
+                covering = best_covering_summary(candidate.summary, curated_summaries)
+                if covering is None:
+                    extras.append(candidate)
+                    continue
+                # docs/26 §3.2 (#77): fold the deterministic candidate's guaranteed
+                # tag + importance onto the BEST-matching (argmax coverage, not
+                # first-match) curated summary instead of silently discarding them --
+                # a coverage-drop can no longer silence a durable event's canon
+                # eligibility, even though the duplicate candidate row itself is
+                # still gone.
+                target = curated[covering.index]
+                curated[covering.index] = target.model_copy(
+                    update={
+                        "tags": ordered_union(target.tags, candidate.tags),
+                        "importance": max(target.importance, candidate.importance),
+                    }
+                )
+                warnings.append(
+                    "deterministic candidate folded (best-match, coverage="
+                    f"{covering.score:.2f}): {candidate.summary[:80]}"
+                )
             if extras:
                 warnings.append(
                     f"deterministic memory fallback added {len(extras)} explicit durable event(s)"

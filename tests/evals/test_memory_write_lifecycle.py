@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.evals.memory_write_lifecycle import evaluate_memory_write_lifecycle
 
 
-def test_memory_write_lifecycle_eval_proves_extraction_dedup_and_auditable_drops() -> None:
+def test_memory_write_lifecycle_eval_proves_extraction_dedup_fold_and_auditable_drops() -> None:
     result = evaluate_memory_write_lifecycle()
 
     assert result.passed is True
@@ -14,4 +14,6 @@ def test_memory_write_lifecycle_eval_proves_extraction_dedup_and_auditable_drops
         "distinct_compass_candidate_survives_write_dedup": True,
         "near_verbatim_restatement_dropped_by_write_dedup": True,
         "dropped_restatement_is_auditable": True,
+        "deterministic_tag_and_importance_fold_onto_curated_summary": True,
+        "fold_is_auditable": True,
     }
