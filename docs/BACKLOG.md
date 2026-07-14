@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-14 @ aa05954
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -607,6 +607,15 @@ Ordered by value. Effort S/M/L.
   also a P1.2 viability note). Acceptance for P1.1 hybrid / P2.5 rerank: this query against
   this pool must place the blue-seal memory in the selected set; then re-run the full
   docs/25 Phase D preset, which is blocked on this item.
+  **Update 2026-07-14 ([docs/26](26_memory_retrieval_redesign.md)):** fix path revised — the
+  blue-seal instance is a dead `canon_importance_floor` predicate on validated-good
+  `build_standing_facts` machinery, not a retrieval ceiling (verified against the preserved D3
+  artifact); Lane A canon pinning (**#78**) fixes this instance retrieval-free, Lane B lexical
+  slice quotas (**#79**) cover the general non-canon class, and P1.1/P2.5 are demoted to the
+  conditional escalation rung ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)),
+  pulled by a post-Stage-5 live miss neither lane covers — not built speculatively. The
+  acceptance bar (blue-seal reaches the actor prompt every turn) is expected to be satisfied
+  via Lane A's pinning path; that reinterpretation must be recorded explicitly at Stage 5 (#80).
 
 - [ ] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
   turn as a recall miss 10 turns later.** docs/25 Phase D run 4: turn 55 (amber_ring_token's
@@ -620,6 +629,74 @@ Ordered by value. Effort S/M/L.
   at the known ~6.7% local fail-closed rate, one of the 8 probe-definition turns is hit in
   a substantial fraction of 100-turn runs, so green P2.2 runs also depend on this
   distinction being visible.
+  **Update 2026-07-14 ([docs/26](26_memory_retrieval_redesign.md)):** scoped as Stage 0
+  (**#75**, harness fail-fast at the definition turn) plus Stage 1's provenance-OR-phrasing
+  probe attribution (**#76**) and a labeled single definition-turn retry whose survival delta
+  is *measured* at Stage 5 (**#80**), not assumed from an independence multiplication.
+
+## Planned 2026-07-14 — docs/26 memory/retrieval redesign (from the Phase D findings)
+
+The four docs/25 Phase D 100-turn runs (2026-07-12/13) produced the failure dossier behind
+#72–#74; [docs/26](26_memory_retrieval_redesign.md) synthesizes four independently-designed,
+adversarially-judged redesigns into one staged plan: **two guarantee lanes over the existing
+pipeline** (no new table, store, LLM call site, or vector-store feature), a shared provenance
+substrate, and a corrected measurement layer. Write-dedup (0.75/0.5 + reversal markers) and the
+additive boost rerank stay untouched by decision — every proposed rider on them was
+judge-broken (docs/26 §3.5, §7). Ship stages in order; each is additive, default-off where it
+changes runtime behavior, and closes with the full deterministic gate before any live run.
+Owner decisions in [docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner)
+gate the marked items — Q1 (continuity-contract framing) should be confirmed before #78 ships.
+
+- [ ] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
+  `memory_write_lifecycle` regression category (scripted transcript through the real extractor
+  + dedup + task-aware fake curator), the #74 fail-fast (a probe definition turn ending in
+  `controlled_failure` fails immediately, named, instead of surfacing as a recall miss 10 turns
+  later), and the offline D3-artifact replay script (**read-only / copy-first** — untracked
+  `-shm`/`-wal` sidecars already exist from a prior read-write open). Closes #74's harness
+  half; lands the offline write-path benchmark docs/22's gap analysis calls for.
+  [docs/26 §6 Stage 0](26_memory_retrieval_redesign.md#6-staged-migration-plan). ~1.5–2 days.
+- [ ] **#76** *(provenance, M)* **Stage 1 — `memory_episodes.source_turn_id`.** Fifth
+  idempotent `_ensure_column` migration + optional `turn_id` threaded through the
+  three-signature / two-call-site chain (inline + deferred) + consolidation carry-forward
+  (`min()` over the non-null subset of folded originals; `None` if all legacy — never a
+  sentinel) + provenance-OR-phrasing probe attribution. Attribution-only: explicitly NOT a
+  fact-identity or dedup key (the quote/`fact_key` variant was judge-broken).
+  [docs/26 §3.1](26_memory_retrieval_redesign.md#31-provenance-substrate--memory_episodessource_turn_id). ~1.5–2 days.
+- [ ] **#77** *(correctness, S)* **Stage 2 — best-match tag/importance fold.** At the
+  curator-coverage-drop site (`stages/memory.py:169-177`), fold a covered deterministic
+  candidate's tags/importance onto the **best-matching** (argmax coverage, not first-match)
+  curated summary instead of silently discarding them — any player-first-person-stated durable
+  event stays canon-taggable and clears the importance floor even when the curator forgets the
+  tag. [docs/26 §3.2](26_memory_retrieval_redesign.md#32-deterministic-tagimportance-fold-best-match-not-first-match). ~0.5–1 day.
+- [ ] **#78** *(retrieval, M — fixes #73's canon-tagged instance)* **Stage 3 / Lane A —
+  tag-eligible canon pinning.** `CANON_TAG_PINNING=false` (byte-identical default) widens
+  `build_standing_facts` eligibility to CANON_TAG-carrying sub-floor memories — the blue-seal
+  case is a dead importance-floor predicate (D3 curator distribution: 9×1 / 38×2 / 1×3, zero
+  at the floor of 4), not a retrieval ceiling. Ships with the flag-gated stale-fact
+  supersession safeguard (§3.3.1), German tag aliases (mirrored into `_PRESERVE_TAGS`), and
+  `standing_facts_count`/`_chars` diagnostics. Offline-checkable today via #75's replay script
+  against D3. Gated on docs/26 §8 Q1/Q3 confirmation.
+  [docs/26 §3.3](26_memory_retrieval_redesign.md#33-lane-a--tag-eligible-canon-pinning-retrieval-free-guarantee). ~1–1.5 days.
+- [ ] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
+  quotas.** Session-pool-IDF lexical scorer (`app/rag/lexical.py`, pure, reuses
+  `content_terms()`) + reserved slots reordered on the **final** top-5 selection window (not
+  the ~13-item rerank window — the load-bearing placement detail), `RAG_SLICE_LEXICAL_QUOTA=0`
+  default with a quotas=0 byte-identity golden test. All four judge fixes baked in from the
+  start: `CONSOLIDATED_TAG` exclusion, `min_slice_score` shipped unset (measured at Stage 5,
+  not guessed), dedicated `slice_score` field (preserves the boost-identity invariant),
+  pre-retriever fail-open ordering; plus the named confidence-gating test. Offline-falsifiable
+  against D3 (blue-seal query terms hit 4/48 pool memories) before any live run.
+  [docs/26 §3.4](26_memory_retrieval_redesign.md#34-lane-b--lexical-slice-quotas-retrieval-time-guarantee-general-case). ~2–3 days.
+- [ ] **#80** *(validation, M — owner's machine; closes docs/22 P2.2)* **Stage 5 — live
+  validation + default flip.** At least **two** full docs/25 Phase D 100-turn runs (MTP
+  non-determinism makes one green run weak evidence) with `CANON_TAG_PINNING=on`,
+  `RAG_SLICE_LEXICAL_QUOTA=2`, `LIVE_DEFINITION_RETRIES=1` (harness-local scenario semantics,
+  not a Settings field). Measure — don't assume — the definition-retry survival delta; derive
+  `min_slice_score` from observed IDF distributions; watch pinned-block context-preflight
+  pressure. Flip defaults only if both runs are clean, and record the #73 acceptance
+  reinterpretation explicitly in docs/22. P1.1 hybrid stays the conditional escalation rung
+  ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)) — pulled by
+  a live miss neither lane covers, never pushed. 1–2 elapsed days.
 
 ## Not doing (personal-use scope)
 
