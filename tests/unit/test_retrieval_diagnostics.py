@@ -40,6 +40,10 @@ def test_retrieval_diagnostics_serialize_without_chunk_text() -> None:
                 "source_type": "session_memory",
                 "tags": ["promise", "dawn"],
                 "visibility": "player",
+                # Lane B slice labels (docs/26 §3.4, #79): additive, no-slice defaults.
+                "slice_score": None,
+                "slice_matched_terms": [],
+                "slice_guaranteed": False,
             }
         ],
         "rejected": [],

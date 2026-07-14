@@ -63,6 +63,12 @@ class MemoryEpisode(BaseModel):
     visibility: Visibility
     tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
+    # Attribution-only provenance (docs/26 §3.1, #76): which turn produced this
+    # episode. Nullable/additive -- legacy rows and any row written before this
+    # stage lands deserialize as None, same contract as TurnDiagnostics.token_usage.
+    # Explicitly NOT a fact-identity or dedup key -- see docs/26 §3.1's "what this
+    # does NOT become".
+    source_turn_id: int | None = None
 
 
 class CanonFact(BaseModel):
@@ -79,6 +85,10 @@ class MemoryCandidate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     scene_id: str | None = None
     actor_id: str | None = None
+    # See MemoryEpisode.source_turn_id. Stamped onto every candidate producer
+    # (curator, deterministic extractor, curator-failure fallback) before
+    # persistence -- see TurnMemoryStage._persist_and_index.
+    source_turn_id: int | None = None
 
 
 class MemoryCuratorResult(BaseModel):
@@ -168,6 +178,13 @@ class RetrievalCandidateDiagnostic(BaseModel):
     adjusted_score: float
     applied_boosts: dict[str, float] = Field(default_factory=dict)
     selected_rank: int | None = Field(default=None, ge=1)
+    # Lane B lexical slice labels (docs/26 §3.4, #79); additive, no-slice defaults.
+    # slice_score is the matched terms' summed session-pool IDF, kept as a dedicated
+    # field rather than folded into applied_boosts so the adjusted==original+boosts
+    # identity holds for injected members too. See ChunkRetrievalDiagnostic.
+    slice_score: float | None = None
+    slice_matched_terms: list[str] = Field(default_factory=list)
+    slice_guaranteed: bool = False
 
 
 class TurnRetrievalDiagnostics(BaseModel):
@@ -192,6 +209,15 @@ class TurnDiagnostics(BaseModel):
     # Optional and additive: old persisted rows without this key deserialize with
     # token_usage=None (docs #69).
     token_usage: dict[str, int] | None = None
+    # Standing-facts (Lane A canon pinning) diagnostics (docs/26 §3.3, #78): the
+    # count and total char length of context.standing_facts for this turn, populated
+    # every turn regardless of canon_tag_pinning (counting is not a behavior change --
+    # only whether the flag widens what gets counted). Lets canon-cap saturation
+    # (canon_max_items/canon_max_chars) become VISIBLE rather than silently dropping
+    # the oldest/lowest-importance pinned line. Optional and additive: old persisted
+    # rows without these keys deserialize as None, same contract as token_usage.
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
 
 
 class DeferredMemoryJob(BaseModel):
@@ -225,6 +251,9 @@ class TurnResult(BaseModel):
     stage_timings: dict[str, float] = Field(default_factory=dict)
     # See TurnDiagnostics.token_usage for the same-generation-as-final-text rule.
     token_usage: dict[str, int] | None = None
+    # See TurnDiagnostics.standing_facts_count/standing_facts_chars.
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
     deferred_memory: "DeferredMemoryJob | None" = Field(default=None, exclude=True)
 

@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from app.domain import MemoryCandidate
 from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import (
+    COVERAGE_THRESHOLD,
     WRITE_DEDUP_COVERAGE_THRESHOLD,
+    _reversal_markers,
+    _strip_framing,
     is_covered_by_summaries,
 )
 from app.memory.semantic_dedup import is_semantic_duplicate
 from app.orchestration.stages.session_summary_cache import SessionSummaryCache
 from app.rag.embeddings import EmbeddingProvider
+from app.rag.ranking import content_terms
 
 
 class MemoryDeduplicator:
@@ -116,3 +123,67 @@ def _snippet(summary: str, limit: int = 80) -> str:
     # into turn diagnostics, so the snippet makes drops auditable after the fact.
     text = summary if len(summary) <= limit else summary[: limit - 1] + "…"
     return f'"{text}"'
+
+
+@dataclass(frozen=True)
+class CoverageMatch:
+    """The argmax result of `best_covering_summary`: which curated summary covers a
+    candidate best, and by how much."""
+
+    index: int
+    score: float
+
+
+def best_covering_summary(
+    candidate_summary: str,
+    summaries: Sequence[str],
+    *,
+    threshold: float = COVERAGE_THRESHOLD,
+) -> CoverageMatch | None:
+    """Argmax-coverage variant of `is_covered_by_summaries` (docs/26 §3.2): instead of
+    a bool for the first summary that clears `threshold`, return the index + score of
+    the summary with the HIGHEST coverage among those that clear it.
+
+    Reuses `is_covered_by_summaries`'s own term-overlap + reversal-marker primitives
+    unmodified, so for every input reachable from the real deterministic extractor
+    (candidate summaries always carry real content terms -- see the guard below),
+    `is_covered_by_summaries(candidate_summary, summaries, threshold=threshold)` is
+    True if and only if this returns non-None. `is_covered_by_summaries` itself is
+    untouched.
+
+    Deterministic tie-break: the LOWEST index wins an exact-score tie (first
+    encountered), per docs/26 §3.2.
+    """
+    candidate_terms = content_terms(_strip_framing(candidate_summary))
+    if not candidate_terms:
+        # Cannot happen via extract_explicit_durable_events (every extracted
+        # candidate matches a trigger pattern with real content words); guarded here
+        # only to avoid a ZeroDivisionError below for any other caller.
+        return None
+    candidate_markers = _reversal_markers(candidate_summary)
+    best: CoverageMatch | None = None
+    for index, summary in enumerate(summaries):
+        overlap = len(candidate_terms & content_terms(_strip_framing(summary)))
+        score = overlap / len(candidate_terms)
+        if score < threshold:
+            continue
+        # Mirrors is_covered_by_summaries: a reversal marker present in the candidate
+        # but absent from this summary means a state CHANGE, not a duplicate -- this
+        # summary does not cover the candidate, no matter how high its term overlap.
+        if candidate_markers - _reversal_markers(summary):
+            continue
+        if best is None or score > best.score:
+            best = CoverageMatch(index=index, score=score)
+    return best
+
+
+def ordered_union(base: Sequence[str], additional: Sequence[str]) -> list[str]:
+    """`base`'s items in order, then any `additional` items not already present (in
+    their own relative order). No duplicates either way."""
+    result = list(base)
+    seen = set(result)
+    for item in additional:
+        if item not in seen:
+            result.append(item)
+            seen.add(item)
+    return result

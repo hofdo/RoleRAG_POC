@@ -147,6 +147,11 @@ class RetrievalCandidateResponse(BaseModel):
     adjusted_score: float
     applied_boosts: dict[str, float] = Field(default_factory=dict)
     selected_rank: int | None = None
+    # Lane B lexical slice labels (docs/26 §3.4, #79); additive, no-slice defaults so
+    # a slice pick is never a silent cosine mystery in the inspection payload.
+    slice_score: float | None = None
+    slice_matched_terms: list[str] = Field(default_factory=list)
+    slice_guaranteed: bool = False
 
 
 class RetrievalDiagnosticsResponse(BaseModel):
@@ -179,6 +184,11 @@ class CreateTurnResponse(BaseModel):
     # when a repair ran, otherwise the initial actor generation's). None when no
     # generation completed or the provider reported no usage (#69).
     token_usage: dict[str, int] | None = None
+    # Standing-facts (Lane A canon pinning) diagnostics (docs/26 §3.3, #78): count and
+    # total char length of this turn's pinned Standing-facts block, populated every
+    # turn. Mirrors token_usage's optional/additive contract.
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
 
 
 class StreamTextPayload(BaseModel):
@@ -195,6 +205,8 @@ class StreamFinalPayload(BaseModel):
     retrieval: RetrievalDiagnosticsResponse | None = None
     stage_timings: dict[str, float] = Field(default_factory=dict)
     token_usage: dict[str, int] | None = None
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
 
 
 class StreamFailurePayload(StreamFinalPayload):
@@ -280,6 +292,8 @@ class TurnDetailResponse(BaseModel):
     stage_timings: dict[str, float] = Field(default_factory=dict)
     retrieval: RetrievalDiagnosticsResponse | None = None
     token_usage: dict[str, int] | None = None
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
 
 
 class EvalRunSummary(BaseModel):

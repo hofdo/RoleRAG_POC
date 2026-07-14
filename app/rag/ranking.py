@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from app.domain import RetrievedChunk
+from app.domain import MemoryEpisode, RetrievedChunk
+from app.domain.visibility import Visibility
 from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics
 from app.rag.models import RagCollection
+
+if TYPE_CHECKING:
+    from app.rag.lexical import LexicalHit
 
 SESSION_MEMORY_WEIGHT: Final[float] = 0.08
 PERSONA_MEMORY_WEIGHT: Final[float] = 0.04
@@ -17,6 +22,17 @@ PERSONA_ID_MATCH_BOOST: Final[float] = 0.03
 IMPORTANCE_STEP_BOOST: Final[float] = 0.015
 LEXICAL_MATCH_STEP_BOOST: Final[float] = 0.05
 LEXICAL_MATCH_MAX_BOOST: Final[float] = 0.25
+
+# Confidence-equivalent contributed to retrieval_confidence by a chunk guaranteed
+# into the prompt by the Lane B lexical slice (docs/26 §3.4, backlog #79). A hit's
+# raw summed-IDF slice_score is on a session-relative scale that is NOT comparable
+# to cosine similarity, so a slice member instead floors its confidence
+# contribution at this fixed cosine-equivalent. 0.5 clears the default
+# low_retrieval_confidence threshold (0.45, app/config.py) so a turn rescued
+# ENTIRELY by the lexical slice is not treated as low-confidence and does not
+# trigger hedging on exactly the turn the slice exists to rescue. Pinned by the
+# named slice-confidence test.
+SLICE_CONFIDENCE_EQUIVALENT: Final[float] = 0.5
 
 # Function words excluded from lexical overlap so that conversational framing
 # ("I ask whether she...") does not boost unrelated chunks.
@@ -92,6 +108,39 @@ class RankedChunk:
     original_score: float
     adjusted_score: float
     applied_boosts: dict[str, float]
+
+
+@dataclass(frozen=True)
+class SliceQuotas:
+    """Lane B lexical slice-quota policy (docs/26 §3.4, backlog #79).
+
+    ``lexical`` reserves that many prompt slots for the highest session-pool-IDF
+    lexical matches to the player's message; ``0`` is a byte-identical no-op (the
+    house opt-in pattern). ``min_slice_score`` is fix 2's floor: only hits whose
+    summed-IDF score clears it may claim a reserved slot, so weak/common-term hits
+    spill to the fused fill exactly as if the slice were empty. ``None`` means NO
+    floor -- the mechanism ships, but docs/26 deliberately refuses to guess a
+    numeral (Stage 5 measures it), and ``None`` must behave exactly like pre-fix
+    semantics so the fix's mere presence never silently changes behavior.
+    """
+
+    lexical: int = 0
+    min_slice_score: float | None = None
+
+
+DEFAULT_SLICE_QUOTAS: Final[SliceQuotas] = SliceQuotas()
+
+
+@dataclass(frozen=True)
+class SliceQuotaResult:
+    """Output of ``apply_lexical_slice_quotas``: the reordered/injected chunk list
+    feeding ``select_retrieved_chunks_for_prompt``, its diagnostics, and the set of
+    chunk ids that occupy a guaranteed lexical slot (so the stage can compute
+    slice-aware ``retrieval_confidence`` independently of the diagnostics)."""
+
+    chunks: list[RetrievedChunk]
+    diagnostics: RetrievalDiagnostics | None
+    slice_member_ids: frozenset[str] = field(default_factory=frozenset)
 
 
 def candidate_limit(top_k: int, *, oversample_factor: int = 2) -> int:
@@ -285,4 +334,206 @@ def _sort_key(ranked_chunk: RankedChunk) -> tuple[float, float, int, str]:
         -ranked_chunk.original_score,
         COLLECTION_PRIORITY[ranked_chunk.collection],
         ranked_chunk.chunk.id,
+    )
+
+
+def _eligible_quota_hits(
+    lexical_hits: Sequence[LexicalHit], quotas: SliceQuotas
+) -> list[LexicalHit]:
+    """The top ``quotas.lexical`` hits that clear ``min_slice_score``.
+
+    ``min_slice_score is None`` (fix 2 ships unset) applies no floor -- identical
+    to pre-fix "any matched term qualifies" semantics. ``lexical_hits`` is already
+    in deterministic descending-score order (see ``score_memories_lexical``).
+    """
+    floor = quotas.min_slice_score
+    eligible = [hit for hit in lexical_hits if floor is None or hit.score >= floor]
+    return eligible[: quotas.lexical]
+
+
+def apply_lexical_slice_quotas(
+    *,
+    chunks: Sequence[RetrievedChunk],
+    diagnostics: RetrievalDiagnostics | None,
+    lexical_hits: Sequence[LexicalHit],
+    memories_by_id: Mapping[str, MemoryEpisode],
+    quotas: SliceQuotas,
+    prompt_window: int,
+) -> SliceQuotaResult:
+    """Reorder/inject so guaranteed lexical members reach the FINAL prompt window.
+
+    This operates so that ``select_retrieved_chunks_for_prompt``'s UNCHANGED walk
+    (which selects the first ``prompt_window`` PLAYER-visible, non-excluded,
+    distinct chunks front-to-back) lands the quota members in the actor prompt --
+    docs/26 §3.4's single most load-bearing detail. The mechanism is
+    ordering, not simulation: the guaranteed members are moved to the FRONT of the
+    list in quota order (a dense hit already in the natural top window is merely
+    reordered to the front, so no dense chunk is evicted; a hit deeper than the
+    window, or one not dense-fetched at all, is pulled in, evicting the lowest
+    dense chunk). ``prompt_window`` is accepted for interface clarity and future
+    caps; the front-load ordering makes the guarantee hold for any window size.
+
+    Injected members (a lexical hit whose memory was not dense-fetched) are built
+    from ``memories_by_id`` as ``original_score=0.0`` / ``applied_boosts={}`` with
+    a dedicated ``slice_score`` on the diagnostic (fix 3) -- so the
+    ``adjusted_score == original_score + sum(applied_boosts)`` identity holds for
+    every chunk (0.0 == 0.0 + 0). A dense-fetched chunk that also wins a slot keeps
+    its real score/boosts and merely gains ``slice_score``/matched-terms/guaranteed
+    labels. A memory never appears twice: a hit already present as a dense chunk is
+    promoted in place, never re-injected.
+
+    ``quotas.lexical <= 0`` (default) is a byte-identical no-op: the inputs are
+    returned unchanged with an empty ``slice_member_ids``. Passing ``chunks=()``
+    with ``diagnostics=None`` yields the lexical-only degradation the stage uses
+    when dense retrieval fails.
+    """
+    if quotas.lexical <= 0:
+        return SliceQuotaResult(chunks=list(chunks), diagnostics=diagnostics)
+    quota_hits = _eligible_quota_hits(lexical_hits, quotas)
+    if not quota_hits:
+        return SliceQuotaResult(chunks=list(chunks), diagnostics=diagnostics)
+
+    chunk_by_id = {chunk.id: chunk for chunk in chunks}
+    diag_by_id = (
+        {entry.id: entry for entry in diagnostics.selected} if diagnostics is not None else {}
+    )
+    guaranteed_chunks: list[RetrievedChunk] = []
+    guaranteed_diags: list[ChunkRetrievalDiagnostic] = []
+    consumed: set[str] = set()
+    for hit in quota_hits:
+        memory_id = hit.memory_id
+        if memory_id in consumed:
+            continue
+        dense_chunk = chunk_by_id.get(memory_id)
+        if dense_chunk is not None:
+            guaranteed_chunks.append(dense_chunk)
+            if diagnostics is not None:
+                base = diag_by_id.get(memory_id) or _diagnostic_from_chunk(dense_chunk)
+                guaranteed_diags.append(_mark_slice_diagnostic(base, hit))
+        else:
+            memory = memories_by_id.get(memory_id)
+            if memory is None:
+                continue
+            guaranteed_chunks.append(_memory_to_chunk(memory))
+            if diagnostics is not None:
+                guaranteed_diags.append(_injected_diagnostic(memory, hit))
+        consumed.add(memory_id)
+
+    if not consumed:
+        return SliceQuotaResult(chunks=list(chunks), diagnostics=diagnostics)
+
+    rest_chunks = [chunk for chunk in chunks if chunk.id not in consumed]
+    ordered_chunks = guaranteed_chunks + rest_chunks
+
+    new_diagnostics = diagnostics
+    if diagnostics is not None:
+        rest_diags = [
+            diag_by_id.get(chunk.id) or _diagnostic_from_chunk(chunk) for chunk in rest_chunks
+        ]
+        ordered_diags = guaranteed_diags + rest_diags
+        renumbered = [
+            entry.model_copy(update={"selected_rank": rank})
+            for rank, entry in enumerate(ordered_diags, start=1)
+        ]
+        # A hit injected from beyond the reranked window may also appear in
+        # ``rejected``; drop it there so a guaranteed member is never double-listed.
+        new_rejected = [entry for entry in diagnostics.rejected if entry.id not in consumed]
+        new_diagnostics = RetrievalDiagnostics(
+            query=diagnostics.query, selected=renumbered, rejected=new_rejected
+        )
+
+    return SliceQuotaResult(
+        chunks=ordered_chunks,
+        diagnostics=new_diagnostics,
+        slice_member_ids=frozenset(consumed),
+    )
+
+
+def slice_aware_confidence(
+    chunks: Sequence[RetrievedChunk], slice_member_ids: frozenset[str]
+) -> float:
+    """``retrieval_confidence`` over PLAYER-visible chunks, slice-aware (docs/26
+    §3.4). Each chunk contributes ``max(original_score, SLICE_CONFIDENCE_EQUIVALENT)``
+    when it holds a guaranteed lexical slot, else its raw ``original_score`` -- so a
+    turn rescued entirely by the lexical slice (injected chunks carry
+    ``original_score == 0.0``) is not read as low-confidence. With an empty
+    ``slice_member_ids`` this is byte-identical to the pre-Lane-B
+    ``max(chunk.score for player-visible chunks) if any else 0.0``.
+    """
+    contributions = [
+        (
+            max(chunk.score, SLICE_CONFIDENCE_EQUIVALENT)
+            if chunk.id in slice_member_ids
+            else chunk.score
+        )
+        for chunk in chunks
+        if chunk.visibility == Visibility.PLAYER
+    ]
+    return max(contributions) if contributions else 0.0
+
+
+def _memory_to_chunk(memory: MemoryEpisode) -> RetrievedChunk:
+    """Build the injected session-memory chunk, mirroring
+    ``app.memory.indexer.MemoryIndexer._to_chunk`` so an injected chunk is
+    indistinguishable from its dense-fetched form (same id, source, fields)."""
+    return RetrievedChunk(
+        id=memory.id,
+        source=f"memory_episode:{memory.id}",
+        source_type=RagCollection.SESSION_MEMORY.value,
+        text=memory.summary,
+        score=0.0,
+        visibility=memory.visibility,
+        tags=memory.tags,
+        scene_id=memory.scene_id,
+        session_id=memory.session_id,
+        actor_id=memory.actor_id,
+        importance=memory.importance,
+        created_at=memory.created_at,
+    )
+
+
+def _injected_diagnostic(memory: MemoryEpisode, hit: LexicalHit) -> ChunkRetrievalDiagnostic:
+    return ChunkRetrievalDiagnostic(
+        id=memory.id,
+        source=f"memory_episode:{memory.id}",
+        source_type=RagCollection.SESSION_MEMORY.value,
+        collection=RagCollection.SESSION_MEMORY,
+        visibility=memory.visibility,
+        tags=list(memory.tags),
+        original_score=0.0,
+        adjusted_score=0.0,
+        applied_boosts={},
+        selected_rank=None,
+        slice_score=hit.score,
+        slice_matched_terms=list(hit.matched),
+        slice_guaranteed=True,
+    )
+
+
+def _mark_slice_diagnostic(
+    entry: ChunkRetrievalDiagnostic, hit: LexicalHit
+) -> ChunkRetrievalDiagnostic:
+    return entry.model_copy(
+        update={
+            "slice_score": hit.score,
+            "slice_matched_terms": list(hit.matched),
+            "slice_guaranteed": True,
+        }
+    )
+
+
+def _diagnostic_from_chunk(chunk: RetrievedChunk) -> ChunkRetrievalDiagnostic:
+    """Fallback diagnostic for a chunk with no reranked entry (defensive: the
+    reranked ``chunks``/``diagnostics.selected`` lists are parallel in the real
+    retriever, so this is only reached if a caller supplies a mismatched pair)."""
+    return ChunkRetrievalDiagnostic(
+        id=chunk.id,
+        source=chunk.source,
+        source_type=chunk.source_type,
+        collection=RagCollection.SESSION_MEMORY,
+        visibility=chunk.visibility,
+        tags=list(chunk.tags),
+        original_score=chunk.score,
+        adjusted_score=chunk.score,
+        applied_boosts={},
     )

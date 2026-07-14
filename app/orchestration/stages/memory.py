@@ -13,12 +13,15 @@ from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import (
     contains_durable_event_terms,
     extract_explicit_durable_events,
-    is_covered_by_summaries,
 )
 from app.orchestration.stages.critique import record_structured_failure, validate_gating
 from app.orchestration.stages.failure_log import StructuredFailureRecording
 from app.orchestration.stages.memory_consolidation import MemoryConsolidator
-from app.orchestration.stages.memory_dedup import MemoryDeduplicator
+from app.orchestration.stages.memory_dedup import (
+    MemoryDeduplicator,
+    best_covering_summary,
+    ordered_union,
+)
 from app.orchestration.stages.memory_protocols import (
     MemoryCuratingAgent,
     MemoryIndexing,
@@ -60,6 +63,7 @@ class TurnMemoryStage:
         consolidation_importance_ceiling: int = 3,
         consolidation_min_age: int = 0,
         consolidation_batch_cap: int = 0,
+        canon_tag_pinning: bool = False,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -87,6 +91,7 @@ class TurnMemoryStage:
             consolidation_importance_ceiling=consolidation_importance_ceiling,
             consolidation_min_age=consolidation_min_age,
             consolidation_batch_cap=consolidation_batch_cap,
+            canon_tag_pinning=canon_tag_pinning,
         )
 
     async def run(
@@ -99,6 +104,7 @@ class TurnMemoryStage:
         assistant_message: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
+        turn_id: int | None = None,
     ) -> MemoryStageResult:
         result = await self._run_extraction(
             session=session,
@@ -108,6 +114,7 @@ class TurnMemoryStage:
             assistant_message=assistant_message,
             retrieval_confidence=retrieval_confidence,
             scene_complexity=scene_complexity,
+            turn_id=turn_id,
         )
         consolidation = await self._consolidator.consolidate_if_needed(
             session_id=session.id,
@@ -132,6 +139,7 @@ class TurnMemoryStage:
         assistant_message: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
+        turn_id: int | None = None,
     ) -> MemoryStageResult:
         if self.memory_curator is None or self.memory_store is None:
             return MemoryStageResult(memory_written=False, warnings=())
@@ -165,12 +173,33 @@ class TurnMemoryStage:
                 assistant_message=assistant_message,
             )
             curated = list(memory_result.memories) if memory_result.write_memory else []
+            # curated_summaries is computed once: folding below only ever updates a
+            # curated candidate's tags/importance, never its .summary, so the term
+            # coverage it is checked against does not change across iterations.
             curated_summaries = [candidate.summary for candidate in curated]
-            extras = [
-                candidate
-                for candidate in fallback_candidates
-                if not is_covered_by_summaries(candidate.summary, curated_summaries)
-            ]
+            extras: list[MemoryCandidate] = []
+            for candidate in fallback_candidates:
+                covering = best_covering_summary(candidate.summary, curated_summaries)
+                if covering is None:
+                    extras.append(candidate)
+                    continue
+                # docs/26 §3.2 (#77): fold the deterministic candidate's guaranteed
+                # tag + importance onto the BEST-matching (argmax coverage, not
+                # first-match) curated summary instead of silently discarding them --
+                # a coverage-drop can no longer silence a durable event's canon
+                # eligibility, even though the duplicate candidate row itself is
+                # still gone.
+                target = curated[covering.index]
+                curated[covering.index] = target.model_copy(
+                    update={
+                        "tags": ordered_union(target.tags, candidate.tags),
+                        "importance": max(target.importance, candidate.importance),
+                    }
+                )
+                warnings.append(
+                    "deterministic candidate folded (best-match, coverage="
+                    f"{covering.score:.2f}): {candidate.summary[:80]}"
+                )
             if extras:
                 warnings.append(
                     f"deterministic memory fallback added {len(extras)} explicit durable event(s)"
@@ -179,6 +208,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=[*curated, *extras],
                 warnings=warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -200,6 +230,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=fallback_candidates,
                 warnings=failure_warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -211,6 +242,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=fallback_candidates,
                 warnings=failure_warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -223,6 +255,7 @@ class TurnMemoryStage:
         session_id: str,
         candidates: list[MemoryCandidate],
         warnings: list[str],
+        turn_id: int | None = None,
     ) -> bool:
         if not candidates:
             return False
@@ -234,6 +267,7 @@ class TurnMemoryStage:
                 session_id=session_id,
                 candidates=candidates,
                 warnings=warnings,
+                turn_id=turn_id,
             )
         except Exception as exc:
             warnings.append(f"deterministic memory fallback skipped: {exc}")
@@ -245,6 +279,7 @@ class TurnMemoryStage:
         session_id: str,
         candidates: list[MemoryCandidate],
         warnings: list[str],
+        turn_id: int | None = None,
     ) -> bool:
         if not candidates or self.memory_store is None:
             return False
@@ -256,6 +291,16 @@ class TurnMemoryStage:
         )
         if not candidates:
             return False
+        # Provenance stamp (docs/26 §3.1, #76): every candidate producer -- curator,
+        # deterministic extractor (both funnel through the call above), and the
+        # curator-failure fallback (via _fallback_after_curator_failure) -- reaches
+        # persistence through this one choke point, so stamping here covers all
+        # three without duplicating the assignment at each call site.
+        if turn_id is not None:
+            candidates = [
+                candidate.model_copy(update={"source_turn_id": turn_id})
+                for candidate in candidates
+            ]
         persisted = self.memory_store.persist_memories(
             session_id=session_id,
             memories=candidates,

@@ -12,7 +12,9 @@ from app.agents.critic_agent import CriticAgentOutputError
 from app.agents.memory_curator import MemoryCuratorOutputError
 from app.domain import (
     CriticResult,
+    MemoryCandidate,
     MemoryCuratorResult,
+    MemoryEpisode,
     PersonaCard,
     RetrievedChunk,
     SceneState,
@@ -23,8 +25,9 @@ from app.domain import (
 )
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
-from app.memory import MemoryEpisodeStore
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.memory.consolidation import CONSOLIDATED_TAG
+from app.memory.deterministic_extractor import DETERMINISTIC_EVENT_IMPORTANCE
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages import (
     LoadedTurnContext,
@@ -33,10 +36,13 @@ from app.orchestration.stages import (
     TurnPersistenceStage,
     TurnRetrievalStage,
     TurnRoutingStage,
+    TurnSessionLoader,
 )
 from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
 from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult
+from app.persistence import DemoWorldRecord
+from app.rag.ranking import SliceQuotas
 
 
 def _context() -> LoadedTurnContext:
@@ -75,6 +81,160 @@ def _routing() -> TurnRoutingStage:
         local_temperature=0.75,
         cloud_temperature=0.65,
     )
+
+
+class _FakeSessionDataLoader:
+    """Minimal TurnDataLoader: one world/persona/scene, real nominal domain types
+    (a Protocol structurally matches, but its method RETURN types are concrete
+    classes -- DemoWorldRecord/PersonaCard/SceneState -- so a SimpleNamespace stand-in
+    would not satisfy mypy --strict there)."""
+
+    def load_world(self, world_id: str) -> DemoWorldRecord:
+        return DemoWorldRecord(
+            id=world_id,
+            name="Test World",
+            default_scene_id="scene",
+            persona_ids=["persona"],
+            scene_ids=["scene"],
+        )
+
+    def load_persona(self, persona_id: str) -> PersonaCard:
+        return PersonaCard(
+            id=persona_id,
+            name="Archivist",
+            role="npc",
+            public_description="A careful archivist.",
+            speaking_style="Precise.",
+        )
+
+    def load_scene(self, scene_id: str) -> SceneState:
+        return SceneState(
+            id=scene_id,
+            title="Gallery",
+            location="Palace",
+            player_visible_summary="A mirrored gallery.",
+        )
+
+
+def _build_session_loader(
+    *,
+    memories: Sequence[MemoryEpisode] = (),
+    canon_tag_pinning: bool = False,
+) -> TurnSessionLoader:
+    """docs/26 §3.3 (#78) TurnSessionLoader wiring fixture. The memory store is a
+    fake returning exactly the given ``memories`` -- full, deterministic control over
+    each MemoryEpisode's created_at (unlike a real SQLite-backed store, whose
+    wall-clock timestamps would make the stale-fact safeguard's ordering
+    non-deterministic to test)."""
+    session = SessionState(
+        id="session",
+        world_id="world",
+        active_scene_id="scene",
+        active_persona_id="persona",
+        player_name="Player",
+    )
+    memory_store = MemoryEpisodeStore(
+        memory_repository=cast(
+            Any, SimpleNamespace(list_memories_for_session=lambda session_id: list(memories))
+        )
+    )
+    return TurnSessionLoader(
+        loader=_FakeSessionDataLoader(),
+        loader_factory=None,
+        content_root="data",
+        session_repository=cast(Any, SimpleNamespace(get_session=lambda session_id: session)),
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=cast(
+                Any, SimpleNamespace(list_recent_turns=lambda session_id, limit: [])
+            ),
+            recent_turns=8,
+        ),
+        memory_store=memory_store,
+        canon_repository=None,
+        canon_importance_floor=4,
+        canon_max_items=8,
+        canon_max_chars=900,
+        canon_tag_pinning=canon_tag_pinning,
+    )
+
+
+def _tagged_memory(
+    memory_id: str,
+    *,
+    summary: str,
+    importance: int = 2,
+    tags: list[str] | None = None,
+    created_at: datetime | None = None,
+) -> MemoryEpisode:
+    return MemoryEpisode(
+        id=memory_id,
+        session_id="session",
+        scene_id="scene",
+        summary=summary,
+        importance=importance,
+        visibility=Visibility.PLAYER,
+        tags=tags if tags is not None else ["rule"],
+        created_at=created_at,
+    )
+
+
+def test_session_loader_flag_off_leaves_sub_floor_tagged_memory_unpinned() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "blue-seal", summary="The player will only trust messages with a blue wax seal."
+            )
+        ]
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == ()
+    assert context.warnings == ()
+
+
+def test_session_loader_flag_on_widens_eligibility_into_context() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "blue-seal", summary="The player will only trust messages with a blue wax seal."
+            )
+        ],
+        canon_tag_pinning=True,
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == (
+        "The player will only trust messages with a blue wax seal.",
+    )
+    assert context.warnings == ()
+
+
+def test_session_loader_flag_on_surfaces_safeguard_drop_as_context_warning() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "seal-old",
+                summary="The trust rule is a blue wax seal.",
+                created_at=datetime(2026, 6, 1, tzinfo=UTC),
+            ),
+            _tagged_memory(
+                "seal-new",
+                summary="The trust rule is now a blue wax seal plus a knock at the door.",
+                created_at=datetime(2026, 6, 2, tzinfo=UTC),
+            ),
+        ],
+        canon_tag_pinning=True,
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == (
+        "The trust rule is now a blue wax seal plus a knock at the door.",
+    )
+    assert len(context.warnings) == 1
+    assert "stale canon fact superseded" in context.warnings[0]
 
 
 def test_retrieval_stage_uses_only_player_visible_scores_for_confidence() -> None:
@@ -1064,6 +1224,7 @@ class RecordingMemoryStore:
                 importance=candidate.importance,
                 visibility=candidate.visibility,
                 tags=list(candidate.tags),
+                source_turn_id=candidate.source_turn_id,
             )
             for index, candidate in enumerate(memories)
         ]
@@ -1173,6 +1334,124 @@ async def test_memory_stage_consolidates_when_threshold_reached() -> None:
     assert set(store.consolidated_ids) == set(original_ids)
     assert set(indexer.unindexed) == set(original_ids)
     assert any("rolled up 3 memories" in warning for warning in result.warnings)
+    # docs/26 §3.1.1 (#76), all-NULL case: every folded original here came from
+    # _seed_filler, which never sets source_turn_id -- so the non-null subset is
+    # empty and the summary's source_turn_id must stay None, never a sentinel.
+    # The source_ids audit trail is recorded regardless of provenance.
+    assert store.persisted[-1].source_turn_id is None
+    assert f"source_ids:{','.join(original_ids)}" in store.persisted[-1].tags
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_source_turn_id_min_when_all_provenanced() -> None:
+    # docs/26 §3.1.1 (#76), all-provenanced case: the summary's source_turn_id is
+    # the EARLIEST (min) of the folded originals' own source_turn_id values --
+    # "when was this fact first established" -- regardless of fold order.
+    from app.domain import MemoryCandidate
+
+    store = RecordingMemoryStore()
+    context = _context()
+    store.persist_memories(
+        session_id=context.session.id,
+        memories=[
+            MemoryCandidate(
+                summary=f"Filler observation {index}",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=source_turn_id,
+            )
+            for index, source_turn_id in enumerate((30, 10, 20))
+        ],
+    )
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+    )
+
+    await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:3]]
+    summary = store.persisted[-1]
+    assert summary.source_turn_id == 10
+    assert f"source_ids:{','.join(original_ids)}" in summary.tags
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_source_turn_id_min_of_non_null_when_mixed() -> None:
+    # docs/26 §3.1.1 (#76), mixed-NULL case: one legacy/unprovenanced original
+    # (source_turn_id=None) folded together with one provenanced original in the
+    # same pass. min() must be taken over the non-null subset only -- it must never
+    # see None (Python's min() has no defined behavior comparing int and None) --
+    # and the result here is the provenanced original's own value.
+    from app.domain import MemoryCandidate
+
+    store = RecordingMemoryStore()
+    context = _context()
+    store.persist_memories(
+        session_id=context.session.id,
+        memories=[
+            MemoryCandidate(
+                summary="Legacy filler with no provenance.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=None,
+            ),
+            MemoryCandidate(
+                summary="Provenanced filler.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=15,
+            ),
+        ],
+    )
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=2,
+        consolidation_importance_ceiling=3,
+    )
+
+    await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:2]]
+    summary = store.persisted[-1]
+    assert summary.source_turn_id == 15
+    assert f"source_ids:{','.join(original_ids)}" in summary.tags
 
 
 @pytest.mark.asyncio
@@ -1743,6 +2022,210 @@ async def test_memory_stage_does_not_duplicate_event_already_curated() -> None:
     assert store.persisted[0].summary == "The player promised to return before dawn."
 
 
+class _ScriptedCurator:
+    """Fake curator returning a fixed, pre-scripted MemoryCuratorResult. Unlike
+    CoveringCurator/DecliningCurator (one hard-coded shape each), this lets a test
+    control exactly what "the curator curated this turn" while the REAL deterministic
+    extractor still runs for real against user_message -- docs/26 §3.2 (#77)'s
+    best-match fold needs both sides genuine to be meaningfully tested."""
+
+    def __init__(self, memories: list[MemoryCandidate]) -> None:
+        self._memories = memories
+
+    async def consolidate(self, **_: object) -> str:
+        raise AssertionError("consolidate not expected in this test")
+
+    async def curate(self, **_: object) -> MemoryCuratorResult:
+        return MemoryCuratorResult(
+            write_memory=bool(self._memories),
+            memories=list(self._memories),
+            reason="scripted",
+        )
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_folds_deterministic_tag_onto_covering_curated_summary() -> None:
+    # docs/26 §3.2 (#77): reuses the EXACT #72 dawn-promise string pinned verbatim in
+    # tests/unit/test_deterministic_extractor.py and app/evals/memory_write_lifecycle.py.
+    # The real deterministic extractor turns an explicit entrust sentence into a
+    # candidate that shares exactly the frame vocabulary {iria, vale, keep, return}
+    # documented in deterministic_extractor.py's WRITE_DEDUP_COVERAGE_THRESHOLD
+    # comment -- 0.50 coverage against a curated summary that never mentions the
+    # compass at all. Pre-#77 that candidate (and its "entrusted" tag, importance=4)
+    # would be silently discarded; the fold must land it on the curator's summary
+    # instead of dropping it.
+    dawn_promise_summary = (
+        "The player promised to return to the archive before dawn, provided "
+        "Iria Vale keeps the archive door unbarred."
+    )
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=dawn_promise_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=[],  # the curator forgot to tag this durable fact
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I entrust my silver compass to Iria Vale, to keep until my return.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    # Folded, not appended: still exactly one persisted memory.
+    assert len(store.persisted) == 1
+    folded = store.persisted[0]
+    assert folded.summary == dawn_promise_summary
+    assert "entrusted" in folded.tags
+    assert folded.importance == DETERMINISTIC_EVENT_IMPORTANCE  # raised from 2 to 4
+    fold_warning = next(
+        (w for w in result.warnings if w.startswith("deterministic candidate folded")), None
+    )
+    assert fold_warning is not None
+    assert "coverage=0.50" in fold_warning
+    assert "silver compass" in fold_warning
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_folds_onto_argmax_not_first_listed_summary() -> None:
+    # docs/26 §3.2 (#77), the judge-constructed wrong-donation scenario: TWO curated
+    # summaries both clear the 0.5 coverage threshold for the SAME deterministic
+    # candidate, with different scores. A first-match implementation would fold onto
+    # curated[0] (the lower-scoring summary that merely mentions the event, checked
+    # first, coverage=0.50); best-match must fold onto curated[1] instead (the
+    # higher-scoring summary that is actually about the same event, coverage=0.83).
+    # This test fails under a first-match implementation.
+    low_match_summary = "The player mentioned guarding something before midnight, vaguely."
+    high_match_summary = "The player swore to guard the amber vault before midnight without fail."
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=low_match_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=[],
+                    scene_id="scene",
+                    actor_id="persona",
+                ),
+                MemoryCandidate(
+                    summary=high_match_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=3,
+                    tags=["oath"],
+                    scene_id="scene",
+                    actor_id="persona",
+                ),
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to guard the amber vault before midnight.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 2
+    low = next(m for m in store.persisted if m.summary == low_match_summary)
+    high = next(m for m in store.persisted if m.summary == high_match_summary)
+    # The lower-scoring, first-listed summary is untouched -- a first-match
+    # implementation would have folded onto this one instead of curated[1].
+    assert low.tags == []
+    assert low.importance == 2
+    # The higher-scoring summary received the fold; its own curator-assigned tag
+    # ("oath") survives alongside the donated ones (ordered_union, no dupes).
+    assert high.tags == ["oath", "promise", "deadline"]
+    assert high.importance == DETERMINISTIC_EVENT_IMPORTANCE
+    fold_warning = next(
+        (w for w in result.warnings if w.startswith("deterministic candidate folded")), None
+    )
+    assert fold_warning is not None
+    assert "coverage=0.83" in fold_warning
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_extras_path_unchanged_when_nothing_covers_candidate() -> None:
+    # docs/26 §3.2 (#77): when nothing in this turn's curated output clears the 0.5
+    # coverage threshold, the deterministic candidate must still go to extras exactly
+    # as pre-#77 -- byte-identical path, no fold warning.
+    unrelated_summary = "The regent's banquet was postponed to next week."
+    store = RecordingMemoryStore()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ScriptedCurator(
+            [
+                MemoryCandidate(
+                    summary=unrelated_summary,
+                    visibility=Visibility.PLAYER,
+                    importance=2,
+                    tags=["lore"],
+                    scene_id="scene",
+                    actor_id="persona",
+                )
+            ]
+        ),
+        memory_indexer=None,
+        routing_stage=_routing(),
+    )
+    context = _context()
+
+    result = await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I promise to guard the amber vault before midnight.",
+        assistant_message="Iria nods once.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    assert result.memory_written is True
+    assert len(store.persisted) == 2
+    unrelated = next(m for m in store.persisted if m.summary == unrelated_summary)
+    assert unrelated.tags == ["lore"]
+    assert unrelated.importance == 2
+    extra = next(m for m in store.persisted if m.summary != unrelated_summary)
+    assert "promise" in extra.tags
+    assert "deadline" in extra.tags
+    assert extra.importance == DETERMINISTIC_EVENT_IMPORTANCE
+    assert any(
+        w == "deterministic memory fallback added 1 explicit durable event(s)"
+        for w in result.warnings
+    )
+    assert not any(w.startswith("deterministic candidate folded") for w in result.warnings)
+
+
 class AcceptingCriticAgent(FailingCriticAgent):
     def __init__(self) -> None:
         self.calls = 0
@@ -2123,3 +2606,224 @@ async def test_memory_stage_auto_gating_runs_curator_for_assistant_durable_terms
     )
 
     assert curator.calls == 1
+
+
+# --- Lane B lexical slice quotas at the stage level (docs/26 §3.4, #79) -----------
+
+
+def _memory_episode(
+    memory_id: str,
+    summary: str,
+    *,
+    tags: list[str] | None = None,
+) -> MemoryEpisode:
+    return MemoryEpisode(
+        id=memory_id,
+        session_id="session",
+        scene_id="scene",
+        summary=summary,
+        importance=2,
+        visibility=Visibility.PLAYER,
+        tags=tags or [],
+    )
+
+
+def _context_with_memories(memories: list[MemoryEpisode]) -> LoadedTurnContext:
+    base = _context()
+    return LoadedTurnContext(
+        session=base.session,
+        persona=base.persona,
+        scene=base.scene,
+        recent_turns=base.recent_turns,
+        session_memories=tuple(memories),
+    )
+
+
+def _dense_result(chunks: list[RetrievedChunk]) -> object:
+    from app.rag.diagnostics import (
+        ChunkRetrievalDiagnostic,
+        RetrievalDiagnostics,
+        RetrievalResult,
+    )
+    from app.rag.models import RagCollection
+
+    diagnostics = RetrievalDiagnostics(
+        query="q",
+        selected=[
+            ChunkRetrievalDiagnostic(
+                id=chunk.id,
+                source=chunk.source,
+                source_type=chunk.source_type,
+                collection=RagCollection.SESSION_MEMORY,
+                visibility=chunk.visibility,
+                tags=list(chunk.tags),
+                original_score=chunk.score,
+                adjusted_score=chunk.score,
+                applied_boosts={},
+                selected_rank=index,
+            )
+            for index, chunk in enumerate(chunks, start=1)
+        ],
+        rejected=[],
+    )
+    return RetrievalResult(chunks=chunks, diagnostics=diagnostics)
+
+
+def _dense_chunk(chunk_id: str, *, score: float, text: str) -> RetrievedChunk:
+    return RetrievedChunk(
+        id=chunk_id,
+        source=f"memory_episode:{chunk_id}",
+        source_type="session_memory",
+        text=text,
+        score=score,
+        visibility=Visibility.PLAYER,
+        session_id="session",
+    )
+
+
+_BLUE_SEAL_QUERY = "what rule did we agree to trust"
+
+
+def test_retrieval_stage_quota_off_ignores_memories_and_is_byte_identical() -> None:
+    # Default quotas (lexical=0): the scorer never runs, session_memories are ignored,
+    # and the stage output is exactly the retriever's -- no reorder, no slice labels,
+    # no scorer warning.
+    dense = [_dense_chunk("scene-1", score=0.6, text="iria stands by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.chunks == tuple(dense)
+    assert result.confidence == 0.6
+    assert result.warnings == ()
+    assert result.diagnostics is not None
+    assert all(entry.slice_guaranteed is False for entry in result.diagnostics.selected)
+
+
+def test_retrieval_stage_injects_lexical_hit_not_in_dense_results() -> None:
+    dense = [
+        _dense_chunk("scene-1", score=0.58, text="iria stands quietly by the tall window"),
+        _dense_chunk("scene-2", score=0.52, text="the palace market is crowded today"),
+    ]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [
+        _memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"]),
+        _memory_episode("chatter", "iria mentioned the market", tags=[]),
+    ]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    ids = [chunk.id for chunk in result.chunks]
+    assert ids[0] == "blue"  # the rare-term direct answer is promoted to the front
+    assert ids.count("blue") == 1  # injected once, never duplicated
+    # It reaches the actual actor prompt window through the UNCHANGED select walk.
+    from app.orchestration.context_budget import select_retrieved_chunks_for_prompt
+
+    selected = select_retrieved_chunks_for_prompt(
+        result.chunks, budget=ContextBudget(retrieved_chunks=5)
+    )
+    assert "blue" in {chunk.id for chunk in selected}
+    entry = next(e for e in result.diagnostics.selected if e.id == "blue")  # type: ignore[union-attr]
+    assert entry.slice_guaranteed is True
+    assert entry.slice_score is not None and entry.slice_score > 0
+    assert "rule" in entry.slice_matched_terms and "trust" in entry.slice_matched_terms
+
+
+def test_retrieval_stage_slice_only_rescue_is_not_low_confidence() -> None:
+    # The flagged confidence interaction (docs/26 §3.4): dense results are all weak
+    # (0.2), the turn is rescued entirely by an injected lexical hit (score 0.0), and
+    # the confidence must NOT read as low (below the 0.45 default) on exactly that turn.
+    from app.rag.ranking import SLICE_CONFIDENCE_EQUIVALENT
+
+    dense = [_dense_chunk("scene-1", score=0.20, text="iria stands quietly by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=1),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.confidence == SLICE_CONFIDENCE_EQUIVALENT
+    assert result.confidence >= 0.45  # not low-confidence despite dense max being 0.20
+
+
+def test_retrieval_stage_survives_retriever_failure_with_lexical_leg() -> None:
+    # Fail-open direction 1 (fix 4): a dense/Qdrant exception must NOT take the
+    # lexical leg down with it -- the stage degrades to a lexical-only prompt built
+    # from the pre-retriever hits, strictly better than today's empty fallback.
+    def boom(**_: object) -> object:
+        raise RuntimeError("qdrant offline")
+
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor_with_diagnostics=boom),
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert [chunk.id for chunk in result.chunks] == ["blue"]
+    assert result.confidence is not None and result.confidence >= 0.45
+    assert any("retrieval degraded to lexical slice" in warning for warning in result.warnings)
+
+
+def test_retrieval_stage_scorer_failure_degrades_to_dense_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Fail-open direction 2: a lexical-scorer exception degrades Lane B to a no-op
+    # (dense-only) with a warning, never failing the turn.
+    def boom(**_: object) -> object:
+        raise RuntimeError("scorer exploded")
+
+    monkeypatch.setattr("app.orchestration.stages.retrieval.score_memories_lexical", boom)
+    dense = [_dense_chunk("scene-1", score=0.6, text="iria stands by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.chunks == tuple(dense)  # dense-only
+    assert result.confidence == 0.6
+    assert any("lexical slice scorer skipped" in warning for warning in result.warnings)

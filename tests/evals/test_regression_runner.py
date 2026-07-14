@@ -19,6 +19,7 @@ def test_regression_runner_reports_all_eval_categories() -> None:
         "role_consistency",
         "memory",
         "memory_continuity",
+        "memory_write_lifecycle",
         "draft_validation",
         "provider_binding",
         "containment",

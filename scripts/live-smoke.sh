@@ -56,6 +56,11 @@ if [[ -z "${LIVE_TURN_COUNT:-}" ]]; then
   fi
 fi
 LIVE_FAIL_ON_STRUCTURED_WARNINGS="${LIVE_FAIL_ON_STRUCTURED_WARNINGS:-1}"
+# #80 (docs/26 Stage 5 / §8 Q4): harness-local scenario-semantics knob, NOT a
+# Settings/.env.example field -- resends a probe's failed DEFINITION turn
+# message up to N times before failing fast. Default 0 = byte-identical to
+# today's fail-fast (mirrors LIVE_FAIL_ON_STRUCTURED_WARNINGS's plumbing).
+LIVE_DEFINITION_RETRIES="${LIVE_DEFINITION_RETRIES:-0}"
 
 API_PID=""
 LLAMA_CPP_PID=""
@@ -89,6 +94,7 @@ cat > "${REPORT}" <<EOF
 - cloud_mode: ${CLOUD_MODE}
 - live_turn_count: ${LIVE_TURN_COUNT:-8}
 - live_fail_on_structured_warnings: ${LIVE_FAIL_ON_STRUCTURED_WARNINGS}
+- live_definition_retries: ${LIVE_DEFINITION_RETRIES}
 
 ## Steps
 EOF
@@ -382,6 +388,7 @@ export CLOUD_MODE
 export LIVE_TURN_COUNT
 export LIVE_LONG_TURN_COUNT
 export LIVE_FAIL_ON_STRUCTURED_WARNINGS
+export LIVE_DEFINITION_RETRIES
 export STRUCTURED_OUTPUT_FAILURE_LOG_DIR="${STRUCTURED_OUTPUT_FAILURE_LOG_DIR:-${RAW_DIR}/structured-failures}"
 export PLAYWRIGHT_BASE_URL="${API_BASE_URL}"
 export PLAYWRIGHT_OUTPUT_DIR="${ARTIFACT_DIR}/playwright-results"
@@ -567,6 +574,7 @@ run_step conversation-checkpoint "Run ${LIVE_TURN_COUNT}-turn Rose Gallery check
   --database-path "${DATABASE_PATH}" \
   --turn-count "${LIVE_TURN_COUNT}" \
   --fail-on-structured-warnings "${LIVE_FAIL_ON_STRUCTURED_WARNINGS}" \
+  --definition-retries "${LIVE_DEFINITION_RETRIES}" \
   --json-report "${RAW_DIR}/conversation-checkpoint.json" \
   --markdown-report "${WORK_DIR}/conversation-checkpoint.md"
 

@@ -1,6 +1,6 @@
 # 25 — Live Validation Runbook
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-14 @ 3d5e18f
 
 How to clear the four live-validation caveats that are shipped, gate-green, and byte-identical
 by default, but still missing the one kind of evidence the deterministic offline gate cannot
@@ -266,6 +266,186 @@ environment variables, so it can run Phase A's plain baseline on a self-hosted r
 would run a 100-turn *baseline* (no preset), which is a different, less useful data point than
 this phase — Phases B, C, and D are local-only for now.
 
+## Phase E — docs/26 Stage 5: Lanes A+B live validation (#80)
+
+Phases A–D's setup, environment, and reading conventions are assumed from here on — this phase
+does not repeat them. It validates the [docs/26](26_memory_retrieval_redesign.md) redesign
+stages shipped 2026-07-14 (#75 harness fail-fast, #76 provenance attribution, #77 best-match
+tag/importance fold, #78 Lane A canon pinning, #79 Lane B lexical slice quotas, plus this
+document's own #80 session-side wiring: the definition-turn retry and its offset-aware
+bookkeeping) against a real `llama-server` + Qdrant 100-turn run. Nothing below is new machinery
+to write — every mechanism it exercises is already shipped, gate-green, and
+byte-identical-by-default; this phase is where it earns a live default flip the same way Phases
+A–D earned theirs.
+
+### The command
+
+The full Phase D preset, plus the three docs/26 knobs Stage 5 exists to validate:
+`CANON_TAG_PINNING=true` (Lane A, #78), `RAG_SLICE_LEXICAL_QUOTA=2` (Lane B, #79), and
+`LIVE_DEFINITION_RETRIES=1` (the harness-local retry, #80 — confirmed harness-scoped, not a
+Settings field, by docs/26 §8 Q4).
+
+```bash
+LIVE_ARTIFACT_DIR=/tmp/rolerag-live-test-stage5-run1 \
+MEMORY_CONSOLIDATION_THRESHOLD=40 \
+MEMORY_CONSOLIDATION_MAX_IMPORTANCE=2 \
+MEMORY_CONSOLIDATION_MIN_AGE=10 \
+MEMORY_CONSOLIDATION_BATCH_CAP=15 \
+RAG_WRITE_DEDUP_COSINE_THRESHOLD=0.92 \
+RAG_RECENCY_WEIGHT=0.02 \
+CANON_TAG_PINNING=true \
+RAG_SLICE_LEXICAL_QUOTA=2 \
+LIVE_DEFINITION_RETRIES=1 \
+LIVE_TURN_COUNT=100 \
+bash scripts/live-smoke.sh
+```
+
+### At least two clean runs
+
+Run the command above **twice**, end to end, before touching any default — not once. Docs/26
+§6 Stage 5 is explicit about why: MTP's non-bit-determinism re-rolls the curator's paraphrase
+and tag choices on every scripted rerun, so a single green run is weak evidence for a default
+flip (the same reasoning that made the original P2.2 preset require two-plus runs' worth of
+scrutiny). Point the second run at its own artifact dir so the first isn't overwritten
+(`live-smoke.sh` wipes `LIVE_ARTIFACT_DIR` at the start of every run) — change only that one
+variable, keep every other env var identical:
+
+```bash
+LIVE_ARTIFACT_DIR=/tmp/rolerag-live-test-stage5-run2 \
+MEMORY_CONSOLIDATION_THRESHOLD=40 \
+MEMORY_CONSOLIDATION_MAX_IMPORTANCE=2 \
+MEMORY_CONSOLIDATION_MIN_AGE=10 \
+MEMORY_CONSOLIDATION_BATCH_CAP=15 \
+RAG_WRITE_DEDUP_COSINE_THRESHOLD=0.92 \
+RAG_RECENCY_WEIGHT=0.02 \
+CANON_TAG_PINNING=true \
+RAG_SLICE_LEXICAL_QUOTA=2 \
+LIVE_DEFINITION_RETRIES=1 \
+LIVE_TURN_COUNT=100 \
+bash scripts/live-smoke.sh
+```
+
+### What to read, per run
+
+Both runs produce the same shape of artifact — substitute each run's own `LIVE_ARTIFACT_DIR`:
+`${LIVE_ARTIFACT_DIR}/raw/conversation-checkpoint.json`.
+
+- **Blue-seal-class pinning evidence (Lane A, #78).** Walk `turns[].standing_facts_count` /
+  `turns[].standing_facts_chars` turn by turn. Once the blue-seal-class fact (or any
+  durable-tagged fact) has been established, its pinned block must never drop back to
+  `0`/`null` for the rest of the run — that is the whole guarantee `CANON_TAG_PINNING` is
+  buying. Cross-check against the verified-offline headroom (docs/26 §3.3: 3 tag-eligible
+  items, 352 chars against the D3 pool) — a live campaign growing past `canon_max_items=8` /
+  `canon_max_chars=900` is docs/26 §8's open question 2, not a failure by itself, but it
+  should be visible here if it happens.
+- **Lexical slice activity (Lane B, #79).** In each callback turn's
+  `turns[].retrieval.selected[]`, read `slice_score` / `slice_matched_terms` /
+  `slice_guaranteed` on the entries that carry them. A `slice_guaranteed: true` entry is
+  Lane B claiming a reserved slot; note which callback turns it fires on and whether the
+  matched terms are genuinely rare (the offline D3 replay predicted the blue-seal memory
+  ranking #1/15 on `{messag, rule, trust}` — does a live run's matched-term set look
+  similarly targeted, or is the slice firing on common scene vocabulary, which would mean
+  `min_slice_score` needs to be set higher than "unset/no floor" once you pick a real value).
+- **Definition-turn retries — the measured survival delta (#80).** Read
+  `quality_metrics.definition_retries_allowed` and `quality_metrics.definition_retries_used`
+  (per-event; also mirrored per event under `events[].definition_retries_used`). For every
+  event where a retry was consumed, cross-reference `turns[]` for the two (or more) entries
+  sharing that `turn_index` — the labeled `is_definition_retry`/`retry_attempt` entries — and
+  record whether the retry succeeded. This is the raw material for the delta docs/26 §4 and §7
+  insist on **measuring, not assuming**: the naive `0.067² ≈ 0.45%`/`~96.5%` independence math
+  was rejected specifically because retry outcomes may correlate with the original failure
+  (same model state, same draft class). Two runs give you at most a couple of data points per
+  probe — say so plainly when you record this rather than presenting it as a stable rate.
+- **Context-preflight warning counts (Lane A pressure).**
+  `quality_metrics.context_preflight_warning_count` /
+  `quality_metrics.context_actual_warning_count`. Lane A's pinned Standing-facts block adds
+  prompt tokens every turn now, unconditionally (not only when a callback needs them) —
+  confirm this does not push a real ~100-turn campaign over the context-accounting ceiling in
+  a way Phase B's baseline didn't already show.
+- **Recall/selection misses vs. Phase A/D baselines.**
+  `quality_metrics.callback_recall_misses`, `retrieval_selection_misses`,
+  `retrieval_miss_ranks` — compare against your own Phase A and Phase D numbers (or
+  [docs/22 § P2.2](22_rag_scaling_roadmap.md#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence)'s
+  recorded runs if you have not re-run A/D recently). Lanes A+B exist to make these go down,
+  or at minimum not go up, relative to the dense-only baseline; a regression here is a finding,
+  not noise to average away.
+
+### Owner-side extras this environment could not run
+
+Neither of these needs a fresh live run — both replay against artifacts this phase (or the
+preserved D3 artifact) already produces — but both need a real embedding model and/or a
+disposable Qdrant this authoring environment does not have:
+
+- `rolerag semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2` through the
+  slice-enabled retriever (`RAG_SLICE_LEXICAL_QUOTA=2` set), holding docs/22 § P0.4's
+  calibrated floors (recall@10 ≥ 0.75, nDCG@10 ≥ 0.70, German recall@10 ≥ 0.55) — confirms
+  Lane B does not regress the offline-measured semantic-quality floors now that it reorders
+  the live selection window, not just the D3 replay.
+- `reindex-memories` of the D3 pool
+  (`docs/artifacts/live-validation-D3-2026-07-12.db`) into a disposable Qdrant, then
+  `inspect_story_event` with both lanes' quotas on, for an end-to-end (not offline-replay)
+  confirmation that the blue-seal memory `354b8d98` lands in the selected top-5 for the
+  callback query. Docs/26 §6 Stage 4 already ran this once during Stage 4's own validation;
+  re-running it here, after Stage 5's two live runs, closes the loop against the exact preset
+  this phase validates rather than Stage 4's narrower one.
+
+### PASS criteria
+
+Both runs: `live-smoke.sh` exits `0`, `report.md` is all-`PASS`, and — since this preset keeps
+`LIVE_FAIL_ON_STRUCTURED_WARNINGS` at its default `1` — every checkpoint assertion held,
+including the offset-aware ones (#80): the persisted-turn-count check accounted for whatever
+`definition_retries_used` totalled, and provenance attribution resolved against the
+actually-successful attempt on every retried event. Both are checkpoint-internal invariants —
+if either were wrong, the run would have failed outright with a `CheckpointError`, not silently
+produced a wrong number. Beyond exit code: the pinning/slice/retry evidence above must read as
+*working as designed*, not merely as "the run did not crash" — a green run where
+`standing_facts_count` never rises above `0`, or where `slice_guaranteed` never fires once in
+100 turns, is a finding to record and investigate, not a pass.
+
+### On success (both runs clean)
+
+- **Derive and record `min_slice_score`.** Pull the summed-IDF `slice_score` values observed
+  above (both runs) for every `slice_guaranteed: true` hit and every near-miss (matched but
+  not guaranteed). Set a concrete `RAG_SLICE_MIN_SCORE` default from that observed
+  distribution — docs/26 §3.4 is explicit that no numeral ships pre-measured; this is where
+  one gets chosen, WITH the observed numbers that justified it recorded alongside it, not just
+  the final value.
+- **Flip the two runtime defaults** — `CANON_TAG_PINNING` and `RAG_SLICE_LEXICAL_QUOTA`
+  (`app/config.py` / `.env.example`) from `false`/`0` to `true`/`2`, plus the newly-derived
+  `RAG_SLICE_MIN_SCORE`. Re-run the deterministic gate after flipping (`ruff check . && mypy .
+  && pytest && python -m app.evals.regression_runner`) — the quotas=0/flag-off golden tests pin
+  the *old* default's byte-identity, not the new one, so confirm nothing else in the suite
+  implicitly assumed the old defaults.
+- **[docs/22 § P2.2](22_rag_scaling_roadmap.md#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence)** —
+  add the dated Stage 5 confirmation and both runs' key numbers, plus — required, not
+  optional, per docs/26 §6 Stage 5 — the explicit **#73 acceptance reinterpretation**: the
+  acceptance bar ("blue-seal reaches the selected top-5") is satisfied via Lane A's
+  retrieval-free pinning path (and/or Lane B's lexical slice) for this instance, **not** via a
+  rank improvement in dense retrieval. Record that reinterpretation in words, not only the
+  passing numbers — docs/26 §6 Stage 5 calls this out by name as something that must be
+  recorded explicitly, not left implicit behind a green checkmark.
+- **[docs/BACKLOG.md](BACKLOG.md) #80** — flip to `[x]`, dated, with both runs' artifact paths,
+  the measured retry survival delta (stated as an observation from N data points, not a
+  rate), and the derived `min_slice_score`.
+- **`CHANGELOG.md` `Unreleased`** — one entry for the default flips, exactly the case Phase D's
+  own Recording matrix row calls for ("only if you also flip any shipped default").
+- **Add a row to the [Recording matrix](#recording-matrix)** below, matching the existing
+  rows' shape (Phase, Issue(s), On success update).
+
+### No loosening, and a retry-consumed run is not a re-roll
+
+The [no-loosening rule](#if-something-fails) applies here exactly as in Phases A–D: a Phase E
+failure — the pinned block dropping to `0`, the slice never firing, a retry-exhausted
+`CheckpointError`, a semantic-benchmark floor regression — is a finding about Lanes A/B or the
+preset, not a bug in the checkpoint to route around. Do not lower
+`LIVE_FAIL_ON_STRUCTURED_WARNINGS`, do not weaken `_validate_attribution` or the offset-aware
+persisted-turn-count check, and do not treat a run where `LIVE_DEFINITION_RETRIES=1` consumed a
+retry as disqualified, or as a free re-roll to discard in favor of a "cleaner" one. Per docs/26
+§8 Q4 (owner-confirmed 2026-07-14): a consumed retry is a **labeled scenario variant** — the
+harness modeling a real player's natural retry on an errored turn — not a re-roll of the run.
+Count it, record its outcome in `definition_retries_used`, and let it stand as one of your two
+data points.
+
 ## Recording matrix
 
 | Phase | Issue(s) | On success, update |
@@ -274,6 +454,7 @@ this phase — Phases B, C, and D are local-only for now.
 | B | #69 | docs/BACKLOG.md #69 PENDING paragraph; docs/22 § P0.1 Validate line |
 | C | #6 | docs/BACKLOG.md #6 caveat sentence; your own `.env` if enabling (not `.env.example`) |
 | D | P2.2, C2 | docs/22 § P2.2 Change/Validate text; docs/22 § C2 confirmation; optionally `.env.example` as a documented optional preset; CHANGELOG.md `Unreleased` only if a shipped default changes |
+| E | #80 (docs/26 Stage 5) | docs/22 § P2.2 dated Stage 5 confirmation + #73 acceptance reinterpretation; docs/BACKLOG.md #80 → `[x]`; `CANON_TAG_PINNING`/`RAG_SLICE_LEXICAL_QUOTA`/`RAG_SLICE_MIN_SCORE` defaults + `.env.example`; CHANGELOG.md `Unreleased` |
 
 ## If something fails
 

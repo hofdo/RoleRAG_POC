@@ -536,6 +536,7 @@ class SQLiteMemoryRepository:
                 visibility=memory.visibility,
                 tags=memory.tags,
                 created_at=created_at,
+                source_turn_id=memory.source_turn_id,
             )
             self.connection.execute(
                 """
@@ -548,8 +549,9 @@ class SQLiteMemoryRepository:
                     importance,
                     visibility,
                     tags_json,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at,
+                    source_turn_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     episode.id,
@@ -561,6 +563,7 @@ class SQLiteMemoryRepository:
                     episode.visibility.value,
                     json.dumps(episode.tags),
                     serialize_datetime(created_at),
+                    episode.source_turn_id,
                 ),
             )
             episodes.append(episode)
@@ -582,7 +585,8 @@ class SQLiteMemoryRepository:
                 importance,
                 visibility,
                 tags_json,
-                created_at
+                created_at,
+                source_turn_id
             FROM memory_episodes
             WHERE session_id = ?
             ORDER BY created_at DESC
@@ -605,6 +609,13 @@ class SQLiteMemoryRepository:
                 visibility=Visibility(row["visibility"]),
                 tags=json.loads(row["tags_json"]),
                 created_at=parse_datetime(row["created_at"]),
+                # source_turn_id predates this column on rows written before #76
+                # landed; sqlite3.Row has no .get(), so guard on the key being
+                # present (mirrors _row_to_turn's outcome/_row_to_session's provider
+                # handling for the same _ensure_column migration pattern).
+                source_turn_id=(
+                    row["source_turn_id"] if "source_turn_id" in row.keys() else None
+                ),
             )
             for row in reversed(rows)
         ]

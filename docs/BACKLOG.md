@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-14 @ 03ec2cc
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -607,8 +607,17 @@ Ordered by value. Effort S/M/L.
   also a P1.2 viability note). Acceptance for P1.1 hybrid / P2.5 rerank: this query against
   this pool must place the blue-seal memory in the selected set; then re-run the full
   docs/25 Phase D preset, which is blocked on this item.
+  **Update 2026-07-14 ([docs/26](26_memory_retrieval_redesign.md)):** fix path revised — the
+  blue-seal instance is a dead `canon_importance_floor` predicate on validated-good
+  `build_standing_facts` machinery, not a retrieval ceiling (verified against the preserved D3
+  artifact); Lane A canon pinning (**#78**) fixes this instance retrieval-free, Lane B lexical
+  slice quotas (**#79**) cover the general non-canon class, and P1.1/P2.5 are demoted to the
+  conditional escalation rung ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)),
+  pulled by a post-Stage-5 live miss neither lane covers — not built speculatively. The
+  acceptance bar (blue-seal reaches the actor prompt every turn) is expected to be satisfied
+  via Lane A's pinning path; that reinterpretation must be recorded explicitly at Stage 5 (#80).
 
-- [ ] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
+- [x] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
   turn as a recall miss 10 turns later.** docs/25 Phase D run 4: turn 55 (amber_ring_token's
   definition turn) ended `outcome: controlled_failure` (critic rejection, invariant #4 —
   correctly no memory written), and the checkpoint marched on, then failed at the turn-65
@@ -620,6 +629,351 @@ Ordered by value. Effort S/M/L.
   at the known ~6.7% local fail-closed rate, one of the 8 probe-definition turns is hit in
   a substantial fraction of 100-turn runs, so green P2.2 runs also depend on this
   distinction being visible.
+  **Update 2026-07-14 ([docs/26](26_memory_retrieval_redesign.md)):** scoped as Stage 0
+  (**#75**, harness fail-fast at the definition turn) plus Stage 1's provenance-OR-phrasing
+  probe attribution (**#76**) and a labeled single definition-turn retry whose survival delta
+  is *measured* at Stage 5 (**#80**), not assumed from an independence multiplication.
+  **Shipped as part of #75's Stage 0** (2026-07-14): the harness fail-fast lives in
+  `app/diagnostics/live_checkpoint.py::_validate_definition_turn_outcome`, wired into
+  `run_checkpoint` right after each turn is recorded — see **#75** below for the concrete
+  mechanism, gating, and tests. The single definition-turn retry
+  (`LIVE_DEFINITION_RETRIES`) is out of scope here; it stays Stage 5 harness scope,
+  tracked as **#80**.
+
+## Planned 2026-07-14 — docs/26 memory/retrieval redesign (from the Phase D findings)
+
+The four docs/25 Phase D 100-turn runs (2026-07-12/13) produced the failure dossier behind
+#72–#74; [docs/26](26_memory_retrieval_redesign.md) synthesizes four independently-designed,
+adversarially-judged redesigns into one staged plan: **two guarantee lanes over the existing
+pipeline** (no new table, store, LLM call site, or vector-store feature), a shared provenance
+substrate, and a corrected measurement layer. Write-dedup (0.75/0.5 + reversal markers) and the
+additive boost rerank stay untouched by decision — every proposed rider on them was
+judge-broken (docs/26 §3.5, §7). Ship stages in order; each is additive, default-off where it
+changes runtime behavior, and closes with the full deterministic gate before any live run.
+Owner answers recorded 2026-07-14 in
+[docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner): Q2 wait /
+Q3 keep-both / Q4 yes-both / Q5 English-first (N2 stays deferred). Q1 resolved 2026-07-14
+(post-sprint): **minimal contract** — the guarantee tier is the durable-commitment tag
+family only; see the docs/26 §8 answer block. Q6 was resolved
+2026-07-14 by the [docs/27](27_world_chronicle_design.md) design conversation — see the
+world-chronicle section below (#81–#83).
+
+- [x] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
+  `memory_write_lifecycle` regression category (scripted transcript through the real extractor
+  + dedup + task-aware fake curator), the #74 fail-fast (a probe definition turn ending in
+  `controlled_failure` fails immediately, named, instead of surfacing as a recall miss 10 turns
+  later), and the offline D3-artifact replay script (**read-only / copy-first** — untracked
+  `-shm`/`-wal` sidecars already exist from a prior read-write open). Closes #74's harness
+  half; lands the offline write-path benchmark docs/22's gap analysis calls for.
+  [docs/26 §6 Stage 0](26_memory_retrieval_redesign.md#6-staged-migration-plan). ~1.5–2 days.
+  **Shipped:** three pieces, zero runtime-engine behavior changed.
+  (1) `app/evals/memory_write_lifecycle.py` (mirrored in
+  `tests/evals/test_memory_write_lifecycle.py`, wired into `run_regressions()`) drives the
+  REAL `TurnMemoryStage` — real deterministic extractor, real write-dedup — with only the
+  curator's LLM call faked (task-aware, marker-keyed, mirrors
+  `memory_continuity._TaskAwareFakeProvider`). Asserts a player-stated promise/deadline fact
+  survives extraction+dedup into a persisted candidate set, and replays the #72 compass/dawn
+  pair verbatim at the `TurnMemoryStage` integration level (not just the pure-function level
+  `test_memory_dedup.py`/`test_deterministic_extractor.py` already cover): the distinct terse
+  compass-gift candidate survives at the 0.75 write-dedup threshold, a near-verbatim
+  restatement drops, and the drop warning names the dropped summary. Stage 2/3 assertions
+  (tag-presence post-fold, standing-facts inclusion) are left as marked, unimplemented
+  comments. (2) `app/diagnostics/live_checkpoint.py::_validate_definition_turn_outcome`:
+  `run_checkpoint` now checks, right after each turn is recorded, whether that turn was a
+  probe's `definition_turn` and its outcome was not `success`; if so it raises immediately —
+  `"definition turn N for event <key> ended in controlled_failure: fact never entered the
+  world — probe vacuous"` — instead of deferring to the callback turn's generic "no persisted
+  matching memory". Gated on `fail_on_structured_warnings` (strict mode only): the check it
+  preempts (`_validate_attribution`'s `matching_memory_ids` requirement) only ever raised in
+  strict mode, so this relocates and renames an existing failure rather than introducing one
+  in report-only runs — precision, not a loosening. 4 new tests in
+  `tests/unit/test_live_checkpoint.py` (named-cause message, non-strict no-op, non-definition
+  turn no-op, early-termination/auditability via progress snapshots) using the existing fake
+  `event_inspector`/`inspector`/`client_factory` seam. (3) `app/diagnostics/replay_selection.py`
+  (113 lines incl. docstrings/CLI — over the ~30–60 line guidance; a documented
+  `immutable=1` finding plus a conventional argparse CLI earned the extra length): opens a
+  preserved artifact via a `mode=ro&immutable=1`
+  SQLite URI — `mode=ro` alone still lets SQLite create `-shm`/`-wal` sidecars for a WAL-mode
+  DB on open, verified empirically against the real artifact before landing on `immutable=1`
+  — and reports each PLAYER-visible memory's importance/tags/`CANON_TAGS` intersection/
+  eligibility under today's `build_standing_facts` predicate, plus a summary line. Run against
+  the real D3 artifact (`docs/artifacts/live-validation-D3-2026-07-12.db`, session
+  `1a3f65da…`): **47** player-visible memories (48 total rows in that session; the 48th is
+  `gm`-visibility, not `player` — docs/26 §3.3's "48-memory pool" figure is the unfiltered row
+  count, not the player-visible one), importance distribution `8×1/38×2/1×3`, 3 tag-eligible
+  (`354b8d98` blue-seal among them, `tags=["rule", ...]` as documented), **0** eligible at
+  `importance_floor=4` — confirms docs/26 §3.3 exactly, modulo that one-row headline-count
+  precision correction. `tests/unit/test_replay_selection.py` covers the eligibility predicate
+  against a synthetic temp DB (never opens the real artifact) plus a dedicated test proving no
+  sidecar files appear. `git status` clean under `docs/artifacts/` after every run. Full gate
+  green (`ruff`/`mypy --strict`/`pytest`/`regression_runner`); regression runner now 91 checks
+  (up from 85).
+- [x] **#76** *(provenance, M)* **Stage 1 — `memory_episodes.source_turn_id`.** Fifth
+  idempotent `_ensure_column` migration + optional `turn_id` threaded through the
+  three-signature / two-call-site chain (inline + deferred) + consolidation carry-forward
+  (`min()` over the non-null subset of folded originals; `None` if all legacy — never a
+  sentinel) + provenance-OR-phrasing probe attribution. Attribution-only: explicitly NOT a
+  fact-identity or dedup key (the quote/`fact_key` variant was judge-broken).
+  [docs/26 §3.1](26_memory_retrieval_redesign.md#31-provenance-substrate--memory_episodessource_turn_id). ~1.5–2 days.
+  **Shipped:** `memory_episodes.source_turn_id INTEGER` (nullable, fifth `_ensure_column`
+  instance); `MemoryEpisode`/`MemoryCandidate` gain `source_turn_id: int | None = None` (old
+  rows and pre-stamp candidates deserialize as `None`). `TurnMemoryStage.run` →
+  `_run_extraction` → `_persist_and_index` thread an optional `turn_id` kwarg; the stamp is
+  applied once, centrally, in `_persist_and_index` — the single choke point all three
+  candidate producers (curator, deterministic extractor, curator-failure fallback) funnel
+  through before `persist_memories` — so every producer is covered without repeating the
+  assignment at each origin. Both orchestrator call sites pass it: the inline site
+  (`persistence.turn.id`, `turn_orchestrator.py`) and `run_deferred_memory`
+  (`DeferredMemoryJob.turn_id`). `MemoryConsolidator._persist_consolidation` carries
+  provenance forward per §3.1.1 (`min()` over the non-null subset of folded originals' own
+  `source_turn_id`; stays `None`, never a sentinel, when every original is legacy) and
+  appends a `source_ids:<comma-joined-original-episode-ids>` audit tag (reuses `tags_json`,
+  no new schema). Live-checkpoint attribution
+  (`app/diagnostics/live_checkpoint.py::build_event_attribution`) is now provenance-OR-
+  phrasing, gated on a `definition_turn_id` resolved via a direct SQLite lookup
+  (`SQLiteTurnRepository.list_all_turns` inside `inspect_story_event`, matched on
+  `turn_index` — `turns.id` is an internal PK the HTTP API never exposes, so this stays a
+  DB-side lookup rather than adding a new API surface); the multi-memory-definition-turn
+  over-attribution risk §4 flags is implemented as specified (never provenance-only) and
+  pinned by a dedicated test, not silently tightened. Tests: repository round-trip +
+  legacy-row-reads-`None` (`tests/unit/test_repositories.py`); inline/deferred call-site
+  provenance extended onto the existing orchestrator memory tests
+  (`tests/unit/test_turn_orchestrator.py`); three consolidation carry-forward cases —
+  all-provenanced, mixed-NULL, all-NULL — the last folded into the pre-existing threshold
+  test alongside a new audit-tag assertion
+  (`tests/unit/orchestration/stages/test_core_stages.py`); provenance-OR-phrasing incl. the
+  multi-memory-turn residual (`tests/unit/test_live_checkpoint.py`). No Settings/
+  `.env.example`, ranking, retrieval, or write-dedup changes. Gate green (ruff, mypy
+  --strict, 801 pytest, 91-check regression runner); `docs/artifacts/` untouched.
+- [x] **#77** *(correctness, S)* **Stage 2 — best-match tag/importance fold.** At the
+  curator-coverage-drop site (`stages/memory.py:169-177`), fold a covered deterministic
+  candidate's tags/importance onto the **best-matching** (argmax coverage, not first-match)
+  curated summary instead of silently discarding them — any player-first-person-stated durable
+  event stays canon-taggable and clears the importance floor even when the curator forgets the
+  tag. [docs/26 §3.2](26_memory_retrieval_redesign.md#32-deterministic-tagimportance-fold-best-match-not-first-match).
+  **Shipped:** two pure helpers in `app/orchestration/stages/memory_dedup.py` —
+  `best_covering_summary` (argmax-coverage variant of `is_covered_by_summaries`, itself
+  unmodified: returns the index/score of the highest-coverage curated summary among those
+  clearing the existing 0.5 `COVERAGE_THRESHOLD`, deterministic tie-break to the **lowest
+  index** on an exact-score tie) and `ordered_union` (order-preserving, dedup'd tag union) —
+  wired into the coverage-drop loop in `memory.py::_run_extraction`, which now folds
+  (`curated[idx].model_copy(update={"tags": ordered_union(...), "importance":
+  max(...)})`) instead of dropping, appending an audited `"deterministic candidate folded
+  (best-match, coverage=X.XX): <summary[:80]>"` warning per fold. No coverage → unchanged
+  `extras.append(candidate)` path, byte-identical. The fold runs before `_persist_and_index`,
+  so #76's `source_turn_id` stamping composes untouched; `is_covered_by_summaries` itself, the
+  0.75/0.5 thresholds, reversal markers, and framing-strip are byte-identical (the new helper
+  reuses `deterministic_extractor`'s private `_strip_framing`/`_reversal_markers`, not a
+  reimplementation, so the "does X cover Y" decision cannot silently drift from
+  `is_covered_by_summaries`'s own — pinned by an explicit agreement test). Tests: 6
+  pure-function unit tests (`tests/unit/orchestration/stages/test_memory_dedup.py`) covering
+  argmax-vs-first-match, the lowest-index tie-break, the no-coverage/None case, agreement with
+  `is_covered_by_summaries`, and the reversal-marker escape; 3 `TurnMemoryStage`-level tests
+  with a scripted curator (`tests/unit/orchestration/stages/test_core_stages.py`) — the pinned
+  #72 dawn-promise string folding a real entrust-triggered candidate (coverage=0.50), the
+  judge-constructed argmax-vs-first-match scenario (two curated summaries both clear 0.5 for
+  one candidate at different scores, listed low-score-first; **verified** by temporarily
+  reverting `best_covering_summary` to first-match that this exact test fails, then reverting
+  — diff-clean), and the no-coverage extras-path-unchanged case. Extended
+  `app/evals/memory_write_lifecycle.py`'s marked Stage 2 extension point with a fifth scripted
+  turn (a real deterministic trigger plus a curator paraphrase that forgets the tag and
+  under-scores importance) and two new checks
+  (`deterministic_tag_and_importance_fold_onto_curated_summary`, `fold_is_auditable`), pinned
+  in `tests/evals/test_memory_write_lifecycle.py`. Also fixed 3 pre-existing
+  `tests/unit/test_turn_orchestrator.py` tests whose shared fixture (a "return before dawn"
+  promise message plus a curator summary already about returning before dawn) incidentally
+  cleared the coverage threshold (0.67): their exact `warnings ==` assertions now include the
+  new fold-audit warning that this previously-silent drop now emits — a real, expected
+  behavior change (a tag that used to vanish with zero trace is now visible), not a test
+  weakening. No Settings/`.env.example`, ranking, retrieval, threshold, or write-dedup
+  changes. Gate green (ruff, mypy --strict, 810 pytest, 93-check regression runner);
+  `docs/artifacts/` untouched.
+- [x] **#78** *(retrieval, M — fixes #73's canon-tagged instance)* **Stage 3 / Lane A —
+  tag-eligible canon pinning.** `CANON_TAG_PINNING=false` (byte-identical default) widens
+  `build_standing_facts` eligibility to CANON_TAG-carrying sub-floor memories — the blue-seal
+  case is a dead importance-floor predicate (D3 curator distribution: 9×1 / 38×2 / 1×3, zero
+  at the floor of 4), not a retrieval ceiling. Ships with the flag-gated stale-fact
+  supersession safeguard (§3.3.1), German tag aliases (mirrored into `_PRESERVE_TAGS`), and
+  `standing_facts_count`/`_chars` diagnostics. Offline-checkable today via #75's replay script
+  against D3. Q3 confirmed 2026-07-14 (keep-both); Q1 resolved 2026-07-14 (minimal contract).
+  [docs/26 §3.3](26_memory_retrieval_redesign.md#33-lane-a--tag-eligible-canon-pinning-retrieval-free-guarantee). ~1–1.5 days.
+  **Shipped:** eligibility in `app/orchestration/canon_builder.py::build_standing_facts` is now
+  `visibility == PLAYER AND CANON_TAGS-intersects-tags AND (importance >= floor OR
+  canon_tag_pinning)` — the flag only widens the tag-carrying-but-sub-floor subclass;
+  already-floor-eligible facts (deterministic-extractor / Stage-2-folded, importance=4) are
+  unaffected. German aliases (`regel`/`versprechen`/`abmachung`/`frist`/`schwur`/`eid`/
+  `anvertraut`) live in a new `CANON_TAGS_DE` frozenset, unioned into the matched-tag set only
+  when the flag is on (`effective_canon_tags`) — `CANON_TAGS` itself is untouched, so the
+  flag-off tag set is byte-identical. `app/memory/consolidation.py` mirrors this independently
+  as `_PRESERVE_TAGS_DE`/`_effective_preserve_tags` (not imported — the same
+  duplicate-not-share convention `_PRESERVE_TAGS` already used for the English tags), so a
+  German-tagged durable fact is protected from consolidation exactly when pinning would also
+  make it canon-eligible. **§3.3.1 stale-fact safeguard** (`_drop_superseded_facts`, same
+  module): within the flag-on eligible set, drops an older entry when a newer entry sharing at
+  least one matched canon tag ("same family") has `content_terms` that are a *strict* superset
+  of the older entry's, and the newer entry's `created_at` is strictly later — every drop
+  appends an audit message to an optional `warnings: list[str] | None` out-param (mirrors
+  `MemoryDeduplicator.drop_duplicates`'s established mutate-in-place convention, so
+  `build_standing_facts`'s return type/signature stays `tuple[str, ...]`-compatible and every
+  pre-#78 call site is unaffected). Ambiguous cases — partial overlap, equal term sets,
+  cross-family, either side missing `created_at`, or not strictly newer — keep both pinned
+  (Q3). **Flag threading (the #48/#67 lesson):** `Settings.canon_tag_pinning: bool = False`
+  (`CANON_TAG_PINNING` in `.env.example`) → `build_orchestrator_config` (the one wiring point
+  both the CLI, which delegates to `app.composition.build_services`, and the API share) →
+  `TurnOrchestratorConfig.canon_tag_pinning` → `TurnOrchestrator.__init__` passes it to BOTH
+  `TurnSessionLoader` (new `canon_tag_pinning` ctor param, read in `load()` when calling
+  `build_standing_facts`) and `TurnMemoryStage` → `MemoryConsolidator` (new `canon_tag_pinning`
+  ctor param, read in `consolidate_if_needed()` when calling `select_consolidatable`) — two
+  independent consumers off one config field, pinned by
+  `test_cli_and_api_wire_canon_tag_pinning_into_session_and_consolidator`
+  (`tests/unit/test_composition_config_parity.py`). The safeguard's audit warnings reach turn
+  diagnostics via a new `LoadedTurnContext.warnings: tuple[str, ...] = ()` field, populated by
+  `TurnSessionLoader.load()` and prepended to both of `TurnOrchestrator.run_turn`'s
+  warnings-list constructions (the actor-failure early exit and the main path) — the same
+  mechanism every other audited drop in this codebase already uses (write-dedup, the
+  coverage-drop fold), not a new one. **Diagnostics:** additive `TurnDiagnostics`/`TurnResult`
+  fields `standing_facts_count`/`standing_facts_chars: int | None = None`, computed once per
+  turn right after session load (`len`/summed-`len` of `context.standing_facts`) and populated
+  on every turn regardless of flag state (counting is not a behavior change) — threaded through
+  `_turn_diagnostics`/`_controlled_failure_result`/`_persist_controlled_failure` and mirrored
+  wherever `token_usage` already flows: `CreateTurnResponse`, `StreamFinalPayload`
+  (`StreamFailurePayload` inherits it), `TurnDetailResponse`, and their `routes.py`/`sse.py`
+  mapping functions. Old `diagnostics_json` rows without the keys deserialize as `None`
+  (`test_turn_repository_loads_diagnostics_json_predating_standing_facts_fields`), same
+  contract as `token_usage`. **Offline D3 replay** (`app/diagnostics/replay_selection.py` gains
+  a `--pinning` flag, `replay_selection(..., canon_tag_pinning=...)`, read-only,
+  `docs/artifacts/` untouched): against the preserved D3 artifact (session
+  `1a3f65da-73f5-4729-a58d-f058d1d01aac`), flag off reproduces the pre-#78 baseline exactly (47
+  player memories, 3 tag-eligible, **0** eligible); flag on makes all **3** tag-eligible
+  memories eligible — `a89d4281`/`6aeb87e2` (promise) and `354b8d98` (the blue-seal rule
+  memory) — confirming docs/26 §3.3. Directly measuring `build_standing_facts` against the
+  same pool with the flag on: the pinned block is **352/900 chars** (3 items), exactly matching
+  docs/26's measured headroom, with **zero** safeguard warnings (no amendment-shaped pairs
+  exist in this transcript, as expected). Gate green: `ruff` clean, `mypy --strict` 182 files,
+  **881 pytest** (+29: 12 in `test_canon_builder.py` incl. the flag-off golden test and the
+  full safeguard fire/ambiguous-case matrix, 4 in `test_replay_selection.py`, 3 each in
+  `test_core_stages.py` — TurnSessionLoader-level, deterministic `created_at` control —
+  `test_consolidation.py`, and `test_turn_orchestrator.py`, 2 in `test_repositories.py`, 1 each
+  in `test_config.py`/`test_composition_config_parity.py`), **96-check regression runner**
+  (+3: `memory_write_lifecycle`'s Stage 3 extension point — `promise_memory`/
+  `fold_target_memory` pinned regardless of flag since the deterministic-extractor/Stage-2-fold
+  class already clears the importance floor pre-#78; `compass_memory` (curator-tagged,
+  sub-floor) pinned only with the flag on). `select_retrieved_chunks_for_prompt`, write-dedup,
+  and the ranking/boost math are untouched.
+- [x] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
+  quotas.** Session-pool-IDF lexical scorer (`app/rag/lexical.py`, pure, reuses
+  `content_terms()`) + reserved slots reordered on the **final** top-5 selection window (not
+  the ~13-item rerank window — the load-bearing placement detail), `RAG_SLICE_LEXICAL_QUOTA=0`
+  default with a quotas=0 byte-identity golden test. All four judge fixes baked in from the
+  start: `CONSOLIDATED_TAG` exclusion, `min_slice_score` shipped unset (measured at Stage 5,
+  not guessed), dedicated `slice_score` field (preserves the boost-identity invariant),
+  pre-retriever fail-open ordering; plus the named confidence-gating test. Offline-falsifiable
+  against D3 (blue-seal query terms hit 4/48 pool memories) before any live run.
+  [docs/26 §3.4](26_memory_retrieval_redesign.md#34-lane-b--lexical-slice-quotas-retrieval-time-guarantee-general-case). ~2–3 days.
+  **Shipped:** new pure `app/rag/lexical.py` (`score_memories_lexical`, `LexicalHit`,
+  `idf_over`; pool filter = PLAYER **and** `CONSOLIDATED_TAG` not in tags = fix 1; per-memory
+  doc terms = `content_terms(summary) | content_terms(" ".join(tags))`; `idf = log(N/df)` over
+  the session's own pool; deterministic order `(-score, -importance, -created_ordinal,
+  memory_id)` with `created_ordinal = -inf` for `None` created_at, explicitly tested).
+  `app/rag/ranking.py` gains frozen `SliceQuotas{lexical=0, min_slice_score=None}` +
+  `apply_lexical_slice_quotas` + `slice_aware_confidence` + `SLICE_CONFIDENCE_EQUIVALENT=0.5`.
+  The reorder operates on the retriever's `(chunks, RetrievalDiagnostics)` — the flow currency
+  that feeds `select_retrieved_chunks_for_prompt` — front-loading the top-quota eligible hits
+  so the UNCHANGED prompt-window walk selects them: a member already inside the natural top-5
+  is only reordered (no dense eviction), a member deeper than the window or not dense-fetched
+  is pulled in / injected from `context.session_memories` (fix 3: injected as
+  `original_score=0.0`/`applied_boosts={}` with a dedicated `slice_score` on the diagnostic, so
+  `adjusted == original + sum(boosts)` holds for every chunk; a memory never appears twice —
+  a dense hit is promoted in place, and any duplicate `rejected` entry is dropped). The stage
+  (`app/orchestration/stages/retrieval.py`) computes lexical hits from `context.session_memories`
+  (added to `LoadedTurnContext`, zero extra queries) BEFORE the retriever (fix 4): a dense/Qdrant
+  failure degrades to a lexical-only prompt (`retrieval degraded to lexical slice`) instead of
+  empty, and a scorer/reorder exception degrades to dense-only with a warning — Lane B is
+  fail-open both directions. `retrieval_confidence` is slice-aware (a guaranteed slot floors at
+  0.5 so a slice-only rescue is not low-confidence; byte-identical with quotas off) — the named
+  test `test_retrieval_stage_slice_only_rescue_is_not_low_confidence` pins it. New
+  `RAG_SLICE_LEXICAL_QUOTA=0` / `RAG_SLICE_MIN_SCORE=` (unset) Settings mirrored in `.env.example`
+  and wired via `build_orchestrator_config` (both roots). Diagnostics + API inspection payload
+  gain `slice_score`/`slice_matched_terms`/`slice_guaranteed`. **`context_budget.py` and the
+  additive-boost rerank math are byte-identical** (quotas=0 golden test); no new store/table/LLM
+  call site/vector-store feature, so no `InMemoryVectorStore` parity work (Lane B runs outside
+  the store). **Offline D3 replay** (`replay_selection --lexical-query`, read-only, `docs/artifacts/`
+  untouched): blue-seal memory `354b8d98` ranks **#1 of 15** (score 10.45, matched
+  `[messag, rule, trust]`) for the callback query — well within a quota of 2, so #73's blue-seal
+  instance is guaranteed into the actor prompt via Lane B (independent of Lane A #78). Full gate
+  green (ruff, mypy --strict 182 files, 852 pytest, 93-check regression runner); +42 tests
+  (`test_lexical.py`, `test_slice_quotas.py`, stage/config/replay/diagnostics extensions).
+- [ ] **#80** *(validation, M — owner's machine; closes docs/22 P2.2)* **Stage 5 — live
+  validation + default flip.** At least **two** full docs/25 Phase D 100-turn runs (MTP
+  non-determinism makes one green run weak evidence) with `CANON_TAG_PINNING=on`,
+  `RAG_SLICE_LEXICAL_QUOTA=2`, `LIVE_DEFINITION_RETRIES=1` (harness-local scenario semantics,
+  not a Settings field; Q4 confirmed 2026-07-14). Measure — don't assume — the definition-retry survival delta; derive
+  `min_slice_score` from observed IDF distributions; watch pinned-block context-preflight
+  pressure. Flip defaults only if both runs are clean, and record the #73 acceptance
+  reinterpretation explicitly in docs/22. P1.1 hybrid stays the conditional escalation rung
+  ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)) — pulled by
+  a live miss neither lane covers, never pushed. 1–2 elapsed days.
+  **Update 2026-07-14 (session-side wiring shipped):** the harness-local
+  `LIVE_DEFINITION_RETRIES`/`--definition-retries` retry mechanism landed in
+  `app/diagnostics/live_checkpoint.py` — a probe's failed DEFINITION turn is re-sent up to N
+  times before the run fails fast, default `0` byte-identical to pre-#80 behavior — together
+  with the offset-aware bookkeeping a consumed retry requires (step-keyed `turn_by_step` for
+  callback/event lookups, `definition_turn_db_index` tracking the actual persisted DB ordinal
+  so #76's provenance attribution resolves to the successful retried turn rather than the
+  failed original or a naively-assumed step==index value, an offset-adjusted persisted-turn-
+  count assertion, and `quality_metrics.definition_retries_allowed`/`definition_retries_used`
+  labeling). `scripts/live-smoke.sh` plumbs `LIVE_DEFINITION_RETRIES` through the same four
+  points as `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. The
+  [docs/25 Phase E](25_live_validation_runbook.md#phase-e--docs26-stage-5-lanes-ab-live-validation-80)
+  runbook section (command, two-clean-runs requirement, what to read per run, owner-side
+  extras, on-success checklist) is written. Full deterministic gate green; +10 unit tests
+  pinning the retry/offset behavior. **Still open**: the live 100-turn Phase E runs themselves,
+  the measured survival delta, the derived `min_slice_score`, and the resulting default flip /
+  docs/22 confirmation all remain on the owner's machine — this item stays unchecked until
+  those land.
+
+## Planned 2026-07-14 — docs/27 world chronicle (Q6 design conversation)
+
+Resolves docs/26 §8 Q6 and engages the deferred Milestone 4 decision.
+[docs/27](27_world_chronicle_design.md) records the decided game model (owner design
+conversation, two structured rounds): a persistent world — new hero, same world — with an
+**automatic boundary chronicle** (batch promotion at session end, ordered supersession, no
+live supersession), **world-scoped persona memory**, **tag-based carry-over** (commitments +
+defining moments, replacing the dead importance floor), **NPC-held default visibility**
+(public only via explicit consequence tags), automatic-plus-editable authorial control, and
+**no session-start recap** (discover in play; recap explicitly rejected). A same-day
+addendum ([docs/27 §3.5](27_world_chronicle_design.md#35-living-world-layer-rumors-same-day-addendum-decisions-912))
+adds the **living-world rumor layer**: derived-with-distortion hearsay, generated
+mid-session on the bound provider (background, flag-gated), boundary-reconciled — the
+dedicated-small-model variant assessed and parked (§3.5.3). Build is evidence-gated:
+strictly after docs/26 Stages 0–5 (#75–#80), pulled by a real second-campaign need,
+probe first.
+
+- [ ] **#81** *(instrumentation, S — chronicle C0)* **P2.4 two-session world probe.**
+  Unchanged from [docs/22 § P2.4](22_rag_scaling_roadmap.md#p24-world-scoped-durable-memory-engages-the-deferred-milestone-4-decision):
+  session A establishes facts, session B starts in the same world, measure what B recalls.
+  Expected today: only importance-4 commitments via a shared persona — that baseline is what
+  #83 is later measured against. [docs/27 §5](27_world_chronicle_design.md#5-staging-and-gates-backlog-8183).
+- [ ] **#82** *(correctness, S — chronicle C1)* **World-scoped persona memory.** Add
+  `world_id` to persona-memory chunk payloads + the retrieval filter (today's persona-only
+  filter leaks NPC memories across worlds); rebuildable via `reindex-memories`;
+  InMemoryVectorStore parity test per convention. Independent of #83 — fixes the leak
+  regardless. [docs/27 §2](27_world_chronicle_design.md#2-current-state-verified-2026-07-14-against-source).
+- [ ] **#83** *(feature, M/L — chronicle C2)* **Chronicle v1.** `world_facts` SQLite table
+  (authoritative, Milestone 4's home) + boundary promotion pass (deterministic selection
+  over tagged rows, source provenance, no new LLM call site) + tag-based persona selection
+  replacing `PERSONA_MEMORY_IMPORTANCE_FLOOR` + audit CLI/API (list/edit/delete) +
+  diagnostics. Live acceptance: the #81 probe re-run shows session B recalling the promoted
+  set and nothing it shouldn't. [docs/27 §3](27_world_chronicle_design.md#3-target-design).
+- [ ] **#84** *(feature, M — chronicle C3, depends on #83)* **Living-world rumor layer.**
+  Player-visible hearsay rows derived (distortion allowed) from real memories/facts,
+  generated mid-session by a cadence-driven background pass on the **session's bound
+  provider** (flag-gated, default off, deferred-job path — no turn-latency cost), with a
+  deterministic anchor-validation check (fail-open: unanchored rumor → skipped + warning),
+  hearsay-labeled prompt framing via `CANON_LORE`/`source_type="world_rumor"`, and
+  status reconciliation (confirmed/debunked/faded) at chronicle boundaries only — no
+  spread simulation. Dedicated small rumor-model idea parked with a named trigger.
+  [docs/27 §3.5](27_world_chronicle_design.md#35-living-world-layer-rumors-same-day-addendum-decisions-912).
 
 ## Not doing (personal-use scope)
 

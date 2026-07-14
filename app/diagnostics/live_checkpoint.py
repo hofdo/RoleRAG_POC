@@ -18,7 +18,7 @@ import httpx
 from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
-from app.domain import MemoryEpisode, Visibility
+from app.domain import MemoryEpisode, StoredTurn, Visibility
 from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
@@ -294,7 +294,12 @@ class PersistenceInspection:
 
 
 Inspector = Callable[[str], PersistenceInspection]
-EventInspector = Callable[[str, StoryEvent], EventAttribution]
+# Third argument (#80, docs/26 §8 Q4): the definition turn's ACTUAL persisted DB
+# ordinal at the moment it succeeded, tracked by run_checkpoint across any
+# consumed definition-turn retries -- None when that turn never succeeded (or
+# the caller doesn't track it), in which case implementations fall back to the
+# StoryEvent's raw scripted definition_turn step.
+EventInspector = Callable[[str, StoryEvent, int | None], EventAttribution]
 ClientFactory = Callable[[], Any]
 
 
@@ -335,9 +340,33 @@ def build_event_attribution(
     indexed_memory_ids: Sequence[str],
     selected: Sequence[Mapping[str, Any]],
     rejected: Sequence[Mapping[str, Any]] = (),
+    definition_turn_id: int | None = None,
 ) -> EventAttribution:
+    """Build attribution for one probe event.
+
+    A memory counts toward ``matching_memory_ids`` if it phrasing-matches
+    (``semantic_match``, unchanged) OR its ``source_turn_id`` equals
+    ``definition_turn_id`` -- provenance-OR-phrasing, never provenance-only
+    (docs/26 §4's correction to the paraphrase-fragility measurement gap, #76).
+    ``definition_turn_id=None`` (the default) disables the provenance leg
+    entirely, so callers that never resolve it -- and every pre-#76 caller --
+    get exactly the old phrasing-only behavior.
+
+    Multi-memory-turn caveat (docs/26 §3.1, §4): a definition turn that produces
+    several memory episodes links ALL of them to the same source_turn_id. If NONE
+    of them phrasing-match the probe's term groups, provenance alone cannot tell
+    which episode is the probed fact -- every episode from that turn still counts
+    as "matching". This is a deliberate, documented residual (docs/26 explicitly
+    rejects provenance-ONLY attribution for exactly this reason, but ships
+    OR-with-phrasing anyway as the bounded, auditable trade against the worse
+    paraphrase-fragility false negative); see
+    test_build_event_attribution_provenance_over_attributes_on_multi_memory_definition_turn.
+    """
     matching_ids = tuple(
-        memory.id for memory in memories if semantic_match(memory.summary, event.term_groups)
+        memory.id
+        for memory in memories
+        if semantic_match(memory.summary, event.term_groups)
+        or (definition_turn_id is not None and memory.source_turn_id == definition_turn_id)
     )
     matching_set = set(matching_ids)
     selected_memory_ids = tuple(
@@ -430,19 +459,72 @@ def run_checkpoint(
     expected_model: str,
     turn_count: int,
     fail_on_structured_warnings: bool,
+    definition_retries: int = 0,
     monotonic: Callable[[], float] = time.monotonic,
     progress_writer: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    """Run the scripted Rose Gallery checkpoint.
+
+    ``definition_retries`` (#80, docs/26 §6 Stage 5 / §8 Q4): a harness-local
+    scenario-semantics parameter -- deliberately NOT an app.config.Settings field
+    (Q4: it scripts the harness's own message sequence, never engine behavior, so
+    it is out of scope for the Settings/.env.example pairing test). At the
+    default of 0 this function is byte-identical to the pre-#80 code path: the
+    retry loop below never executes, so every probe's definition turn either
+    succeeds or fails exactly as it always has, and #75's fail-fast fires
+    unchanged.
+
+    When > 0: a probe's DEFINITION turn ending in a non-success outcome gets the
+    SAME scripted message re-sent, up to ``definition_retries`` times -- modeling
+    a real player's natural retry on an errored turn (Q4), not a re-roll of the
+    run. If a retry succeeds, the run continues; if the budget is exhausted with
+    no success, the run fails fast naming both the original cause and the
+    consumed retry (see ``_validate_definition_turn_outcome``).
+
+    Each consumed retry inserts an EXTRA persisted DB turn, so scripted step N no
+    longer reliably lands on DB ``turn_index`` N once any retry has fired earlier
+    in the run (docs/26 §8 Q4's "scenario semantics" hazard). Two bookkeeping
+    structures exist purely to keep every turn-number-keyed computation correct
+    under that offset, instead of assuming step == index:
+
+    - ``turn_by_step``: the CURRENT (latest-attempt) turn record for a given
+      scripted step, keyed by the step itself -- never by position in ``turns``.
+      ``turns`` stays the full chronological attempt log (it gains one extra,
+      clearly labeled ``is_definition_retry``/``retry_attempt`` entry per
+      consumed retry); indexing into it positionally by scripted step is exactly
+      the hazard ``turn_by_step`` avoids. ``event_by_callback`` and
+      ``event_by_definition_turn`` stay keyed by scripted step throughout, since
+      that is what a StoryEvent's ``definition_turn``/``callback_turn`` mean.
+    - ``definition_turn_db_index``: the ACTUAL persisted ``turns.turn_index`` at
+      the moment an event's definition turn succeeded (whether on the first
+      attempt or a consumed retry) -- threaded into ``event_inspector`` so #76's
+      provenance attribution resolves to the SUCCESSFUL attempt's DB id, never
+      the failed original's id and never a naively-assumed step==index value.
+    """
     messages = conversation_messages(turn_count)
     event_by_callback = {
         event.callback_turn: event for event in events_for_turn_count(turn_count)
     }
+    # #74 fail-fast: looked up once per turn below so a probe's DEFINITION turn
+    # ending in a non-success outcome is named immediately instead of surfacing as
+    # a misleading "no persisted matching memory" at the callback turn, 10+ turns
+    # later (_validate_attribution, which only fires in strict mode).
+    event_by_definition_turn = {
+        event.definition_turn: event for event in events_for_turn_count(turn_count)
+    }
     attributions: dict[str, EventAttribution] = {}
     turns: list[dict[str, Any]] = []
+    turn_by_step: dict[int, dict[str, Any]] = {}
+    definition_turn_db_index: dict[str, int] = {}
+    definition_retries_used: dict[str, int] = {
+        event.key: 0 for event in event_by_definition_turn.values()
+    }
+    persisted_turn_ordinal = 0
     configuration = {
         "turn_count": turn_count,
         "expected_model": expected_model,
         "fail_on_structured_warnings": fail_on_structured_warnings,
+        "definition_retries_allowed": definition_retries,
     }
 
     def write_progress() -> None:
@@ -490,14 +572,13 @@ def run_checkpoint(
         )
         session_id = str(session["session_id"])
 
-        for turn_index, prompt in enumerate(messages, start=1):
-            event = event_by_callback.get(turn_index)
-            if event is not None:
-                attribution = event_inspector(session_id, event)
-                _validate_attribution(attribution, strict=fail_on_structured_warnings)
-                attributions[event.key] = attribution
-                write_progress()
-
+        def send_turn(turn_index: int, prompt: str, *, retry_attempt: int) -> dict[str, Any]:
+            nonlocal persisted_turn_ordinal
+            label = (
+                f"turn {turn_index}"
+                if retry_attempt == 0
+                else f"turn {turn_index} (definition retry {retry_attempt})"
+            )
             started = monotonic()
             turn = _post_json(
                 client,
@@ -505,51 +586,108 @@ def run_checkpoint(
                 {"message": prompt},
             )
             duration_seconds = monotonic() - started
+            # Every POST persists a turn regardless of outcome (StoredTurn rows
+            # are SUCCESS or CONTROLLED_FAILURE, never absent), so this ordinal
+            # tracks the real DB turn_index of the row this call just created.
+            persisted_turn_ordinal += 1
             route = turn.get("route", {})
             warnings = turn.get("warnings", [])
             raw_response = turn.get("text")
             _require(
                 isinstance(raw_response, str) and bool(raw_response.strip()),
-                f"empty actor text on turn {turn_index}",
+                f"empty actor text on {label}",
             )
             response = cast(str, raw_response)
             outcome = str(turn.get("outcome") or "success")
             _require(
                 route.get("provider") == "local",
-                f"unexpected route provider on turn {turn_index}: {route}",
+                f"unexpected route provider on {label}: {route}",
             )
             _require(
                 route.get("model") == expected_model,
-                f"unexpected route model on turn {turn_index}: {route}",
+                f"unexpected route model on {label}: {route}",
             )
             counts = validate_warnings(
                 warnings,
                 strict=fail_on_structured_warnings,
                 turn_index=turn_index,
             )
-            turns.append(
-                {
-                    "turn_index": turn_index,
-                    "prompt": prompt,
-                    "response": response,
-                    "outcome": outcome,
-                    "response_chars": len(response),
-                    "duration_seconds": round(duration_seconds, 3),
-                    "route": route,
-                    "finish_reason": turn.get("finish_reason"),
-                    "memory_written": bool(turn.get("memory_written")),
-                    "stage_timings": dict(turn.get("stage_timings") or {}),
-                    "retrieval": turn.get("retrieval"),
-                    "warning_counts": counts,
-                    "warnings": list(warnings),
-                }
-            )
+            turn_record = {
+                "turn_index": turn_index,
+                "prompt": prompt,
+                "response": response,
+                "outcome": outcome,
+                "response_chars": len(response),
+                "duration_seconds": round(duration_seconds, 3),
+                "route": route,
+                "finish_reason": turn.get("finish_reason"),
+                "memory_written": bool(turn.get("memory_written")),
+                "stage_timings": dict(turn.get("stage_timings") or {}),
+                "retrieval": turn.get("retrieval"),
+                # Lane A canon-pinning evidence (docs/26 §3.3, #78): already
+                # returned by CreateTurnResponse on every turn but not
+                # previously surfaced here -- needed for docs/25 Phase E's
+                # "never drops to 0 once established" read (#80).
+                "standing_facts_count": turn.get("standing_facts_count"),
+                "standing_facts_chars": turn.get("standing_facts_chars"),
+                "warning_counts": counts,
+                "warnings": list(warnings),
+                # #80 labeling (docs/26 §8 Q4): a consumed retry is a real extra
+                # persisted DB row, auditable here rather than silently folded
+                # into the original entry -- "scenario variant, not a re-roll".
+                "is_definition_retry": retry_attempt > 0,
+                "retry_attempt": retry_attempt,
+            }
+            turns.append(turn_record)
+            return turn_record
+
+        for turn_index, prompt in enumerate(messages, start=1):
+            event = event_by_callback.get(turn_index)
+            if event is not None:
+                attribution = event_inspector(
+                    session_id, event, definition_turn_db_index.get(event.key)
+                )
+                _validate_attribution(attribution, strict=fail_on_structured_warnings)
+                attributions[event.key] = attribution
+                write_progress()
+
+            turn_record = send_turn(turn_index, prompt, retry_attempt=0)
+            turn_by_step[turn_index] = turn_record
             write_progress()
+
+            definition_event = event_by_definition_turn.get(turn_index)
+            original_outcome = turn_record["outcome"]
+            retries_used = 0
+            if definition_event is not None:
+                while (
+                    turn_record["outcome"] != "success" and retries_used < definition_retries
+                ):
+                    retries_used += 1
+                    turn_record = send_turn(turn_index, prompt, retry_attempt=retries_used)
+                    turn_by_step[turn_index] = turn_record
+                    write_progress()
+                if retries_used:
+                    definition_retries_used[definition_event.key] = retries_used
+                if turn_record["outcome"] == "success":
+                    definition_turn_db_index[definition_event.key] = persisted_turn_ordinal
+
+            _validate_definition_turn_outcome(
+                turn_index=turn_index,
+                outcome=turn_record["outcome"],
+                event_by_definition_turn=event_by_definition_turn,
+                strict=fail_on_structured_warnings,
+                original_outcome=original_outcome,
+                retries_used=retries_used,
+            )
 
         lookup = _get_json(client, f"/sessions/{session_id}")
 
     # Controlled-failure turns are persisted but excluded from the recent-dialogue
-    # view, so the expected window is the last 8 *successful* prompts.
+    # view, so the expected window is the last 8 *successful* prompts. This
+    # already tolerates consumed retries unmodified: a retried step contributes
+    # its FAILED attempt (outcome != success, filtered out here) and, if the
+    # retry succeeded, exactly one "success" entry with the same prompt text --
+    # matching what the real recent-turns view shows.
     successful_prompts = [turn["prompt"] for turn in turns if turn["outcome"] == "success"]
     expected_recent = list(successful_prompts[-min(len(successful_prompts), 8) :])
     actual_recent = [
@@ -563,9 +701,15 @@ def run_checkpoint(
     )
 
     inspection = inspector(session_id)
+    # #80: each consumed retry is one real extra persisted DB row, so the
+    # scripted turn_count alone under-counts once any retry has fired.
+    total_definition_retries_consumed = sum(definition_retries_used.values())
+    expected_persisted_turn_count = turn_count + total_definition_retries_consumed
     _require(
-        inspection.persisted_turn_count == turn_count,
-        f"persisted-turn count mismatch: {inspection.persisted_turn_count} != {turn_count}",
+        inspection.persisted_turn_count == expected_persisted_turn_count,
+        f"persisted-turn count mismatch: {inspection.persisted_turn_count} != "
+        f"{expected_persisted_turn_count} (turn_count={turn_count}, "
+        f"definition_retries_consumed={total_definition_retries_consumed})",
     )
     _require(inspection.canon_lore_count >= 1, "Qdrant contains no ingested canon lore")
     _require(
@@ -576,10 +720,14 @@ def run_checkpoint(
 
     for event in events_for_turn_count(turn_count):
         attribution = attributions[event.key]
-        callback_response = turns[event.callback_turn - 1]["response"]
-        turns[event.callback_turn - 1]["event_callback"] = event.key
-        turns[event.callback_turn - 1]["callback_recalled"] = semantic_match(
-            callback_response,
+        # Step-keyed, not positional (#80): callback turns are never themselves
+        # retried, so turn_by_step[event.callback_turn] is unambiguous even after
+        # an earlier definition-turn retry has made turns[event.callback_turn - 1]
+        # point at the wrong list position.
+        callback_turn_record = turn_by_step[event.callback_turn]
+        callback_turn_record["event_callback"] = event.key
+        callback_turn_record["callback_recalled"] = semantic_match(
+            callback_turn_record["response"],
             event.term_groups,
         )
 
@@ -617,7 +765,8 @@ def run_checkpoint(
                 and attribution.indexed_memory_ids == attribution.matching_memory_ids
             ),
             "selected": bool(attribution.selected_memory_ids),
-            "recalled": bool(turns[event.callback_turn - 1]["callback_recalled"]),
+            "recalled": bool(turn_by_step[event.callback_turn]["callback_recalled"]),
+            "definition_retries_used": definition_retries_used[event.key],
         }
         for event in events_for_turn_count(turn_count)
         for attribution in (attributions[event.key],)
@@ -675,8 +824,63 @@ def run_checkpoint(
             },
             "stage_latency_means": stage_latency_means,
             "finish_reason_distribution": dict(sorted(finish_reasons.items())),
+            # #80 (docs/26 §6 Stage 5 / §8 Q4): raw facts only -- the naive
+            # independence multiplication was rejected, so the harness does not
+            # compute a survival-rate estimate here. The owner derives the
+            # measured delta from definition_retries_used/outcome across >= 2
+            # live runs, per Stage 5.
+            "definition_retries_allowed": definition_retries,
+            "definition_retries_used": dict(definition_retries_used),
         },
     }
+
+
+def _validate_definition_turn_outcome(
+    *,
+    turn_index: int,
+    outcome: str,
+    event_by_definition_turn: Mapping[int, StoryEvent],
+    strict: bool,
+    original_outcome: str | None = None,
+    retries_used: int = 0,
+) -> None:
+    """#74 precision fix, not a loosening: when a probe's DEFINITION turn ends in a
+    non-success outcome (invariant #4 fail-closed -- e.g. a critic rejection), the
+    probed fact never entered the world, so it is vacuous to keep running the probe
+    forward to its callback turn. Fail fast here, naming the real cause, instead of
+    marching on and reporting a misleading "no persisted matching memory" at the
+    callback turn, 10+ turns later (docs/25 Phase D run 4).
+
+    Gated on ``strict`` because the later check this replaces
+    (``_validate_attribution``'s ``matching_memory_ids`` requirement) only ever
+    raised in strict mode -- a report-only (non-strict) run never failed on this
+    class of miss before, and still does not; this only relocates and renames an
+    existing strict-mode failure to the turn that actually caused it.
+
+    #80 (docs/26 §8 Q4): ``outcome`` is the FINAL outcome after any consumed
+    definition-turn retries -- if a retry succeeded, ``outcome == "success"`` and
+    this still returns without raising (the run continues, per Q4's "retry
+    succeeds" case). ``retries_used == 0`` (the default, and what every
+    ``definition_retries=0`` call passes) reproduces the original single-cause
+    message byte-for-byte. Only when a consumed retry ALSO ends non-success
+    (budget exhausted) does the message additionally name the original cause and
+    how many retries were spent, per Q4's "budget exhausted" case.
+    """
+    if not strict:
+        return
+    event = event_by_definition_turn.get(turn_index)
+    if event is None or outcome == "success":
+        return
+    if retries_used:
+        raise CheckpointError(
+            f"definition turn {turn_index} for event {event.key} ended in "
+            f"{original_outcome}; {retries_used} definition-turn retry(ies) consumed "
+            f"and still ended in {outcome}: fact never entered the world — probe vacuous"
+        )
+    raise CheckpointError(
+        f"definition turn {turn_index} for event {event.key} ended in {outcome}: "
+        "fact never entered the world — probe vacuous"
+    )
 
 
 def _validate_attribution(attribution: EventAttribution, *, strict: bool) -> None:
@@ -747,20 +951,73 @@ def inspect_live_state(
     )
 
 
+def _turn_id_for_index(turns: Sequence[StoredTurn], turn_index: int) -> int | None:
+    """Resolve a 1-based ordinal ``turn_index`` to the persisted ``turns.id``
+    primary key, for provenance-based attribution (#76).
+
+    ``turn_index`` must be the ACTUAL persisted DB ordinal, not necessarily a
+    StoryEvent's raw ``definition_turn`` scripted-step number (#80, docs/26 §8
+    Q4): once a definition-turn retry has fired anywhere earlier in a run, DB
+    turn_index drifts away from scripted step number by however many retries
+    were consumed before it (every POST -- success or controlled_failure --
+    persists one row, so each consumed retry inserts exactly one extra row).
+    ``inspect_story_event``'s ``definition_turn_index`` parameter is what tracks
+    and supplies the correct value; passing the raw scripted step instead is only
+    correct when no retry has fired before it -- true for every call when
+    ``definition_retries=0``, the default.
+
+    Direct SQLite lookup, not an HTTP round-trip: inspect_story_event already reads
+    the session's turns straight from the database (see its ``recent_turns`` call
+    just below), and ``turns.id`` is an internal primary key the HTTP API
+    deliberately never exposes (CreateTurnResponse/RecentTurnResponse/
+    TurnDetailResponse all expose ``turn_index`` only) -- so this stays consistent
+    with that boundary instead of adding a new API surface just for a diagnostics
+    script. None if no turn was ever persisted under that index (degrades to
+    phrasing-only matching for that event rather than raising).
+    """
+    for turn in turns:
+        if turn.turn_index == turn_index:
+            return turn.id
+    return None
+
+
 def inspect_story_event(
     *,
     database_path: Path,
     settings: Settings,
     session_id: str,
     event: StoryEvent,
+    definition_turn_index: int | None = None,
 ) -> EventAttribution:
+    """Inspect one probe event's retrieval/attribution state at its callback turn.
+
+    ``definition_turn_index`` (#80, docs/26 §8 Q4): the definition turn's ACTUAL
+    persisted DB ordinal, tracked by ``run_checkpoint`` across any consumed
+    definition-turn retries and passed through as ``event_inspector``'s third
+    argument. ``None`` (the default -- every pre-#80 caller, and any ad hoc/
+    offline invocation that hasn't tracked it, e.g. a manual owner-side
+    ``inspect_story_event`` call per docs/25) falls back to
+    ``event.definition_turn`` (the raw scripted step), which is only correct
+    when no retry has fired earlier in the run -- exactly reproducing pre-#80
+    behavior at ``definition_retries=0``.
+    """
     connection = connect_sqlite(database_path)
     try:
         memory_repository = SQLiteMemoryRepository(connection)
         memories = memory_repository.list_memories_for_session(session_id)
-        recent_turns = SQLiteTurnRepository(connection).list_recent_turns(
+        turn_repository = SQLiteTurnRepository(connection)
+        recent_turns = turn_repository.list_recent_turns(
             session_id,
             settings.recent_dialogue_turns,
+        )
+        resolved_definition_turn_index = (
+            definition_turn_index
+            if definition_turn_index is not None
+            else event.definition_turn
+        )
+        definition_turn_id = _turn_id_for_index(
+            turn_repository.list_all_turns(session_id),
+            resolved_definition_turn_index,
         )
     finally:
         connection.close()
@@ -792,6 +1049,7 @@ def inspect_story_event(
         indexed_memory_ids=indexed_ids,
         selected=diagnostics["selected"],
         rejected=diagnostics["rejected"],
+        definition_turn_id=definition_turn_id,
     )
 
 
@@ -858,10 +1116,18 @@ def write_reports(
         "",
     ]
     for turn in safe_summary["turns"]:
+        # #80 (docs/26 §8 Q4): a consumed definition-turn retry is a distinct
+        # header, not silently merged into the original attempt's section --
+        # "auditable, docs/25 forensics style", matching the raw JSON's
+        # is_definition_retry/retry_attempt labeling.
+        header = f"#### Turn {turn['turn_index']}"
+        if turn.get("is_definition_retry"):
+            header += f" (definition retry {turn.get('retry_attempt')})"
         lines.extend(
             [
-                f"#### Turn {turn['turn_index']}",
+                header,
                 "",
+                f"- outcome: {turn['outcome']}",
                 f"- duration_seconds: {turn['duration_seconds']}",
                 f"- stage_timings: `{json.dumps(turn['stage_timings'], sort_keys=True)}`",
                 f"- finish_reason: {turn['finish_reason']}",
@@ -992,6 +1258,16 @@ def main() -> None:
     parser.add_argument("--database-path", type=Path, required=True)
     parser.add_argument("--turn-count", type=int, required=True)
     parser.add_argument("--fail-on-structured-warnings", choices=("0", "1"), required=True)
+    parser.add_argument(
+        "--definition-retries",
+        type=int,
+        default=0,
+        help=(
+            "Harness-local scenario-semantics knob (#80, docs/26 Stage 5 / §8 Q4): "
+            "resend a probe's failed DEFINITION turn message up to N times before "
+            "failing fast. Default 0 reproduces prior behavior byte-identically."
+        ),
+    )
     parser.add_argument("--json-report", type=Path, required=True)
     parser.add_argument("--markdown-report", type=Path, required=True)
     args = parser.parse_args()
@@ -1013,15 +1289,17 @@ def main() -> None:
             settings=settings,
             session_id=session_id,
         ),
-        event_inspector=lambda session_id, event: inspect_story_event(
+        event_inspector=lambda session_id, event, definition_turn_index: inspect_story_event(
             database_path=args.database_path,
             settings=settings,
             session_id=session_id,
             event=event,
+            definition_turn_index=definition_turn_index,
         ),
         expected_model=args.expected_model,
         turn_count=args.turn_count,
         fail_on_structured_warnings=args.fail_on_structured_warnings == "1",
+        definition_retries=args.definition_retries,
         progress_writer=lambda snapshot: write_json_atomic(
             args.json_report,
             redact_secrets(dict(snapshot), secret_values=secret_values),

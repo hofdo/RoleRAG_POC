@@ -40,6 +40,8 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                     retrieval=retrieval,
                     stage_timings=result.stage_timings,
                     token_usage=result.token_usage,
+                    standing_facts_count=result.standing_facts_count,
+                    standing_facts_chars=result.standing_facts_chars,
                 ),
             )
         ]
@@ -57,6 +59,8 @@ def build_turn_stream_frames(result: TurnResult, *, text_chunk_chars: int = 0) -
                 retrieval=retrieval,
                 stage_timings=result.stage_timings,
                 token_usage=result.token_usage,
+                standing_facts_count=result.standing_facts_count,
+                standing_facts_chars=result.standing_facts_chars,
             ),
         ),
     ]

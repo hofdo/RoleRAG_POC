@@ -3,6 +3,121 @@
 Notable changes per release. The dated acceptance/report docs under `docs/` remain the deep
 records; this file is the quick delta between versions.
 
+## Unreleased
+
+### Added
+
+- **docs/26 Stage 0 instrumentation** (#75, closes #74's harness half): new
+  `memory_write_lifecycle` regression category drives the real `TurnMemoryStage` (real
+  deterministic extractor + real write-dedup, faked curator LLM call only) and replays the
+  #72 compass/dawn adversarial pair at the integration level; the live checkpoint now fails
+  fast, naming the cause, when a probe's definition turn ends in `controlled_failure`
+  instead of surfacing a misleading recall miss ten turns later at the callback; new
+  read-only `app.diagnostics.replay_selection` offline replay script reports canon/
+  standing-facts eligibility for a preserved live-run artifact with no model or Qdrant
+  (run against the D3 artifact: 47 player-visible memories, 3 tag-eligible, 0 eligible at
+  the importance floor of 4, confirming docs/26 §3.3). No runtime engine behavior changed.
+- **docs/26 Stage 1 provenance substrate** (#76): `memory_episodes.source_turn_id` (nullable,
+  fifth `_ensure_column` migration) threads an optional `turn_id` through
+  `TurnMemoryStage.run` → `_run_extraction` → `_persist_and_index` from both orchestrator
+  call sites (inline turn persistence and the deferred-memory job), stamping every
+  persisted memory candidate with the turn that produced it. Consolidation carries
+  provenance forward (earliest non-null `source_turn_id` of the folded originals, `None`
+  if all legacy — never a sentinel) plus a `source_ids:` audit tag reusing `tags_json`. The
+  live checkpoint's probe attribution is now provenance-OR-phrasing instead of
+  phrasing-only, closing the paraphrase-fragility measurement gap for facts that survive
+  extraction under a reworded summary — never provenance-only, and the multi-memory
+  definition-turn over-attribution this implies is documented and tested, not silently
+  tightened away. Attribution-only: not a fact-identity or dedup key. No runtime engine,
+  ranking, or retrieval behavior changed.
+- **docs/26 Stage 2 best-match tag/importance fold** (#77): at the curator-coverage-drop
+  site, a deterministic fallback candidate (promise/entrusted/agreement/deadline,
+  importance=4) covered by one of this turn's own curated summaries is no longer silently
+  discarded — it now folds its tag(s) and importance onto the **best-matching** (argmax
+  coverage, not first-match; deterministic lowest-index tie-break) curated summary, with an
+  audited `"deterministic candidate folded (best-match, coverage=X.XX): ..."` warning. A
+  candidate covered by no curated summary still goes to `extras` exactly as before
+  (byte-identical). New pure helpers `best_covering_summary`/`ordered_union`
+  (`app/orchestration/stages/memory_dedup.py`); `is_covered_by_summaries`, the 0.75/0.5
+  thresholds, reversal markers, and framing-strip are unmodified. This is a real, narrow
+  runtime behavior change (a previously-silent tag/importance loss is now recovered and
+  audited); write-dedup, ranking, and retrieval are untouched.
+- **docs/26 Stage 4 Lane B lexical slice quotas** (#79, opt-in, byte-identical default): new
+  pure `app/rag/lexical.py` scorer ranks the session's own memory pool by summed
+  session-pool IDF of the terms it shares with the player's message (reuses `content_terms`;
+  IDF self-calibrates so frame vocabulary is free and rare terms expensive; no new
+  tokenizer). `app/rag/ranking.py` gains `SliceQuotas` + `apply_lexical_slice_quotas`, which
+  reorders/injects the top-quota lexical hits to the FRONT of the selection list so the
+  UNCHANGED `select_retrieved_chunks_for_prompt` walk lands them in the final prompt window
+  (a member already in the window is only reordered — no dense eviction; a deeper or
+  non-dense-fetched hit is pulled in / injected from the memory). All four judge fixes ship:
+  `CONSOLIDATED_TAG` pool exclusion (fix 1); `RAG_SLICE_MIN_SCORE` floor mechanism present
+  but shipped UNSET / no-floor pending Stage 5 measurement (fix 2); a dedicated `slice_score`
+  diagnostic field, not folded into `applied_boosts`, so `adjusted == original + sum(boosts)`
+  holds for every chunk including injected `original=0.0` members (fix 3); lexical hits
+  computed from `context.session_memories` BEFORE the retriever call, so a dense/Qdrant
+  failure degrades to a lexical-only prompt instead of empty (fix 4). `retrieval_confidence`
+  is slice-aware — a chunk holding a guaranteed slot floors at `SLICE_CONFIDENCE_EQUIVALENT`
+  (0.5, clears the 0.45 `low_retrieval_confidence` default) so a slice-only rescue does not
+  read as low-confidence — and is byte-identical with quotas off. New `RAG_SLICE_LEXICAL_QUOTA`
+  (default 0; live preset 2) / `RAG_SLICE_MIN_SCORE` (default unset) Settings, mirrored in
+  `.env.example` and wired through `build_orchestrator_config` (both composition roots).
+  Retrieval diagnostics + the API inspection payload gain labeled slice info (matched terms,
+  score, guaranteed flag). Offline D3 replay (`replay_selection --lexical-query`) ranks the
+  blue-seal rule memory `354b8d98` #1/15 for the #73 callback query — guaranteed into the
+  prompt at quota 2. `context_budget.py` and the additive-boost rerank math are byte-identical
+  (proven by a quotas=0 golden test); no new table, store, LLM call site, or vector-store
+  feature, so no `InMemoryVectorStore` parity work (Lane B runs outside the store).
+- **docs/26 Stage 3 Lane A tag-eligible canon pinning** (#78, opt-in, byte-identical default):
+  `CANON_TAG_PINNING=false` widens `build_standing_facts` eligibility (`app/orchestration/
+  canon_builder.py`) to `visibility == PLAYER AND CANON_TAGS-intersects-tags AND
+  (importance >= floor OR canon_tag_pinning)` — only sub-floor, curator-tagged memories (the
+  blue-seal shape) are newly eligible; already-floor-eligible facts are unaffected. German tag
+  aliases (`regel`/`versprechen`/`abmachung`/`frist`/`schwur`/`eid`/`anvertraut`) join the
+  matched-tag set only when the flag is on (`CANON_TAGS`/`effective_canon_tags`), mirrored
+  independently into `app/memory/consolidation.py`'s preserve-tags so a German-tagged durable
+  fact is never folded either. Ships with the mandatory (flag-on only) §3.3.1 stale-fact
+  safeguard: drops an older pinned entry when a newer entry sharing a canon tag has strictly
+  more content terms (the amendment case) and a later `created_at`; every other case — partial
+  overlap, equal term sets, cross-family, missing timestamps — keeps both pinned (Q3:
+  over-inclusion, never silent loss), and every drop is audited via a warning that reaches turn
+  diagnostics through a new `LoadedTurnContext.warnings` field. The flag threads through
+  `build_orchestrator_config` (both composition roots) to two independent consumers —
+  `TurnSessionLoader` and `MemoryConsolidator` (via `TurnMemoryStage`) — pinned by a dedicated
+  parity test (the #48/#67 lesson). New additive `TurnDiagnostics`/`TurnResult` fields
+  `standing_facts_count`/`standing_facts_chars`, populated every turn (both flag states) and
+  mirrored wherever `token_usage` already flows (API schemas, routes, SSE); old
+  `diagnostics_json` rows without the keys deserialize as `None`. Offline D3 replay
+  (`replay_selection --pinning`, read-only): flag off reproduces the pre-#78 baseline (0/47
+  eligible); flag on makes all 3 tag-eligible memories eligible, incl. the blue-seal rule
+  memory `354b8d98` — pinned block measures 352/900 chars, 0 safeguard warnings (no amendment
+  pairs in this transcript). `select_retrieved_chunks_for_prompt`, write-dedup, and the
+  ranking/boost math are untouched.
+- **docs/26 Stage 5 session-side wiring** (#80, harness-local, byte-identical default): new
+  `--definition-retries`/`LIVE_DEFINITION_RETRIES` knob (default 0) re-sends a probe's
+  DEFINITION turn message up to N times when it ends in a non-success outcome, before
+  `run_checkpoint` falls back to #75's fail-fast — modeling a real player's retry on an errored
+  turn (docs/26 §8 Q4), never an app.config.Settings field. A consumed retry inserts an extra
+  persisted DB turn, so scripted step no longer equals DB `turn_index`; every turn-number-keyed
+  computation is made offset-aware: `event_by_callback`/`event_by_definition_turn` stay
+  step-keyed, a new step-keyed `turn_by_step` map replaces positional indexing into the raw
+  `turns` log (which itself gains one extra, clearly labeled `is_definition_retry`/
+  `retry_attempt` entry per consumed retry), and a new `definition_turn_db_index` map tracks
+  the ACTUAL persisted ordinal at the moment each event's definition turn succeeds, threaded
+  into `inspect_story_event`'s new `definition_turn_index` parameter so #76's provenance
+  attribution resolves to the successful retried turn's DB id, never the failed original's or
+  a naively-assumed step==index value. The persisted-turn-count assertion is offset-adjusted;
+  `quality_metrics` gains `definition_retries_allowed`/`definition_retries_used` (aggregate and
+  per-event) so the actual survival delta can be measured, not assumed, across the docs/25
+  Phase E live runs — the rejected `0.067² ≈ 0.45%`/`~96.5%` independence math is not computed
+  here. Also closes a pre-existing gap: `standing_facts_count`/`standing_facts_chars` (#78) were
+  already returned by `CreateTurnResponse` but never surfaced in the checkpoint's own turn
+  records — now captured so docs/25 Phase E can read pinning evidence per turn.
+  `scripts/live-smoke.sh` plumbs `LIVE_DEFINITION_RETRIES` through the same four points as
+  `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. New docs/25 Phase E runbook section. +10 unit tests
+  pinning the offset/retry mechanics. The live 100-turn validation runs and any resulting
+  default flip remain on the owner's machine (#80 stays open in docs/BACKLOG.md).
+
 ## 1.3.0 — 2026-07-12
 
 ### Fixed (found live)

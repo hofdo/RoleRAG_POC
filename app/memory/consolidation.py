@@ -38,6 +38,23 @@ _PRESERVE_TAGS: frozenset[str] = frozenset(
     }
 )
 
+# German aliases for the durable-commitment tag family (docs/26 §3.3, #78). Mirrors
+# app/orchestration/canon_builder.py's CANON_TAGS_DE -- kept as an independently
+# maintained frozenset (not imported) for the same belt-and-suspenders reason
+# _PRESERVE_TAGS itself mirrors CANON_TAGS instead of importing it. Only added to
+# the effective preserve-tag set when canon_tag_pinning is on (see
+# _effective_preserve_tags) so a German-tagged durable fact is never folded once
+# Lane A pinning makes it eligible, and the flag-off default stays byte-identical.
+_PRESERVE_TAGS_DE: frozenset[str] = frozenset(
+    {"regel", "versprechen", "abmachung", "frist", "schwur", "eid", "anvertraut"}
+)
+
+
+def _effective_preserve_tags(*, canon_tag_pinning: bool) -> frozenset[str]:
+    if not canon_tag_pinning:
+        return _PRESERVE_TAGS
+    return _PRESERVE_TAGS | _PRESERVE_TAGS_DE
+
 CONSOLIDATION_PROMPT = (
     "You compress past roleplay memories. Given a list of earlier minor events, "
     "write a single concise summary (2-4 sentences, third person) that preserves "
@@ -52,6 +69,7 @@ def select_consolidatable(
     importance_ceiling: int,
     min_age: int = 0,
     batch_cap: int = 0,
+    canon_tag_pinning: bool = False,
 ) -> list[MemoryEpisode]:
     """Old, low-importance, non-durable, not-already-consolidated PLAYER memories,
     ordered oldest first (the natural batch to roll up).
@@ -64,13 +82,19 @@ def select_consolidatable(
     ``batch_cap`` caps the result to the oldest N after the age floor is applied.
     Both default to 0, which is a no-op: 0 excludes nothing and 0 means unlimited,
     reproducing the pre-C2 selection byte-for-byte.
+
+    ``canon_tag_pinning`` (docs/26 §3.3, #78, default False = byte-identical) widens
+    the preserve-tag set with the German durable-commitment aliases (see
+    ``_effective_preserve_tags``), so a German-tagged memory is protected from
+    consolidation exactly when Lane A pinning would also make it canon-eligible.
     """
+    preserve_tags = _effective_preserve_tags(canon_tag_pinning=canon_tag_pinning)
     eligible = [
         memory
         for memory in memories
         if memory.visibility == Visibility.PLAYER
         and memory.importance <= importance_ceiling
-        and not _PRESERVE_TAGS.intersection(memory.tags)
+        and not preserve_tags.intersection(memory.tags)
         and CONSOLIDATED_TAG not in memory.tags
         and SUMMARY_TAG not in memory.tags
     ]

@@ -288,6 +288,97 @@ def test_memory_repository_persists_and_loads_memory_episodes(tmp_path: Path) ->
     assert loaded[0].created_at == episodes[0].created_at
 
 
+def test_memory_repository_round_trips_source_turn_id(tmp_path: Path) -> None:
+    # #76 (docs/26 §3.1): source_turn_id is attribution-only provenance -- which
+    # turn produced this episode -- persisted and read back alongside the row.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="I promise to return before dawn.",
+        assistant_message="Iria nods.",
+        route=_build_route(),
+    )
+
+    episodes = memory_repository.append_memories(
+        session_id="session-1",
+        memories=[
+            MemoryCandidate(
+                summary="The player promised to return before dawn.",
+                visibility=Visibility.PLAYER,
+                importance=4,
+                tags=["promise"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+                source_turn_id=turn.id,
+            )
+        ],
+    )
+    loaded = memory_repository.list_memories_for_session("session-1")
+
+    assert episodes[0].source_turn_id == turn.id
+    assert loaded[0].source_turn_id == turn.id
+
+
+def test_memory_repository_legacy_row_without_source_turn_id_reads_back_none(
+    tmp_path: Path,
+) -> None:
+    # An old row written before #76 (or any row with no attributed turn) has NULL
+    # in the column -- exactly what ALTER TABLE ADD COLUMN leaves on pre-existing
+    # rows, reproduced here by omitting the column on INSERT. Must deserialize as
+    # None: never raise, never coerce to a sentinel (docs/26 §3.1's additive
+    # contract, same shape as TurnDiagnostics.token_usage).
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    memory_repository = SQLiteMemoryRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    connection.execute(
+        "INSERT INTO memory_episodes "
+        "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+        "tags_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "legacy-memory",
+            "session-1",
+            "rose-gallery",
+            "archivist",
+            "A pre-#76 memory with no attributed turn.",
+            2,
+            "player",
+            "[]",
+            serialize_datetime(datetime.now(UTC)),
+        ),
+    )
+    connection.commit()
+
+    loaded = memory_repository.list_memories_for_session("session-1")
+
+    assert len(loaded) == 1
+    assert loaded[0].source_turn_id is None
+
+
 def test_add_tag_to_memories_marks_episodes_idempotently(tmp_path: Path) -> None:
     from app.domain import MemoryCandidate, Visibility
     from app.persistence import SQLiteMemoryRepository
@@ -692,6 +783,105 @@ def test_turn_repository_loads_diagnostics_json_predating_token_usage_field(
     assert reloaded.diagnostics is not None
     assert reloaded.diagnostics.token_usage is None
     assert reloaded.diagnostics.memory_written is True
+
+
+def test_turn_repository_round_trips_standing_facts_diagnostics(tmp_path: Path) -> None:
+    # docs/26 §3.3, #78: standing_facts_count/standing_facts_chars are populated every
+    # turn (unlike token_usage, which can genuinely be None) -- confirm real, non-None
+    # values round-trip through persist + reload.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    diagnostics = TurnDiagnostics(
+        retrieval=None,
+        stage_timings={},
+        critic_status=CriticStatus.ACCEPTED,
+        finish_reason="stop",
+        warnings=[],
+        memory_written=False,
+        standing_facts_count=3,
+        standing_facts_chars=352,
+    )
+    turn_repository.update_turn_diagnostics(turn.id, diagnostics)
+
+    reloaded = turn_repository.list_all_turns("session-1")[0]
+
+    assert reloaded.diagnostics is not None
+    assert reloaded.diagnostics.standing_facts_count == 3
+    assert reloaded.diagnostics.standing_facts_chars == 352
+
+
+def test_turn_repository_loads_diagnostics_json_predating_standing_facts_fields(
+    tmp_path: Path,
+) -> None:
+    # docs/26 §3.3, #78: standing_facts_count/standing_facts_chars were added to
+    # TurnDiagnostics after diagnostics_json rows already existed in the wild. A row
+    # persisted before that change has neither key in its JSON at all -- simulate
+    # that directly and confirm it still deserializes, defaulting both fields to
+    # None instead of raising, mirroring token_usage's identical pre-#69 contract.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    pre_78_diagnostics_json = json.dumps(
+        {
+            "retrieval": None,
+            "stage_timings": {"gen": 0.5},
+            "critic_status": "accepted",
+            "finish_reason": "stop",
+            "warnings": [],
+            "memory_written": True,
+            "token_usage": {"total_tokens": 15},
+            # no "standing_facts_count"/"standing_facts_chars" keys -- the pre-#78 shape.
+        }
+    )
+    connection.execute(
+        "UPDATE turns SET diagnostics_json = ? WHERE id = ?",
+        (pre_78_diagnostics_json, turn.id),
+    )
+    connection.commit()
+
+    reloaded = turn_repository.list_all_turns("session-1")[0]
+
+    assert reloaded.diagnostics is not None
+    assert reloaded.diagnostics.standing_facts_count is None
+    assert reloaded.diagnostics.standing_facts_chars is None
+    assert reloaded.diagnostics.token_usage == {"total_tokens": 15}
 
 
 def test_append_memory_outcome_merges_into_diagnostics(tmp_path: Path) -> None:

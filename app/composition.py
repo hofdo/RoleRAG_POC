@@ -187,6 +187,7 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         canon_importance_floor=settings.canon_importance_floor,
         canon_max_items=settings.canon_max_items,
         canon_max_chars=settings.canon_max_chars,
+        canon_tag_pinning=settings.canon_tag_pinning,
         write_dedup_cosine_threshold=settings.rag_write_dedup_cosine_threshold,
         low_retrieval_confidence=settings.low_retrieval_confidence,
         high_scene_complexity=settings.high_scene_complexity,
@@ -198,6 +199,8 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         memory_consolidation_batch_cap=settings.memory_consolidation_batch_cap,
         model_context_window_tokens=settings.model_context_window_tokens,
         context_warn_ratio=settings.context_warn_ratio,
+        rag_slice_lexical_quota=settings.rag_slice_lexical_quota,
+        rag_slice_min_score=settings.rag_slice_min_score,
     )
 
 

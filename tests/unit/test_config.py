@@ -205,6 +205,45 @@ def test_settings_ranking_weight_defaults_mirror_ranking_constants(tmp_path: Pat
     assert settings.rag_recency_weight == 0.0
 
 
+def test_settings_slice_quota_defaults(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.rag_slice_lexical_quota == 0
+    assert settings.rag_slice_min_score is None
+
+
+def test_settings_accept_slice_quota_overrides(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "RAG_SLICE_LEXICAL_QUOTA=2\nRAG_SLICE_MIN_SCORE=1.5\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.rag_slice_lexical_quota == 2
+    assert settings.rag_slice_min_score == 1.5
+
+
+def test_settings_treat_empty_slice_min_score_as_no_floor(tmp_path: Path) -> None:
+    # RAG_SLICE_MIN_SCORE ships as an empty .env.example value (unset = no floor); an
+    # unedited copy must parse to None rather than failing float parsing.
+    env_file = tmp_path / ".env"
+    env_file.write_text("RAG_SLICE_MIN_SCORE=\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.rag_slice_min_score is None
+
+
+def test_settings_reject_negative_slice_quota(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("RAG_SLICE_LEXICAL_QUOTA=-1\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+
 def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
     settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
 
@@ -212,7 +251,17 @@ def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
     assert settings.canon_importance_floor == 4
     assert settings.canon_max_items == 8
     assert settings.canon_max_chars == 900
+    assert settings.canon_tag_pinning is False
     assert settings.session_memory_max_episodes == 0
+
+
+def test_settings_accept_canon_tag_pinning_override(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("CANON_TAG_PINNING=true\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.canon_tag_pinning is True
 
 
 def test_build_ranking_weights_defaults_match_default_ranking_weights(tmp_path: Path) -> None:

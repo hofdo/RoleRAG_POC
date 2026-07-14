@@ -437,6 +437,8 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         "critic_status": "accepted",
         "retrieval": None,
         "token_usage": {"total_tokens": 15},
+        "standing_facts_count": 0,
+        "standing_facts_chars": 0,
     }
     # Memory curation runs after this response on API turns (Task 8); the
     # warning is additive and memory_written stays False until the deferred
@@ -932,6 +934,8 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 ],
                 "retrieval": None,
                 "token_usage": {"total_tokens": 15},
+                "standing_facts_count": 0,
+                "standing_facts_chars": 0,
             },
         ),
     ]
@@ -1342,6 +1346,10 @@ def test_api_get_turn_detail_returns_stored_fields_and_diagnostics(tmp_path: Pat
             "adjusted_score",
             "applied_boosts",
             "selected_rank",
+            # Lane B slice labels (docs/26 §3.4, #79): metadata-only, still no chunk text.
+            "slice_score",
+            "slice_matched_terms",
+            "slice_guaranteed",
         }
 
 

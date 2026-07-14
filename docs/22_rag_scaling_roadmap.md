@@ -1,6 +1,14 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-14 @ 747bbd2
+>
+> **Update 2026-07-14 (docs/26 synthesis).** The four Phase D live failures recorded under
+> [§ P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence) were
+> synthesized into [docs/26](26_memory_retrieval_redesign.md) — two guarantee lanes
+> (tag-eligible canon pinning; lexical slice quotas) over the existing pipeline, staged as
+> [backlog #75–#80](BACKLOG.md#planned-2026-07-14--docs26-memoryretrieval-redesign-from-the-phase-d-findings).
+> P2.2's unblocking path changes: **no longer blocked on P1.1** (see the P2.2 update note);
+> P1.1 becomes a conditional escalation rung pulled by post-Stage-5 live evidence.
 >
 > **Update 2026-07-11 (P0.4, offline half).** Graded-relevance corpus + recall@k/nDCG
 > benchmark harness shipped (see the
@@ -506,6 +514,22 @@ Effort S. — [ ]
 > the harness-accuracy fix. (2) The checkpoint's current report for this case — a recall
 > miss at the callback, 10 turns after the actual event — is misleading; #74 makes it fail
 > fast at the definition turn with the real cause named.
+>
+> **Update 2026-07-14 — unblocking path revised; P2.2 is no longer blocked on P1.1.** The
+> four-run dossier above was synthesized into [docs/26](26_memory_retrieval_redesign.md)
+> (four independent redesigns, twelve adversarial judge verdicts, one recommended target).
+> Its key empirical finding, verified against the preserved D3 artifact: #73's blue-seal
+> instance is a **dead `canon_importance_floor` predicate on validated-good
+> `build_standing_facts` machinery**, not a retrieval ceiling — the memory carries the right
+> durable-fact tags but the D3 pool's curator importance distribution (9×1 / 38×2 / 1×3,
+> zero at the floor of 4) means the floor never admits it. Lane A tag-eligible canon pinning
+> (backlog **#78**) fixes that instance retrieval-free; Lane B lexical slice quotas (**#79**)
+> cover the 94%-non-canon remainder of the pool; #74's harness fail-fast lands first
+> (Stage 0, **#75**). The P2.2 re-run is docs/26 Stage 5 (**#80**): at least two clean
+> 100-turn runs before any default flips, with the #73 acceptance reinterpretation (the fact
+> reaches the actor prompt via pinning, not via dense rank) recorded explicitly here. P1.1
+> drops to a conditional escalation rung (docs/26 Stage 6), pulled only by a live miss
+> neither lane covers — its spec below is unchanged, plus docs/26's RRF score-scale caveat.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
@@ -549,6 +573,13 @@ evidence shows recall degrading because facts live in session episodes.
 **Change.** Do nothing yet; instrument first. Add a live-smoke probe that starts session B
 in the same world after session A establishes facts, and measures what B can recall. If it
 degrades, the design conversation in BACKLOG reopens with data. Effort S (probe only). — [ ]
+
+> **Update 2026-07-14 — the design conversation happened ahead of the data.**
+> [docs/27](27_world_chronicle_design.md) records the decided target (automatic *boundary*
+> chronicle, world-scoped persona memory, tag-based carry-over; backlog **#81–#83**). The
+> probe above is unchanged and still comes first — it is chronicle Stage C0 (**#81**) and
+> its result is the baseline #83 is measured against. Build stays gated on the probe plus
+> docs/26 Stages 0–5.
 
 ### P2.5 Optional cross-encoder rerank pass
 

@@ -1,6 +1,6 @@
 # 26 — Memory/Retrieval Redesign: Synthesis and Target Architecture
 
-> Reviewed: 2026-07-14 @ 874168f
+> Reviewed: 2026-07-14 @ 747bbd2
 
 Synthesis of four independently-designed, adversarially-judged memory/retrieval
 redesigns (world-state-ledger, retrieval-guarantees, event-sourced, minimal-invasive)
@@ -731,6 +731,35 @@ plausibly false (correlated failure modes from the same model state) — this pr
 requires Stage 5 to *measure* the actual delta, not assume the multiplication holds.
 
 ## 8. Open questions for the owner
+
+> **Owner answers 2026-07-14** (the questions below are kept verbatim; answers recorded here
+> rather than rewriting them):
+>
+> 1. **Resolved 2026-07-14 (post-sprint follow-up): minimal contract confirmed.** The
+>    guaranteed never-silently-drops tier is exactly the durable-commitment tag family
+>    (promise/rule/agreement/entrusted/deadline, plus this stage's German aliases);
+>    lore, color, and relationship moments stay best-effort behind Lane B's general
+>    rare-term safety net (shipped as #79, which independently rescues the blue-seal
+>    case at lexical rank 1/15 on the D3 pool). The chronicle's wider carry-over set
+>    (docs/27 decision 4: commitments + defining moments) remains a separate,
+>    cross-session contract — deliberately not folded into the in-session guarantee
+>    tier. #78 unblocked.
+> 2. **Wait.** No preemptive canon-consolidation mechanism; raise the caps per-campaign if
+>    the new `standing_facts_count`/`_chars` diagnostics ever show saturation in live play.
+> 3. **Keep both.** The conservative over-inclusion trade-off is confirmed: ambiguous
+>    supersessions stay pinned; only the narrow, audited tag-family rule may drop an older
+>    fact.
+> 4. **Yes to both.** The single labeled definition-turn retry reads as modeling a real
+>    player's retry on an errored turn, and `LIVE_DEFINITION_RETRIES` stays harness-local
+>    (not a `Settings` field).
+> 5. **English is the main language for now.** N2 stays deferred; the partial mitigations
+>    (Lane A tag aliases, Lane B pool-IDF) are the accepted interim position.
+> 6. **Resolved 2026-07-14 (same day, design conversation)** — the requested deep dive
+>    happened; [docs/27](27_world_chronicle_design.md) records the decided model:
+>    automatic **boundary** chronicle (no live supersession), world-scoped persona
+>    memory, tag-based carry-over replacing the importance floor, NPC-held default
+>    visibility, automatic-plus-editable authorial control. Staged as backlog #81–#83,
+>    build evidence-gated behind Stages 0–5 and the P2.4 probe (#81).
 
 1. **Continuity-contract framing.** This proposal's philosophical bet — durable,
    tagged facts (promises/rules/agreements/deadlines) are the player-facing contract
