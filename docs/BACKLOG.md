@@ -644,8 +644,11 @@ substrate, and a corrected measurement layer. Write-dedup (0.75/0.5 + reversal m
 additive boost rerank stay untouched by decision — every proposed rider on them was
 judge-broken (docs/26 §3.5, §7). Ship stages in order; each is additive, default-off where it
 changes runtime behavior, and closes with the full deterministic gate before any live run.
-Owner decisions in [docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner)
-gate the marked items — Q1 (continuity-contract framing) should be confirmed before #78 ships.
+Owner answers recorded 2026-07-14 in
+[docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner): Q2 wait /
+Q3 keep-both / Q4 yes-both / Q5 English-first (N2 stays deferred). **Q1 (continuity-contract
+framing) is still open — separate discussion requested; it gates #78.** Q6 (cross-session
+memory) is open pending a conceptual deep dive and rides the P2.4 instrument-first gate.
 
 - [ ] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
   `memory_write_lifecycle` regression category (scripted transcript through the real extractor
@@ -675,7 +678,7 @@ gate the marked items — Q1 (continuity-contract framing) should be confirmed b
   at the floor of 4), not a retrieval ceiling. Ships with the flag-gated stale-fact
   supersession safeguard (§3.3.1), German tag aliases (mirrored into `_PRESERVE_TAGS`), and
   `standing_facts_count`/`_chars` diagnostics. Offline-checkable today via #75's replay script
-  against D3. Gated on docs/26 §8 Q1/Q3 confirmation.
+  against D3. Q3 confirmed 2026-07-14 (keep-both); still gated on Q1.
   [docs/26 §3.3](26_memory_retrieval_redesign.md#33-lane-a--tag-eligible-canon-pinning-retrieval-free-guarantee). ~1–1.5 days.
 - [ ] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
   quotas.** Session-pool-IDF lexical scorer (`app/rag/lexical.py`, pure, reuses
@@ -691,7 +694,7 @@ gate the marked items — Q1 (continuity-contract framing) should be confirmed b
   validation + default flip.** At least **two** full docs/25 Phase D 100-turn runs (MTP
   non-determinism makes one green run weak evidence) with `CANON_TAG_PINNING=on`,
   `RAG_SLICE_LEXICAL_QUOTA=2`, `LIVE_DEFINITION_RETRIES=1` (harness-local scenario semantics,
-  not a Settings field). Measure — don't assume — the definition-retry survival delta; derive
+  not a Settings field; Q4 confirmed 2026-07-14). Measure — don't assume — the definition-retry survival delta; derive
   `min_slice_score` from observed IDF distributions; watch pinned-block context-preflight
   pressure. Flip defaults only if both runs are clean, and record the #73 acceptance
   reinterpretation explicitly in docs/22. P1.1 hybrid stays the conditional escalation rung

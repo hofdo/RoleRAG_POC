@@ -1,6 +1,6 @@
 # 26 — Memory/Retrieval Redesign: Synthesis and Target Architecture
 
-> Reviewed: 2026-07-14 @ 874168f
+> Reviewed: 2026-07-14 @ a7aa00d
 
 Synthesis of four independently-designed, adversarially-judged memory/retrieval
 redesigns (world-state-ledger, retrieval-guarantees, event-sourced, minimal-invasive)
@@ -731,6 +731,25 @@ plausibly false (correlated failure modes from the same model state) — this pr
 requires Stage 5 to *measure* the actual delta, not assume the multiplication holds.
 
 ## 8. Open questions for the owner
+
+> **Owner answers 2026-07-14** (the questions below are kept verbatim; answers recorded here
+> rather than rewriting them):
+>
+> 1. **Open — separate discussion requested.** The continuity-contract framing is not yet
+>    confirmed; Stage 3 (backlog #78) stays gated on it.
+> 2. **Wait.** No preemptive canon-consolidation mechanism; raise the caps per-campaign if
+>    the new `standing_facts_count`/`_chars` diagnostics ever show saturation in live play.
+> 3. **Keep both.** The conservative over-inclusion trade-off is confirmed: ambiguous
+>    supersessions stay pinned; only the narrow, audited tag-family rule may drop an older
+>    fact.
+> 4. **Yes to both.** The single labeled definition-turn retry reads as modeling a real
+>    player's retry on an errored turn, and `LIVE_DEFINITION_RETRIES` stays harness-local
+>    (not a `Settings` field).
+> 5. **English is the main language for now.** N2 stays deferred; the partial mitigations
+>    (Lane A tag aliases, Lane B pool-IDF) are the accepted interim position.
+> 6. **Open — conceptual deep dive requested** on whether memories should carry across
+>    sessions at all (whether a world outlives one session is the underlying question).
+>    Stays behind the P2.4 instrument-first gate meanwhile.
 
 1. **Continuity-contract framing.** This proposal's philosophical bet — durable,
    tagged facts (promises/rules/agreements/deadlines) are the player-facing contract
