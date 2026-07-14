@@ -3,6 +3,21 @@
 Notable changes per release. The dated acceptance/report docs under `docs/` remain the deep
 records; this file is the quick delta between versions.
 
+## Unreleased
+
+### Added
+
+- **docs/26 Stage 0 instrumentation** (#75, closes #74's harness half): new
+  `memory_write_lifecycle` regression category drives the real `TurnMemoryStage` (real
+  deterministic extractor + real write-dedup, faked curator LLM call only) and replays the
+  #72 compass/dawn adversarial pair at the integration level; the live checkpoint now fails
+  fast, naming the cause, when a probe's definition turn ends in `controlled_failure`
+  instead of surfacing a misleading recall miss ten turns later at the callback; new
+  read-only `app.diagnostics.replay_selection` offline replay script reports canon/
+  standing-facts eligibility for a preserved live-run artifact with no model or Qdrant
+  (run against the D3 artifact: 47 player-visible memories, 3 tag-eligible, 0 eligible at
+  the importance floor of 4, confirming docs/26 §3.3). No runtime engine behavior changed.
+
 ## 1.3.0 — 2026-07-12
 
 ### Fixed (found live)

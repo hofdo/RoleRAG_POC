@@ -437,6 +437,13 @@ def run_checkpoint(
     event_by_callback = {
         event.callback_turn: event for event in events_for_turn_count(turn_count)
     }
+    # #74 fail-fast: looked up once per turn below so a probe's DEFINITION turn
+    # ending in a non-success outcome is named immediately instead of surfacing as
+    # a misleading "no persisted matching memory" at the callback turn, 10+ turns
+    # later (_validate_attribution, which only fires in strict mode).
+    event_by_definition_turn = {
+        event.definition_turn: event for event in events_for_turn_count(turn_count)
+    }
     attributions: dict[str, EventAttribution] = {}
     turns: list[dict[str, Any]] = []
     configuration = {
@@ -545,6 +552,12 @@ def run_checkpoint(
                 }
             )
             write_progress()
+            _validate_definition_turn_outcome(
+                turn_index=turn_index,
+                outcome=outcome,
+                event_by_definition_turn=event_by_definition_turn,
+                strict=fail_on_structured_warnings,
+            )
 
         lookup = _get_json(client, f"/sessions/{session_id}")
 
@@ -677,6 +690,37 @@ def run_checkpoint(
             "finish_reason_distribution": dict(sorted(finish_reasons.items())),
         },
     }
+
+
+def _validate_definition_turn_outcome(
+    *,
+    turn_index: int,
+    outcome: str,
+    event_by_definition_turn: Mapping[int, StoryEvent],
+    strict: bool,
+) -> None:
+    """#74 precision fix, not a loosening: when a probe's DEFINITION turn ends in a
+    non-success outcome (invariant #4 fail-closed -- e.g. a critic rejection), the
+    probed fact never entered the world, so it is vacuous to keep running the probe
+    forward to its callback turn. Fail fast here, naming the real cause, instead of
+    marching on and reporting a misleading "no persisted matching memory" at the
+    callback turn, 10+ turns later (docs/25 Phase D run 4).
+
+    Gated on ``strict`` because the later check this replaces
+    (``_validate_attribution``'s ``matching_memory_ids`` requirement) only ever
+    raised in strict mode -- a report-only (non-strict) run never failed on this
+    class of miss before, and still does not; this only relocates and renames an
+    existing strict-mode failure to the turn that actually caused it.
+    """
+    if not strict:
+        return
+    event = event_by_definition_turn.get(turn_index)
+    if event is None or outcome == "success":
+        return
+    raise CheckpointError(
+        f"definition turn {turn_index} for event {event.key} ended in {outcome}: "
+        "fact never entered the world — probe vacuous"
+    )
 
 
 def _validate_attribution(attribution: EventAttribution, *, strict: bool) -> None:

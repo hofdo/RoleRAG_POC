@@ -12,6 +12,7 @@ from app.evals.event_key_retrieval import evaluate_event_key_retrieval
 from app.evals.fixtures import EvalFixture, MaliciousActorContextRetriever, build_eval_fixture
 from app.evals.memory_continuity import evaluate_memory_continuity
 from app.evals.memory_recall import evaluate_memory_recall
+from app.evals.memory_write_lifecycle import evaluate_memory_write_lifecycle
 from app.evals.retrieval_miss import evaluate_retrieval_miss
 from app.evals.retrieval_quality import evaluate_retrieval_quality
 from app.evals.role_consistency import evaluate_role_consistency
@@ -47,6 +48,7 @@ def run_regressions() -> RegressionReport:
         _role_consistency_result(fixture),
         asyncio.run(_memory_result(fixture)),
         _memory_continuity_result(),
+        _memory_write_lifecycle_result(),
         _draft_validation_result(),
         asyncio.run(_provider_binding_result(fixture)),
         _containment_result(),
@@ -105,6 +107,13 @@ def _role_consistency_result(fixture: EvalFixture) -> CategoryResult:
 def _memory_continuity_result() -> CategoryResult:
     result = evaluate_memory_continuity()
     return CategoryResult(name="memory_continuity", passed=result.passed, checks=result.checks)
+
+
+def _memory_write_lifecycle_result() -> CategoryResult:
+    result = evaluate_memory_write_lifecycle()
+    return CategoryResult(
+        name="memory_write_lifecycle", passed=result.passed, checks=result.checks
+    )
 
 
 async def _memory_result(fixture: EvalFixture) -> CategoryResult:

@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-14 @ afa3266
+> Reviewed: 2026-07-14 @ 240a9bf
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -617,7 +617,7 @@ Ordered by value. Effort S/M/L.
   acceptance bar (blue-seal reaches the actor prompt every turn) is expected to be satisfied
   via Lane A's pinning path; that reinterpretation must be recorded explicitly at Stage 5 (#80).
 
-- [ ] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
+- [x] **#74** *(diagnostics, S)* **Live checkpoint reports a controlled-failure definition
   turn as a recall miss 10 turns later.** docs/25 Phase D run 4: turn 55 (amber_ring_token's
   definition turn) ended `outcome: controlled_failure` (critic rejection, invariant #4 —
   correctly no memory written), and the checkpoint marched on, then failed at the turn-65
@@ -633,6 +633,12 @@ Ordered by value. Effort S/M/L.
   (**#75**, harness fail-fast at the definition turn) plus Stage 1's provenance-OR-phrasing
   probe attribution (**#76**) and a labeled single definition-turn retry whose survival delta
   is *measured* at Stage 5 (**#80**), not assumed from an independence multiplication.
+  **Shipped as part of #75's Stage 0** (2026-07-14): the harness fail-fast lives in
+  `app/diagnostics/live_checkpoint.py::_validate_definition_turn_outcome`, wired into
+  `run_checkpoint` right after each turn is recorded — see **#75** below for the concrete
+  mechanism, gating, and tests. The single definition-turn retry
+  (`LIVE_DEFINITION_RETRIES`) is out of scope here; it stays Stage 5 harness scope,
+  tracked as **#80**.
 
 ## Planned 2026-07-14 — docs/26 memory/retrieval redesign (from the Phase D findings)
 
@@ -651,7 +657,7 @@ framing) is still open — separate discussion requested; it gates #78.** Q6 was
 2026-07-14 by the [docs/27](27_world_chronicle_design.md) design conversation — see the
 world-chronicle section below (#81–#83).
 
-- [ ] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
+- [x] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
   `memory_write_lifecycle` regression category (scripted transcript through the real extractor
   + dedup + task-aware fake curator), the #74 fail-fast (a probe definition turn ending in
   `controlled_failure` fails immediately, named, instead of surfacing as a recall miss 10 turns
@@ -659,6 +665,48 @@ world-chronicle section below (#81–#83).
   `-shm`/`-wal` sidecars already exist from a prior read-write open). Closes #74's harness
   half; lands the offline write-path benchmark docs/22's gap analysis calls for.
   [docs/26 §6 Stage 0](26_memory_retrieval_redesign.md#6-staged-migration-plan). ~1.5–2 days.
+  **Shipped:** three pieces, zero runtime-engine behavior changed.
+  (1) `app/evals/memory_write_lifecycle.py` (mirrored in
+  `tests/evals/test_memory_write_lifecycle.py`, wired into `run_regressions()`) drives the
+  REAL `TurnMemoryStage` — real deterministic extractor, real write-dedup — with only the
+  curator's LLM call faked (task-aware, marker-keyed, mirrors
+  `memory_continuity._TaskAwareFakeProvider`). Asserts a player-stated promise/deadline fact
+  survives extraction+dedup into a persisted candidate set, and replays the #72 compass/dawn
+  pair verbatim at the `TurnMemoryStage` integration level (not just the pure-function level
+  `test_memory_dedup.py`/`test_deterministic_extractor.py` already cover): the distinct terse
+  compass-gift candidate survives at the 0.75 write-dedup threshold, a near-verbatim
+  restatement drops, and the drop warning names the dropped summary. Stage 2/3 assertions
+  (tag-presence post-fold, standing-facts inclusion) are left as marked, unimplemented
+  comments. (2) `app/diagnostics/live_checkpoint.py::_validate_definition_turn_outcome`:
+  `run_checkpoint` now checks, right after each turn is recorded, whether that turn was a
+  probe's `definition_turn` and its outcome was not `success`; if so it raises immediately —
+  `"definition turn N for event <key> ended in controlled_failure: fact never entered the
+  world — probe vacuous"` — instead of deferring to the callback turn's generic "no persisted
+  matching memory". Gated on `fail_on_structured_warnings` (strict mode only): the check it
+  preempts (`_validate_attribution`'s `matching_memory_ids` requirement) only ever raised in
+  strict mode, so this relocates and renames an existing failure rather than introducing one
+  in report-only runs — precision, not a loosening. 4 new tests in
+  `tests/unit/test_live_checkpoint.py` (named-cause message, non-strict no-op, non-definition
+  turn no-op, early-termination/auditability via progress snapshots) using the existing fake
+  `event_inspector`/`inspector`/`client_factory` seam. (3) `app/diagnostics/replay_selection.py`
+  (113 lines incl. docstrings/CLI — over the ~30–60 line guidance; a documented
+  `immutable=1` finding plus a conventional argparse CLI earned the extra length): opens a
+  preserved artifact via a `mode=ro&immutable=1`
+  SQLite URI — `mode=ro` alone still lets SQLite create `-shm`/`-wal` sidecars for a WAL-mode
+  DB on open, verified empirically against the real artifact before landing on `immutable=1`
+  — and reports each PLAYER-visible memory's importance/tags/`CANON_TAGS` intersection/
+  eligibility under today's `build_standing_facts` predicate, plus a summary line. Run against
+  the real D3 artifact (`docs/artifacts/live-validation-D3-2026-07-12.db`, session
+  `1a3f65da…`): **47** player-visible memories (48 total rows in that session; the 48th is
+  `gm`-visibility, not `player` — docs/26 §3.3's "48-memory pool" figure is the unfiltered row
+  count, not the player-visible one), importance distribution `8×1/38×2/1×3`, 3 tag-eligible
+  (`354b8d98` blue-seal among them, `tags=["rule", ...]` as documented), **0** eligible at
+  `importance_floor=4` — confirms docs/26 §3.3 exactly, modulo that one-row headline-count
+  precision correction. `tests/unit/test_replay_selection.py` covers the eligibility predicate
+  against a synthetic temp DB (never opens the real artifact) plus a dedicated test proving no
+  sidecar files appear. `git status` clean under `docs/artifacts/` after every run. Full gate
+  green (`ruff`/`mypy --strict`/`pytest`/`regression_runner`); regression runner now 91 checks
+  (up from 85).
 - [ ] **#76** *(provenance, M)* **Stage 1 — `memory_episodes.source_turn_id`.** Fifth
   idempotent `_ensure_column` migration + optional `turn_id` threaded through the
   three-signature / two-call-site chain (inline + deferred) + consolidation carry-forward

@@ -390,6 +390,69 @@ def test_retrieval_miss_fails_strict_checkpoint() -> None:
         _run(attribution=_attribution(selected_memory_ids=()))
 
 
+# --- #74/#75 definition-turn fail-fast (docs/26 Stage 0) ---
+#
+# docs/25 Phase D run 4: a probe's DEFINITION turn (before_dawn_promise here: turn 3,
+# callback turn 13) ending in `outcome: controlled_failure` used to march on for ten
+# more turns and then fail at the callback with a misleading "no persisted matching
+# memory" -- the real cause (the fact never entered the world) was only recoverable
+# by a forensic DB diff. This is a precision fix, not a loosening: the run still
+# fails in exactly the cases it failed before (strict mode only, since the check it
+# preempts -- _validate_attribution's matching_memory_ids requirement -- was itself
+# strict-only), just named at the turn that actually caused it.
+
+
+def test_definition_turn_controlled_failure_fails_fast_with_named_cause() -> None:
+    with pytest.raises(
+        CheckpointError,
+        match=r"definition turn 3 for event before_dawn_promise ended in controlled_failure",
+    ) as excinfo:
+        _run(turn_overrides={3: {"outcome": "controlled_failure"}})
+    # The old misleading message must not be what actually surfaces here.
+    assert "no persisted matching memory" not in str(excinfo.value)
+
+
+def test_definition_turn_controlled_failure_is_report_only_when_not_strict() -> None:
+    # Precision, not loosening, cuts both ways: a non-strict (report-only) run never
+    # failed on this class of miss before, and must not start failing now either.
+    summary = _run(strict=False, turn_overrides={3: {"outcome": "controlled_failure"}})
+    assert summary["status"] == "pass"
+    assert summary["turns"][2]["outcome"] == "controlled_failure"
+
+
+def test_non_definition_turn_controlled_failure_does_not_fail_fast() -> None:
+    # Turn 5 is neither a definition nor a callback turn within a 13-turn run -- a
+    # controlled failure there is unrelated to any probe and must not trip the new
+    # check (nor anything else, with the default passing attribution/inspection).
+    summary = _run(turn_overrides={5: {"outcome": "controlled_failure"}})
+    assert summary["status"] == "pass"
+    assert summary["turns"][4]["outcome"] == "controlled_failure"
+
+
+def test_definition_turn_controlled_failure_stops_before_later_turns() -> None:
+    snapshots: list[dict[str, Any]] = []
+    client = FakeClient(turn_overrides={3: {"outcome": "controlled_failure"}})
+    clock = iter(float(index) for index in range(13 * 2))
+
+    with pytest.raises(CheckpointError, match="definition turn 3"):
+        run_checkpoint(
+            client_factory=lambda: client,
+            inspector=lambda _session_id: _inspection(13),
+            event_inspector=lambda _session_id, _event: _attribution(),
+            expected_model="model-1",
+            turn_count=13,
+            fail_on_structured_warnings=True,
+            monotonic=lambda: next(clock),
+            progress_writer=lambda snapshot: snapshots.append(dict(snapshot)),
+        )
+
+    # Turns 4-13 (including the turn-13 callback) never ran; turn 3 itself is
+    # captured in the last snapshot -- auditable, not silently discarded.
+    assert len(snapshots) == 3
+    assert snapshots[-1]["turns"][-1]["turn_index"] == 3
+    assert snapshots[-1]["turns"][-1]["outcome"] == "controlled_failure"
+
+
 def test_stage_latency_means_are_reported_from_turn_stage_timings() -> None:
     overrides = {
         1: {"stage_timings": {"generation": 10.0, "critique": 4.0, "memory": 2.0}},
