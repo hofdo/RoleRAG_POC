@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-14 @ 747bbd2
+> Reviewed: 2026-07-14 @ afa3266
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -711,9 +711,13 @@ conversation, two structured rounds): a persistent world — new hero, same worl
 live supersession), **world-scoped persona memory**, **tag-based carry-over** (commitments +
 defining moments, replacing the dead importance floor), **NPC-held default visibility**
 (public only via explicit consequence tags), automatic-plus-editable authorial control, and
-**no session-start recap** (discover in play; recap explicitly rejected). Build is
-evidence-gated: strictly after docs/26 Stages 0–5 (#75–#80), pulled by a real
-second-campaign need, probe first.
+**no session-start recap** (discover in play; recap explicitly rejected). A same-day
+addendum ([docs/27 §3.5](27_world_chronicle_design.md#35-living-world-layer-rumors-same-day-addendum-decisions-912))
+adds the **living-world rumor layer**: derived-with-distortion hearsay, generated
+mid-session on the bound provider (background, flag-gated), boundary-reconciled — the
+dedicated-small-model variant assessed and parked (§3.5.3). Build is evidence-gated:
+strictly after docs/26 Stages 0–5 (#75–#80), pulled by a real second-campaign need,
+probe first.
 
 - [ ] **#81** *(instrumentation, S — chronicle C0)* **P2.4 two-session world probe.**
   Unchanged from [docs/22 § P2.4](22_rag_scaling_roadmap.md#p24-world-scoped-durable-memory-engages-the-deferred-milestone-4-decision):
@@ -731,6 +735,15 @@ second-campaign need, probe first.
   replacing `PERSONA_MEMORY_IMPORTANCE_FLOOR` + audit CLI/API (list/edit/delete) +
   diagnostics. Live acceptance: the #81 probe re-run shows session B recalling the promoted
   set and nothing it shouldn't. [docs/27 §3](27_world_chronicle_design.md#3-target-design).
+- [ ] **#84** *(feature, M — chronicle C3, depends on #83)* **Living-world rumor layer.**
+  Player-visible hearsay rows derived (distortion allowed) from real memories/facts,
+  generated mid-session by a cadence-driven background pass on the **session's bound
+  provider** (flag-gated, default off, deferred-job path — no turn-latency cost), with a
+  deterministic anchor-validation check (fail-open: unanchored rumor → skipped + warning),
+  hearsay-labeled prompt framing via `CANON_LORE`/`source_type="world_rumor"`, and
+  status reconciliation (confirmed/debunked/faded) at chronicle boundaries only — no
+  spread simulation. Dedicated small rumor-model idea parked with a named trigger.
+  [docs/27 §3.5](27_world_chronicle_design.md#35-living-world-layer-rumors-same-day-addendum-decisions-912).
 
 ## Not doing (personal-use scope)
 
