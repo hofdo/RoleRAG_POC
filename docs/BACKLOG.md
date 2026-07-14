@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-14 @ aa05954
+> Reviewed: 2026-07-14 @ 747bbd2
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -647,8 +647,9 @@ changes runtime behavior, and closes with the full deterministic gate before any
 Owner answers recorded 2026-07-14 in
 [docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner): Q2 wait /
 Q3 keep-both / Q4 yes-both / Q5 English-first (N2 stays deferred). **Q1 (continuity-contract
-framing) is still open — separate discussion requested; it gates #78.** Q6 (cross-session
-memory) is open pending a conceptual deep dive and rides the P2.4 instrument-first gate.
+framing) is still open — separate discussion requested; it gates #78.** Q6 was resolved
+2026-07-14 by the [docs/27](27_world_chronicle_design.md) design conversation — see the
+world-chronicle section below (#81–#83).
 
 - [ ] **#75** *(instrumentation, M)* **Stage 0 — instruments first.** New
   `memory_write_lifecycle` regression category (scripted transcript through the real extractor
@@ -700,6 +701,36 @@ memory) is open pending a conceptual deep dive and rides the P2.4 instrument-fir
   reinterpretation explicitly in docs/22. P1.1 hybrid stays the conditional escalation rung
   ([docs/26 §6 Stage 6](26_memory_retrieval_redesign.md#6-staged-migration-plan)) — pulled by
   a live miss neither lane covers, never pushed. 1–2 elapsed days.
+
+## Planned 2026-07-14 — docs/27 world chronicle (Q6 design conversation)
+
+Resolves docs/26 §8 Q6 and engages the deferred Milestone 4 decision.
+[docs/27](27_world_chronicle_design.md) records the decided game model (owner design
+conversation, two structured rounds): a persistent world — new hero, same world — with an
+**automatic boundary chronicle** (batch promotion at session end, ordered supersession, no
+live supersession), **world-scoped persona memory**, **tag-based carry-over** (commitments +
+defining moments, replacing the dead importance floor), **NPC-held default visibility**
+(public only via explicit consequence tags), automatic-plus-editable authorial control, and
+**no session-start recap** (discover in play; recap explicitly rejected). Build is
+evidence-gated: strictly after docs/26 Stages 0–5 (#75–#80), pulled by a real
+second-campaign need, probe first.
+
+- [ ] **#81** *(instrumentation, S — chronicle C0)* **P2.4 two-session world probe.**
+  Unchanged from [docs/22 § P2.4](22_rag_scaling_roadmap.md#p24-world-scoped-durable-memory-engages-the-deferred-milestone-4-decision):
+  session A establishes facts, session B starts in the same world, measure what B recalls.
+  Expected today: only importance-4 commitments via a shared persona — that baseline is what
+  #83 is later measured against. [docs/27 §5](27_world_chronicle_design.md#5-staging-and-gates-backlog-8183).
+- [ ] **#82** *(correctness, S — chronicle C1)* **World-scoped persona memory.** Add
+  `world_id` to persona-memory chunk payloads + the retrieval filter (today's persona-only
+  filter leaks NPC memories across worlds); rebuildable via `reindex-memories`;
+  InMemoryVectorStore parity test per convention. Independent of #83 — fixes the leak
+  regardless. [docs/27 §2](27_world_chronicle_design.md#2-current-state-verified-2026-07-14-against-source).
+- [ ] **#83** *(feature, M/L — chronicle C2)* **Chronicle v1.** `world_facts` SQLite table
+  (authoritative, Milestone 4's home) + boundary promotion pass (deterministic selection
+  over tagged rows, source provenance, no new LLM call site) + tag-based persona selection
+  replacing `PERSONA_MEMORY_IMPORTANCE_FLOOR` + audit CLI/API (list/edit/delete) +
+  diagnostics. Live acceptance: the #81 probe re-run shows session B recalling the promoted
+  set and nothing it shouldn't. [docs/27 §3](27_world_chronicle_design.md#3-target-design).
 
 ## Not doing (personal-use scope)
 

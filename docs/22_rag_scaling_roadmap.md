@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-14 @ aa05954
+> Reviewed: 2026-07-14 @ 747bbd2
 >
 > **Update 2026-07-14 (docs/26 synthesis).** The four Phase D live failures recorded under
 > [§ P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence) were
@@ -573,6 +573,13 @@ evidence shows recall degrading because facts live in session episodes.
 **Change.** Do nothing yet; instrument first. Add a live-smoke probe that starts session B
 in the same world after session A establishes facts, and measures what B can recall. If it
 degrades, the design conversation in BACKLOG reopens with data. Effort S (probe only). — [ ]
+
+> **Update 2026-07-14 — the design conversation happened ahead of the data.**
+> [docs/27](27_world_chronicle_design.md) records the decided target (automatic *boundary*
+> chronicle, world-scoped persona memory, tag-based carry-over; backlog **#81–#83**). The
+> probe above is unchanged and still comes first — it is chronicle Stage C0 (**#81**) and
+> its result is the baseline #83 is measured against. Build stays gated on the probe plus
+> docs/26 Stages 0–5.
 
 ### P2.5 Optional cross-encoder rerank pass
 

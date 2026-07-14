@@ -1,6 +1,6 @@
 # 26 — Memory/Retrieval Redesign: Synthesis and Target Architecture
 
-> Reviewed: 2026-07-14 @ a7aa00d
+> Reviewed: 2026-07-14 @ 747bbd2
 
 Synthesis of four independently-designed, adversarially-judged memory/retrieval
 redesigns (world-state-ledger, retrieval-guarantees, event-sourced, minimal-invasive)
@@ -747,9 +747,12 @@ requires Stage 5 to *measure* the actual delta, not assume the multiplication ho
 >    (not a `Settings` field).
 > 5. **English is the main language for now.** N2 stays deferred; the partial mitigations
 >    (Lane A tag aliases, Lane B pool-IDF) are the accepted interim position.
-> 6. **Open — conceptual deep dive requested** on whether memories should carry across
->    sessions at all (whether a world outlives one session is the underlying question).
->    Stays behind the P2.4 instrument-first gate meanwhile.
+> 6. **Resolved 2026-07-14 (same day, design conversation)** — the requested deep dive
+>    happened; [docs/27](27_world_chronicle_design.md) records the decided model:
+>    automatic **boundary** chronicle (no live supersession), world-scoped persona
+>    memory, tag-based carry-over replacing the importance floor, NPC-held default
+>    visibility, automatic-plus-editable authorial control. Staged as backlog #81–#83,
+>    build evidence-gated behind Stages 0–5 and the P2.4 probe (#81).
 
 1. **Continuity-contract framing.** This proposal's philosophical bet — durable,
    tagged facts (promises/rules/agreements/deadlines) are the player-facing contract

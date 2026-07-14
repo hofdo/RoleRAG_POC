@@ -1,6 +1,6 @@
 # RoleRAG Documentation
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-14 @ 747bbd2
 
 Navigation hub for the RoleRAG docs. New here? Start with the root
 [README](../README.md) (setup, Docker, CLI/API usage), then use the diagrams and
@@ -117,6 +117,7 @@ flowchart TD
 | [24_semantic_benchmark_runbook](24_semantic_benchmark_runbook.md) | First real-embedding-model semantic-benchmark run: prerequisites, the one-command runner, reading recall@k/nDCG/MRR numbers, floor calibration, run log |
 | [25_live_validation_runbook](25_live_validation_runbook.md) | Chains the four pending live-validation passes (#48/#67 CLI/API parity, #69 context accounting, #6 recency, the P2.2 long-campaign preset) into one sitting: prerequisites, per-phase commands and acceptance criteria, what to record on success or failure |
 | [26_memory_retrieval_redesign](26_memory_retrieval_redesign.md) | Synthesis of four judged memory/retrieval redesigns into one target architecture (provenance substrate, tag-eligible canon pinning, lexical slice quotas), staged migration plan, and rejected alternatives |
+| [27_world_chronicle_design](27_world_chronicle_design.md) | Decided design for cross-session world continuity (docs/26 §8 Q6): automatic boundary chronicle, world-scoped persona memory, tag-based carry-over, NPC-held default visibility, audit surface; staged as #81–#83 behind the docs/26 stages |
 
 ## Planning & roadmap
 
