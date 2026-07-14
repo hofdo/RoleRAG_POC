@@ -133,6 +133,10 @@ class TurnOrchestratorConfig:
     canon_importance_floor: int = 4
     canon_max_items: int = 8
     canon_max_chars: int = 900
+    # Lane A tag-eligible canon pinning (docs/26 §3.3, #78). Default mirrors Settings:
+    # False is byte-identical (today's importance_floor-only eligibility, no German
+    # tag aliases, no stale-fact safeguard).
+    canon_tag_pinning: bool = False
     write_dedup_cosine_threshold: float = 1.0
     low_retrieval_confidence: float = LOW_RETRIEVAL_CONFIDENCE
     high_scene_complexity: int = HIGH_SCENE_COMPLEXITY
@@ -202,6 +206,7 @@ class TurnOrchestrator:
             canon_importance_floor=config.canon_importance_floor,
             canon_max_items=config.canon_max_items,
             canon_max_chars=config.canon_max_chars,
+            canon_tag_pinning=config.canon_tag_pinning,
         )
         self.routing_stage = TurnRoutingStage(
             local_model=config.local_model,
@@ -265,6 +270,7 @@ class TurnOrchestrator:
             consolidation_importance_ceiling=config.memory_consolidation_max_importance,
             consolidation_min_age=config.memory_consolidation_min_age,
             consolidation_batch_cap=config.memory_consolidation_batch_cap,
+            canon_tag_pinning=config.canon_tag_pinning,
         )
 
     @property
@@ -318,6 +324,12 @@ class TurnOrchestrator:
         _emit_stage(on_stage, "session")
         with _stage_timer(timings, "session"):
             context = self.session_stage.load(turn_input)
+        # Standing-facts diagnostics (docs/26 §3.3, #78): computed once, right after
+        # session load, since context.standing_facts never changes for the rest of the
+        # turn. Populated every turn regardless of canon_tag_pinning -- counting is not
+        # a behavior change (#78 SCOPE item 5).
+        standing_facts_count = len(context.standing_facts)
+        standing_facts_chars = sum(len(fact) for fact in context.standing_facts)
         _emit_stage(on_stage, "retrieval")
         with _stage_timer(timings, "retrieval"):
             retrieval = self.retrieval_stage.run(turn_input=turn_input, context=context)
@@ -338,6 +350,7 @@ class TurnOrchestrator:
                 )
         except (EmptyProviderResponseError, TruncatedProviderResponseError) as exc:
             failure_warnings = [
+                *context.warnings,
                 *retrieval.warnings,
                 *routing.warnings,
                 f"actor failed: {exc}",
@@ -354,8 +367,11 @@ class TurnOrchestrator:
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
                 token_usage=None,  # no generation completed at all
+                standing_facts_count=standing_facts_count,
+                standing_facts_chars=standing_facts_chars,
             )
         warnings = [
+            *context.warnings,
             *retrieval.warnings,
             *routing.warnings,
             *generation.warnings,
@@ -414,6 +430,8 @@ class TurnOrchestrator:
                 retrieval_diagnostics=retrieval.diagnostics,
                 on_stage=on_stage,
                 token_usage=final_usage,
+                standing_facts_count=standing_facts_count,
+                standing_facts_chars=standing_facts_chars,
             )
         final_text = resolution.text
         final_route = resolution.route
@@ -467,6 +485,8 @@ class TurnOrchestrator:
                     warnings=warnings,
                     memory_written=False,
                     token_usage=final_usage,
+                    standing_facts_count=standing_facts_count,
+                    standing_facts_chars=standing_facts_chars,
                 ),
             )
             return TurnResult(
@@ -479,6 +499,8 @@ class TurnOrchestrator:
                 retrieval=retrieval.diagnostics,
                 stage_timings=timings,
                 token_usage=final_usage,
+                standing_facts_count=standing_facts_count,
+                standing_facts_chars=standing_facts_chars,
                 deferred_memory=DeferredMemoryJob(
                     session_id=context.session.id,
                     turn_id=persistence.turn.id,
@@ -516,6 +538,8 @@ class TurnOrchestrator:
                 warnings=warnings,
                 memory_written=memory.memory_written,
                 token_usage=final_usage,
+                standing_facts_count=standing_facts_count,
+                standing_facts_chars=standing_facts_chars,
             ),
         )
         return TurnResult(
@@ -528,6 +552,8 @@ class TurnOrchestrator:
             retrieval=retrieval.diagnostics,
             stage_timings=timings,
             token_usage=final_usage,
+            standing_facts_count=standing_facts_count,
+            standing_facts_chars=standing_facts_chars,
         )
 
     async def run_deferred_memory(self, job: DeferredMemoryJob) -> None:
@@ -571,6 +597,8 @@ class TurnOrchestrator:
         warnings: list[str],
         memory_written: bool,
         token_usage: dict[str, int] | None = None,
+        standing_facts_count: int | None = None,
+        standing_facts_chars: int | None = None,
     ) -> TurnDiagnostics:
         """Single builder for persisted turn diagnostics so the deferred, memory, and
         controlled-failure paths write the same field set (they must match the live
@@ -583,6 +611,8 @@ class TurnOrchestrator:
             warnings=warnings,
             memory_written=memory_written,
             token_usage=token_usage,
+            standing_facts_count=standing_facts_count,
+            standing_facts_chars=standing_facts_chars,
         )
 
     def _controlled_failure_result(
@@ -599,6 +629,8 @@ class TurnOrchestrator:
         retrieval_diagnostics: TurnRetrievalDiagnostics | None,
         on_stage: Callable[[str], None] | None,
         token_usage: dict[str, int] | None = None,
+        standing_facts_count: int | None = None,
+        standing_facts_chars: int | None = None,
     ) -> TurnResult:
         """Persist the failed turn and build its CONTROLLED_FAILURE result together, so the
         two failure exits (actor error, repair exhausted) cannot drift apart."""
@@ -614,6 +646,8 @@ class TurnOrchestrator:
             retrieval_diagnostics=retrieval_diagnostics,
             on_stage=on_stage,
             token_usage=token_usage,
+            standing_facts_count=standing_facts_count,
+            standing_facts_chars=standing_facts_chars,
         )
         return TurnResult(
             text=text,
@@ -625,6 +659,8 @@ class TurnOrchestrator:
             retrieval=retrieval_diagnostics,
             stage_timings=timings,
             token_usage=token_usage,
+            standing_facts_count=standing_facts_count,
+            standing_facts_chars=standing_facts_chars,
             outcome=TurnOutcome.CONTROLLED_FAILURE,
         )
 
@@ -642,6 +678,8 @@ class TurnOrchestrator:
         retrieval_diagnostics: TurnRetrievalDiagnostics | None,
         on_stage: Callable[[str], None] | None,
         token_usage: dict[str, int] | None = None,
+        standing_facts_count: int | None = None,
+        standing_facts_chars: int | None = None,
     ) -> None:
         """Keep failed turns in history: the player's message survives, the failure
         diagnostics become queryable, and acceptance tooling can account for every
@@ -670,6 +708,8 @@ class TurnOrchestrator:
                     warnings=warnings,
                     memory_written=False,
                     token_usage=token_usage,
+                    standing_facts_count=standing_facts_count,
+                    standing_facts_chars=standing_facts_chars,
                 ),
             )
         except Exception as exc:  # noqa: BLE001

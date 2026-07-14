@@ -804,6 +804,8 @@ def _to_turn_response(result: TurnResult) -> CreateTurnResponse:
         retrieval=to_retrieval_diagnostics_response(result.retrieval),
         stage_timings=result.stage_timings,
         token_usage=result.token_usage,
+        standing_facts_count=result.standing_facts_count,
+        standing_facts_chars=result.standing_facts_chars,
     )
 
 
@@ -834,6 +836,12 @@ def _to_turn_detail_response(turn: StoredTurn) -> TurnDetailResponse:
             else None
         ),
         token_usage=diagnostics.token_usage if diagnostics is not None else None,
+        standing_facts_count=(
+            diagnostics.standing_facts_count if diagnostics is not None else None
+        ),
+        standing_facts_chars=(
+            diagnostics.standing_facts_chars if diagnostics is not None else None
+        ),
     )
 
 

@@ -785,6 +785,105 @@ def test_turn_repository_loads_diagnostics_json_predating_token_usage_field(
     assert reloaded.diagnostics.memory_written is True
 
 
+def test_turn_repository_round_trips_standing_facts_diagnostics(tmp_path: Path) -> None:
+    # docs/26 §3.3, #78: standing_facts_count/standing_facts_chars are populated every
+    # turn (unlike token_usage, which can genuinely be None) -- confirm real, non-None
+    # values round-trip through persist + reload.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    diagnostics = TurnDiagnostics(
+        retrieval=None,
+        stage_timings={},
+        critic_status=CriticStatus.ACCEPTED,
+        finish_reason="stop",
+        warnings=[],
+        memory_written=False,
+        standing_facts_count=3,
+        standing_facts_chars=352,
+    )
+    turn_repository.update_turn_diagnostics(turn.id, diagnostics)
+
+    reloaded = turn_repository.list_all_turns("session-1")[0]
+
+    assert reloaded.diagnostics is not None
+    assert reloaded.diagnostics.standing_facts_count == 3
+    assert reloaded.diagnostics.standing_facts_chars == 352
+
+
+def test_turn_repository_loads_diagnostics_json_predating_standing_facts_fields(
+    tmp_path: Path,
+) -> None:
+    # docs/26 §3.3, #78: standing_facts_count/standing_facts_chars were added to
+    # TurnDiagnostics after diagnostics_json rows already existed in the wild. A row
+    # persisted before that change has neither key in its JSON at all -- simulate
+    # that directly and confirm it still deserializes, defaulting both fields to
+    # None instead of raising, mirroring token_usage's identical pre-#69 contract.
+    connection = connect_sqlite(tmp_path / "sessions.db")
+    initialize_database(connection)
+    session_repository = SQLiteSessionRepository(connection)
+    turn_repository = SQLiteTurnRepository(connection)
+    session_repository.create_session(
+        SessionState(
+            id="session-1",
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turn = turn_repository.append_turn(
+        session_id="session-1",
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="First question",
+        assistant_message="First answer",
+        route=_build_route(),
+    )
+    pre_78_diagnostics_json = json.dumps(
+        {
+            "retrieval": None,
+            "stage_timings": {"gen": 0.5},
+            "critic_status": "accepted",
+            "finish_reason": "stop",
+            "warnings": [],
+            "memory_written": True,
+            "token_usage": {"total_tokens": 15},
+            # no "standing_facts_count"/"standing_facts_chars" keys -- the pre-#78 shape.
+        }
+    )
+    connection.execute(
+        "UPDATE turns SET diagnostics_json = ? WHERE id = ?",
+        (pre_78_diagnostics_json, turn.id),
+    )
+    connection.commit()
+
+    reloaded = turn_repository.list_all_turns("session-1")[0]
+
+    assert reloaded.diagnostics is not None
+    assert reloaded.diagnostics.standing_facts_count is None
+    assert reloaded.diagnostics.standing_facts_chars is None
+    assert reloaded.diagnostics.token_usage == {"total_tokens": 15}
+
+
 def test_append_memory_outcome_merges_into_diagnostics(tmp_path: Path) -> None:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)

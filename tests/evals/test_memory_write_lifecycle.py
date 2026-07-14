@@ -16,4 +16,7 @@ def test_memory_write_lifecycle_eval_proves_extraction_dedup_fold_and_auditable_
         "dropped_restatement_is_auditable": True,
         "deterministic_tag_and_importance_fold_onto_curated_summary": True,
         "fold_is_auditable": True,
+        "promise_memory_pinned_regardless_of_flag": True,
+        "fold_target_memory_pinned_regardless_of_flag": True,
+        "compass_memory_pinned_only_with_flag_on": True,
     }

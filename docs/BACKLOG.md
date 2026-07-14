@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-14 @ 240a9bf
+> Reviewed: 2026-07-14 @ 03ec2cc
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -788,15 +788,78 @@ world-chronicle section below (#81–#83).
   weakening. No Settings/`.env.example`, ranking, retrieval, threshold, or write-dedup
   changes. Gate green (ruff, mypy --strict, 810 pytest, 93-check regression runner);
   `docs/artifacts/` untouched.
-- [ ] **#78** *(retrieval, M — fixes #73's canon-tagged instance)* **Stage 3 / Lane A —
+- [x] **#78** *(retrieval, M — fixes #73's canon-tagged instance)* **Stage 3 / Lane A —
   tag-eligible canon pinning.** `CANON_TAG_PINNING=false` (byte-identical default) widens
   `build_standing_facts` eligibility to CANON_TAG-carrying sub-floor memories — the blue-seal
   case is a dead importance-floor predicate (D3 curator distribution: 9×1 / 38×2 / 1×3, zero
   at the floor of 4), not a retrieval ceiling. Ships with the flag-gated stale-fact
   supersession safeguard (§3.3.1), German tag aliases (mirrored into `_PRESERVE_TAGS`), and
   `standing_facts_count`/`_chars` diagnostics. Offline-checkable today via #75's replay script
-  against D3. Q3 confirmed 2026-07-14 (keep-both); still gated on Q1.
+  against D3. Q3 confirmed 2026-07-14 (keep-both); Q1 resolved 2026-07-14 (minimal contract).
   [docs/26 §3.3](26_memory_retrieval_redesign.md#33-lane-a--tag-eligible-canon-pinning-retrieval-free-guarantee). ~1–1.5 days.
+  **Shipped:** eligibility in `app/orchestration/canon_builder.py::build_standing_facts` is now
+  `visibility == PLAYER AND CANON_TAGS-intersects-tags AND (importance >= floor OR
+  canon_tag_pinning)` — the flag only widens the tag-carrying-but-sub-floor subclass;
+  already-floor-eligible facts (deterministic-extractor / Stage-2-folded, importance=4) are
+  unaffected. German aliases (`regel`/`versprechen`/`abmachung`/`frist`/`schwur`/`eid`/
+  `anvertraut`) live in a new `CANON_TAGS_DE` frozenset, unioned into the matched-tag set only
+  when the flag is on (`effective_canon_tags`) — `CANON_TAGS` itself is untouched, so the
+  flag-off tag set is byte-identical. `app/memory/consolidation.py` mirrors this independently
+  as `_PRESERVE_TAGS_DE`/`_effective_preserve_tags` (not imported — the same
+  duplicate-not-share convention `_PRESERVE_TAGS` already used for the English tags), so a
+  German-tagged durable fact is protected from consolidation exactly when pinning would also
+  make it canon-eligible. **§3.3.1 stale-fact safeguard** (`_drop_superseded_facts`, same
+  module): within the flag-on eligible set, drops an older entry when a newer entry sharing at
+  least one matched canon tag ("same family") has `content_terms` that are a *strict* superset
+  of the older entry's, and the newer entry's `created_at` is strictly later — every drop
+  appends an audit message to an optional `warnings: list[str] | None` out-param (mirrors
+  `MemoryDeduplicator.drop_duplicates`'s established mutate-in-place convention, so
+  `build_standing_facts`'s return type/signature stays `tuple[str, ...]`-compatible and every
+  pre-#78 call site is unaffected). Ambiguous cases — partial overlap, equal term sets,
+  cross-family, either side missing `created_at`, or not strictly newer — keep both pinned
+  (Q3). **Flag threading (the #48/#67 lesson):** `Settings.canon_tag_pinning: bool = False`
+  (`CANON_TAG_PINNING` in `.env.example`) → `build_orchestrator_config` (the one wiring point
+  both the CLI, which delegates to `app.composition.build_services`, and the API share) →
+  `TurnOrchestratorConfig.canon_tag_pinning` → `TurnOrchestrator.__init__` passes it to BOTH
+  `TurnSessionLoader` (new `canon_tag_pinning` ctor param, read in `load()` when calling
+  `build_standing_facts`) and `TurnMemoryStage` → `MemoryConsolidator` (new `canon_tag_pinning`
+  ctor param, read in `consolidate_if_needed()` when calling `select_consolidatable`) — two
+  independent consumers off one config field, pinned by
+  `test_cli_and_api_wire_canon_tag_pinning_into_session_and_consolidator`
+  (`tests/unit/test_composition_config_parity.py`). The safeguard's audit warnings reach turn
+  diagnostics via a new `LoadedTurnContext.warnings: tuple[str, ...] = ()` field, populated by
+  `TurnSessionLoader.load()` and prepended to both of `TurnOrchestrator.run_turn`'s
+  warnings-list constructions (the actor-failure early exit and the main path) — the same
+  mechanism every other audited drop in this codebase already uses (write-dedup, the
+  coverage-drop fold), not a new one. **Diagnostics:** additive `TurnDiagnostics`/`TurnResult`
+  fields `standing_facts_count`/`standing_facts_chars: int | None = None`, computed once per
+  turn right after session load (`len`/summed-`len` of `context.standing_facts`) and populated
+  on every turn regardless of flag state (counting is not a behavior change) — threaded through
+  `_turn_diagnostics`/`_controlled_failure_result`/`_persist_controlled_failure` and mirrored
+  wherever `token_usage` already flows: `CreateTurnResponse`, `StreamFinalPayload`
+  (`StreamFailurePayload` inherits it), `TurnDetailResponse`, and their `routes.py`/`sse.py`
+  mapping functions. Old `diagnostics_json` rows without the keys deserialize as `None`
+  (`test_turn_repository_loads_diagnostics_json_predating_standing_facts_fields`), same
+  contract as `token_usage`. **Offline D3 replay** (`app/diagnostics/replay_selection.py` gains
+  a `--pinning` flag, `replay_selection(..., canon_tag_pinning=...)`, read-only,
+  `docs/artifacts/` untouched): against the preserved D3 artifact (session
+  `1a3f65da-73f5-4729-a58d-f058d1d01aac`), flag off reproduces the pre-#78 baseline exactly (47
+  player memories, 3 tag-eligible, **0** eligible); flag on makes all **3** tag-eligible
+  memories eligible — `a89d4281`/`6aeb87e2` (promise) and `354b8d98` (the blue-seal rule
+  memory) — confirming docs/26 §3.3. Directly measuring `build_standing_facts` against the
+  same pool with the flag on: the pinned block is **352/900 chars** (3 items), exactly matching
+  docs/26's measured headroom, with **zero** safeguard warnings (no amendment-shaped pairs
+  exist in this transcript, as expected). Gate green: `ruff` clean, `mypy --strict` 182 files,
+  **881 pytest** (+29: 12 in `test_canon_builder.py` incl. the flag-off golden test and the
+  full safeguard fire/ambiguous-case matrix, 4 in `test_replay_selection.py`, 3 each in
+  `test_core_stages.py` — TurnSessionLoader-level, deterministic `created_at` control —
+  `test_consolidation.py`, and `test_turn_orchestrator.py`, 2 in `test_repositories.py`, 1 each
+  in `test_config.py`/`test_composition_config_parity.py`), **96-check regression runner**
+  (+3: `memory_write_lifecycle`'s Stage 3 extension point — `promise_memory`/
+  `fold_target_memory` pinned regardless of flag since the deterministic-extractor/Stage-2-fold
+  class already clears the importance floor pre-#78; `compass_memory` (curator-tagged,
+  sub-floor) pinned only with the flag on). `select_retrieved_chunks_for_prompt`, write-dedup,
+  and the ranking/boost math are untouched.
 - [x] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
   quotas.** Session-pool-IDF lexical scorer (`app/rag/lexical.py`, pure, reuses
   `content_terms()`) + reserved slots reordered on the **final** top-5 selection window (not

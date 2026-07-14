@@ -140,3 +140,39 @@ def test_deterministic_consolidated_summary_combines_text() -> None:
 
     assert "Event a" in summary
     assert "Event b" in summary
+
+
+# --- docs/26 §3.3 German tag aliases, flag-gated (#78) ----------------------------
+
+
+def test_select_consolidatable_flag_off_does_not_preserve_german_tagged_memory() -> None:
+    """With canon_tag_pinning=False (the default), the German alias 'versprechen' is
+    not recognized as a durable-commitment tag -- the memory is foldable exactly as
+    it was before #78."""
+    memories = [_episode("durable-de", importance=1, tags=["versprechen"])]
+
+    selected = select_consolidatable(memories, importance_ceiling=3)
+
+    assert [memory.id for memory in selected] == ["durable-de"]
+
+
+def test_select_consolidatable_flag_on_preserves_german_tagged_memory() -> None:
+    """With canon_tag_pinning=True, 'versprechen' joins the effective preserve-tag
+    set (mirrors app.orchestration.canon_builder's German aliases), so the memory is
+    protected from consolidation exactly as an English-tagged durable fact is --
+    never folded once Lane A pinning would also make it canon-eligible."""
+    memories = [_episode("durable-de", importance=1, tags=["versprechen"])]
+
+    selected = select_consolidatable(memories, importance_ceiling=3, canon_tag_pinning=True)
+
+    assert selected == []
+
+
+def test_select_consolidatable_flag_on_still_folds_untagged_low_value_memories() -> None:
+    """canon_tag_pinning=True does not change consolidation eligibility for memories
+    that never carried a preserve tag in the first place."""
+    memories = [_episode("low", importance=2)]
+
+    selected = select_consolidatable(memories, importance_ceiling=3, canon_tag_pinning=True)
+
+    assert [memory.id for memory in selected] == ["low"]

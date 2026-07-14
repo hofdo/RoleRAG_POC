@@ -135,6 +135,13 @@ class Settings(BaseSettings):
     canon_importance_floor: int = Field(default=4, ge=1, le=5)
     canon_max_items: int = Field(default=8, ge=0)
     canon_max_chars: int = Field(default=900, ge=1)
+    # Lane A tag-eligible canon pinning (docs/26 §3.3, #78). Off = byte-identical:
+    # build_standing_facts keeps today's importance_floor-only eligibility. On: widens
+    # eligibility to CANON_TAGS-carrying memories below the floor (e.g. importance=2,
+    # tags=["rule"]), adds German tag aliases (regel/versprechen/abmachung/frist/schwur/
+    # eid/anvertraut) to both the eligibility predicate and consolidation's preserve-tags,
+    # and activates the narrow stale-fact tag-family-supersession safeguard (§3.3.1).
+    canon_tag_pinning: bool = False
 
     # Critic/curator auto-gating risk thresholds. Defaults mirror the canonical
     # constants in app/llm/router.py and app/orchestration/stages/generation.py;

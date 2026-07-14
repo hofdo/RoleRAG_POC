@@ -169,6 +169,7 @@ def _build_orchestrator(
     cloud_provider: LlmProvider | None = None,
     session_provider: ModelProviderName = ModelProviderName.LOCAL,
     loader: Any = None,
+    canon_tag_pinning: bool = False,
 ) -> TurnOrchestrator:
     connection = connect_sqlite(tmp_path / "sessions.db")
     initialize_database(connection)
@@ -209,6 +210,7 @@ def _build_orchestrator(
             cloud_max_tokens=1000,
             local_temperature=0.75,
             cloud_temperature=0.65,
+            canon_tag_pinning=canon_tag_pinning,
         ),
     )
 
@@ -253,9 +255,108 @@ async def test_turn_orchestrator_returns_turn_result(tmp_path: Path) -> None:
         "warnings": [],
         "retrieval": None,
         "token_usage": {"total_tokens": 15},
+        "standing_facts_count": 0,
+        "standing_facts_chars": 0,
     }
     assert len(provider.requests) == 1
     assert provider.requests[0].messages[1].content == "What have you heard about the regent?"
+
+
+# --- docs/26 §3.3 Lane A tag-eligible canon pinning (#78) -------------------------
+
+
+def test_canon_tag_pinning_reaches_session_stage_and_memory_consolidator(
+    tmp_path: Path,
+) -> None:
+    """The #48/#67 lesson: a config field must reach every collaborator that needs
+    it, not just live on TurnOrchestratorConfig. canon_tag_pinning has two
+    consumers -- TurnSessionLoader (build_standing_facts eligibility/safeguard) and
+    MemoryConsolidator (select_consolidatable's German preserve-tags) -- reached via
+    TurnMemoryStage. Both composition roots (CLI, API) build TurnOrchestratorConfig
+    exclusively through app.composition.build_orchestrator_config (see
+    test_composition_config_parity.py), so proving the flag reaches both
+    collaborators here covers both roots by construction."""
+    orchestrator_off = _build_orchestrator(tmp_path, FakeProvider(), canon_tag_pinning=False)
+    orchestrator_on = _build_orchestrator(
+        tmp_path / "on", FakeProvider(), canon_tag_pinning=True
+    )
+
+    assert orchestrator_off.session_stage.canon_tag_pinning is False
+    assert orchestrator_off.memory_stage._consolidator.canon_tag_pinning is False
+    assert orchestrator_on.session_stage.canon_tag_pinning is True
+    assert orchestrator_on.memory_stage._consolidator.canon_tag_pinning is True
+
+
+@pytest.mark.asyncio
+async def test_standing_facts_count_reflects_widened_eligibility_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """End-to-end proof (session load -> build_standing_facts -> TurnResult
+    diagnostics) that the flag threaded through TurnOrchestratorConfig actually
+    changes what reaches the actor prompt, using the new #78 diagnostics fields
+    themselves as the observable. A sub-floor (importance=2), rule-tagged memory
+    (the blue-seal shape) is invisible to Standing-facts with the flag off and
+    pinned with it on."""
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider, canon_tag_pinning=True)
+    assert orchestrator.memory_store is not None
+    orchestrator.memory_store.persist_memories(
+        session_id="demo-session",
+        memories=[
+            MemoryCandidate(
+                summary="The player will only trust messages with a blue wax seal.",
+                visibility=Visibility.PLAYER,
+                importance=2,
+                tags=["rule"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input)
+
+    assert result.standing_facts_count == 1
+    assert result.standing_facts_chars == len(
+        "The player will only trust messages with a blue wax seal."
+    )
+
+
+@pytest.mark.asyncio
+async def test_standing_facts_count_stays_zero_when_flag_off_for_same_pool(
+    tmp_path: Path,
+) -> None:
+    """The flag-off mirror of the test above: byte-identical-at-default means the
+    same sub-floor tagged memory is NOT pinned, so standing_facts_count is 0."""
+    provider = FakeProvider()
+    orchestrator = _build_orchestrator(tmp_path, provider, canon_tag_pinning=False)
+    assert orchestrator.memory_store is not None
+    orchestrator.memory_store.persist_memories(
+        session_id="demo-session",
+        memories=[
+            MemoryCandidate(
+                summary="The player will only trust messages with a blue wax seal.",
+                visibility=Visibility.PLAYER,
+                importance=2,
+                tags=["rule"],
+                scene_id="rose-gallery",
+                actor_id="archivist",
+            )
+        ],
+    )
+    turn_input = TurnInput(
+        session_id="demo-session",
+        message="What have you heard about the regent?",
+    )
+
+    result = await orchestrator.run_turn(turn_input=turn_input)
+
+    assert result.standing_facts_count == 0
+    assert result.standing_facts_chars == 0
 
 
 @pytest.mark.asyncio

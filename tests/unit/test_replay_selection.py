@@ -179,6 +179,83 @@ def test_main_cli_prints_per_memory_lines_and_summary(
     assert "player_memories=4" in out
 
 
+# --- docs/26 §3.3 --pinning flag-on eligibility mode (#78) ------------------------
+
+
+def test_replay_selection_pinning_widens_eligibility_to_tag_only_memory(
+    tmp_path: Path,
+) -> None:
+    # elig-tag is the blue-seal shape: tag-eligible (rule) but sub-floor (importance=2)
+    # -- excluded without pinning, eligible with it, exactly as build_standing_facts's
+    # own `... or canon_tag_pinning` clause behaves.
+    db_path = tmp_path / "synthetic.db"
+    _seed_database(db_path)
+
+    without_pinning = replay_selection(database_path=db_path, session_id=_SESSION_ID)
+    with_pinning = replay_selection(
+        database_path=db_path, session_id=_SESSION_ID, canon_tag_pinning=True
+    )
+
+    assert _find(without_pinning, "elig-tag").eligible is False
+    assert _find(with_pinning, "elig-tag").eligible is True
+    # Already-floor-eligible facts are unaffected by the flag.
+    assert _find(with_pinning, "elig-all").eligible is True
+
+
+def test_replay_selection_pinning_does_not_widen_untagged_memory(tmp_path: Path) -> None:
+    # elig-imp clears the importance floor but carries no CANON_TAG -- pinning widens
+    # the floor requirement, not the tag requirement, so it stays ineligible.
+    db_path = tmp_path / "synthetic.db"
+    _seed_database(db_path)
+
+    with_pinning = replay_selection(
+        database_path=db_path, session_id=_SESSION_ID, canon_tag_pinning=True
+    )
+
+    assert _find(with_pinning, "elig-imp").eligible is False
+    assert _find(with_pinning, "elig-non").eligible is False
+
+
+def test_summarize_reports_canon_tag_pinning_state(tmp_path: Path) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_database(db_path)
+    memories = replay_selection(
+        database_path=db_path, session_id=_SESSION_ID, canon_tag_pinning=True
+    )
+
+    line = summarize(memories, importance_floor=DEFAULT_IMPORTANCE_FLOOR, canon_tag_pinning=True)
+
+    assert "canon_tag_pinning=True" in line
+    # elig-all and elig-tag both eligible with pinning on; elig-imp/elig-non are not.
+    assert "eligible=2" in line
+
+
+def test_main_cli_pinning_flag_reports_widened_eligibility(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_database(db_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "replay_selection",
+            "--database-path",
+            str(db_path),
+            "--session-id",
+            _SESSION_ID,
+            "--pinning",
+        ],
+    )
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "elig-tag importance=2 tags=['rule'] canon_tags=['rule'] eligible=yes" in out
+    assert "canon_tag_pinning=True" in out
+    assert "eligible=2" in out
+
+
 # --- Lane B lexical replay (docs/26 Stage 4, #79) --------------------------------
 
 _LEXICAL_QUERY = "what rule did we agree to trust"

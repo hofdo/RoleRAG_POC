@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.domain import MemoryEpisode, Visibility
-from app.orchestration.canon_builder import CANON_TAGS
+from app.orchestration.canon_builder import effective_canon_tags
 from app.persistence.sqlite import parse_datetime
 from app.rag.lexical import LexicalHit, score_memories_lexical
 
@@ -50,7 +50,7 @@ class MemoryEligibility:
     importance: int
     tags: tuple[str, ...]
     matched_canon_tags: tuple[str, ...]
-    eligible: bool  # today's build_standing_facts predicate: tag AND importance floor
+    eligible: bool  # build_standing_facts predicate: tag AND (importance floor OR pinning)
 
 
 def replay_selection(
@@ -58,10 +58,20 @@ def replay_selection(
     database_path: Path,
     session_id: str,
     importance_floor: int = DEFAULT_IMPORTANCE_FLOOR,
+    canon_tag_pinning: bool = False,
 ) -> list[MemoryEligibility]:
-    """Read-only replay of ``build_standing_facts``'s eligibility predicate
-    (visibility == PLAYER, importance >= floor, CANON_TAGS intersects tags) against
-    a preserved live-run artifact, oldest-first."""
+    """Read-only replay of ``build_standing_facts``'s eligibility predicate against a
+    preserved live-run artifact, oldest-first.
+
+    ``canon_tag_pinning=False`` (default) reproduces TODAY's predicate: visibility ==
+    PLAYER, CANON_TAGS intersects tags, importance >= floor. ``canon_tag_pinning=True``
+    (docs/26 §3.3, #78) reports which memories become pinnable once CANON_TAG_PINNING
+    is on: the matched-tag set widens with the German aliases
+    (``effective_canon_tags``) and the importance floor is bypassed entirely for any
+    tag-carrying memory (mirrors ``build_standing_facts``'s ``... or canon_tag_pinning``
+    clause).
+    """
+    canon_tags = effective_canon_tags(canon_tag_pinning=canon_tag_pinning)
     uri = f"{Path(database_path).resolve().as_uri()}?mode=ro&immutable=1"
     connection = sqlite3.connect(uri, uri=True)
     try:
@@ -75,27 +85,30 @@ def replay_selection(
     results: list[MemoryEligibility] = []
     for memory_id, importance, tags_json in rows:
         tags = tuple(json.loads(tags_json))
-        matched = tuple(sorted(CANON_TAGS.intersection(tags)))
+        matched = tuple(sorted(canon_tags.intersection(tags)))
         results.append(
             MemoryEligibility(
                 memory_id=memory_id,
                 importance=importance,
                 tags=tags,
                 matched_canon_tags=matched,
-                eligible=bool(matched) and importance >= importance_floor,
+                eligible=bool(matched) and (importance >= importance_floor or canon_tag_pinning),
             )
         )
     return results
 
 
-def summarize(memories: list[MemoryEligibility], *, importance_floor: int) -> str:
+def summarize(
+    memories: list[MemoryEligibility], *, importance_floor: int, canon_tag_pinning: bool = False
+) -> str:
     distribution = Counter(memory.importance for memory in memories)
     dist = ", ".join(f"{count}x{importance}" for importance, count in sorted(distribution.items()))
     tag_eligible = sum(1 for memory in memories if memory.matched_canon_tags)
     eligible = sum(1 for memory in memories if memory.eligible)
     return (
         f"player_memories={len(memories)} importance_floor={importance_floor} "
-        f"importance_distribution=[{dist}] tag_eligible={tag_eligible} eligible={eligible}"
+        f"canon_tag_pinning={canon_tag_pinning} importance_distribution=[{dist}] "
+        f"tag_eligible={tag_eligible} eligible={eligible}"
     )
 
 
@@ -182,6 +195,7 @@ def _run_eligibility(args: argparse.Namespace) -> None:
         database_path=args.database_path,
         session_id=args.session_id,
         importance_floor=args.importance_floor,
+        canon_tag_pinning=args.pinning,
     )
     for memory in memories:
         print(
@@ -189,7 +203,11 @@ def _run_eligibility(args: argparse.Namespace) -> None:
             f"canon_tags={list(memory.matched_canon_tags)} "
             f"eligible={'yes' if memory.eligible else 'no'}"
         )
-    print(summarize(memories, importance_floor=args.importance_floor))
+    print(
+        summarize(
+            memories, importance_floor=args.importance_floor, canon_tag_pinning=args.pinning
+        )
+    )
 
 
 def main() -> None:
@@ -202,6 +220,15 @@ def main() -> None:
     parser.add_argument("--database-path", type=Path, required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--importance-floor", type=int, default=DEFAULT_IMPORTANCE_FLOOR)
+    parser.add_argument(
+        "--pinning",
+        action="store_true",
+        help=(
+            "Eligibility mode only (ignored with --lexical-query): report eligibility "
+            "as if CANON_TAG_PINNING were on -- widened German tag aliases, importance "
+            "floor bypassed for any tag-carrying memory (docs/26 §3.3, #78)."
+        ),
+    )
     parser.add_argument(
         "--lexical-query",
         nargs="?",

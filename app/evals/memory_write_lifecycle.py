@@ -37,6 +37,7 @@ from app.evals.fixtures import build_eval_fixture
 from app.llm.provider import LlmProvider, LlmRequest, LlmResponse
 from app.memory import MemoryEpisodeStore
 from app.memory.deterministic_extractor import DETERMINISTIC_EVENT_IMPORTANCE
+from app.orchestration.canon_builder import build_standing_facts
 from app.orchestration.stages.memory import TurnMemoryStage
 from app.orchestration.stages.routing import TurnRoutingStage
 from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
@@ -248,12 +249,24 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
         None,
     )
 
-    # --- Stage 3 extension point (#78, docs/26 Section 3.3 Lane A tag-eligible
-    # canon pinning): once CANON_TAG_PINNING widens build_standing_facts
-    # eligibility, add assertions here that promise_memory/compass_memory appear
-    # in canon_builder.build_standing_facts(memories, ...) output (standing-facts
-    # inclusion) with the flag on, and that the output stays byte-identical with
-    # the flag off. Not implemented yet -- Stage 0 is instrumentation only. ---
+    # --- Stage 3 (#78, docs/26 §3.3 Lane A tag-eligible canon pinning): standing-
+    # facts inclusion. promise_memory (deterministic extractor) and
+    # fold_target_memory (the Stage 2 best-match fold, #77) both already carry a
+    # CANON_TAGS-intersecting tag (promise/deadline) AND importance ==
+    # DETERMINISTIC_EVENT_IMPORTANCE (4, which equals Settings.canon_importance_floor's
+    # default) -- so BOTH are canon-eligible under TODAY's unchanged predicate, flag
+    # off, with no widening needed: this is docs/26 §3.3.1's own point that the
+    # deterministic-extractor/fold class was already canon-eligible pre-#78.
+    # compass_memory carries "entrusted" (also a CANON_TAG) but at the curator-
+    # assigned importance=2 -- the blue-seal-shaped sub-floor case: #78 only widens
+    # eligibility for this curator-tagged subclass, so it is excluded at
+    # CANON_TAG_PINNING=false and included once the flag is on.
+    standing_facts_flag_off = build_standing_facts(
+        memories, importance_floor=4, max_items=8, max_chars=900
+    )
+    standing_facts_flag_on = build_standing_facts(
+        memories, importance_floor=4, max_items=8, max_chars=900, canon_tag_pinning=True
+    )
 
     checks = {
         "promise_turn_writes_memory": promise_turn.memory_written is True,
@@ -286,6 +299,21 @@ async def _evaluate_memory_write_lifecycle() -> MemoryWriteLifecycleResult:
         ),
         "fold_is_auditable": (
             fold_warning is not None and "northern bridge before sunrise" in fold_warning
+        ),
+        "promise_memory_pinned_regardless_of_flag": (
+            promise_memory is not None
+            and promise_memory.summary in standing_facts_flag_off
+            and promise_memory.summary in standing_facts_flag_on
+        ),
+        "fold_target_memory_pinned_regardless_of_flag": (
+            fold_target_memory is not None
+            and fold_target_memory.summary in standing_facts_flag_off
+            and fold_target_memory.summary in standing_facts_flag_on
+        ),
+        "compass_memory_pinned_only_with_flag_on": (
+            compass_memory is not None
+            and compass_memory.summary not in standing_facts_flag_off
+            and compass_memory.summary in standing_facts_flag_on
         ),
     }
     return MemoryWriteLifecycleResult(passed=all(checks.values()), checks=checks)

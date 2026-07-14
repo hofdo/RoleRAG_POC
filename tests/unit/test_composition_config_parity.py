@@ -116,3 +116,40 @@ def test_cli_and_api_build_services_wire_the_same_collaborators(tmp_path: Path) 
             f"{label}: memory_embedding_provider not wired -- semantic write-dedup can "
             "never activate"
         )
+
+
+def test_cli_and_api_wire_canon_tag_pinning_into_session_and_consolidator(
+    tmp_path: Path,
+) -> None:
+    """docs/26 §3.3 (#78). canon_tag_pinning has two consumers -- TurnSessionLoader
+    (build_standing_facts' widened eligibility + stale-fact safeguard) and
+    MemoryConsolidator (select_consolidatable's German preserve-tags), the latter
+    reached via TurnMemoryStage -- and both must receive the flag on both
+    composition roots, the same #67-class concern
+    test_cli_and_api_build_services_wire_the_same_collaborators pins for the other
+    collaborators."""
+    settings = Settings(
+        database_path=str(tmp_path / "sessions.db"),
+        canon_tag_pinning=True,
+    )
+
+    with (
+        patch("app.composition.build_local_provider", return_value=MagicMock()),
+        patch("app.composition.build_cloud_provider", return_value=None),
+        patch("app.composition.build_critic_agent", return_value=MagicMock()),
+        patch("app.composition.build_memory_curator", return_value=MagicMock()),
+    ):
+        cli_services = _build_services(settings, enable_retrieval=False, content_root=tmp_path)
+        api_services = build_services(settings, enable_retrieval=False, content_root=tmp_path)
+
+    for label, services in (("cli", cli_services), ("api", api_services)):
+        orchestrator = services.orchestrator
+        assert orchestrator.config.canon_tag_pinning is True, (
+            f"{label}: canon_tag_pinning not set on TurnOrchestratorConfig"
+        )
+        assert orchestrator.session_stage.canon_tag_pinning is True, (
+            f"{label}: canon_tag_pinning not wired into session_stage"
+        )
+        assert orchestrator.memory_stage._consolidator.canon_tag_pinning is True, (
+            f"{label}: canon_tag_pinning not wired into memory_stage's consolidator"
+        )

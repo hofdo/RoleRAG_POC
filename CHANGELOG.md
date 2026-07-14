@@ -68,6 +68,31 @@ records; this file is the quick delta between versions.
   prompt at quota 2. `context_budget.py` and the additive-boost rerank math are byte-identical
   (proven by a quotas=0 golden test); no new table, store, LLM call site, or vector-store
   feature, so no `InMemoryVectorStore` parity work (Lane B runs outside the store).
+- **docs/26 Stage 3 Lane A tag-eligible canon pinning** (#78, opt-in, byte-identical default):
+  `CANON_TAG_PINNING=false` widens `build_standing_facts` eligibility (`app/orchestration/
+  canon_builder.py`) to `visibility == PLAYER AND CANON_TAGS-intersects-tags AND
+  (importance >= floor OR canon_tag_pinning)` — only sub-floor, curator-tagged memories (the
+  blue-seal shape) are newly eligible; already-floor-eligible facts are unaffected. German tag
+  aliases (`regel`/`versprechen`/`abmachung`/`frist`/`schwur`/`eid`/`anvertraut`) join the
+  matched-tag set only when the flag is on (`CANON_TAGS`/`effective_canon_tags`), mirrored
+  independently into `app/memory/consolidation.py`'s preserve-tags so a German-tagged durable
+  fact is never folded either. Ships with the mandatory (flag-on only) §3.3.1 stale-fact
+  safeguard: drops an older pinned entry when a newer entry sharing a canon tag has strictly
+  more content terms (the amendment case) and a later `created_at`; every other case — partial
+  overlap, equal term sets, cross-family, missing timestamps — keeps both pinned (Q3:
+  over-inclusion, never silent loss), and every drop is audited via a warning that reaches turn
+  diagnostics through a new `LoadedTurnContext.warnings` field. The flag threads through
+  `build_orchestrator_config` (both composition roots) to two independent consumers —
+  `TurnSessionLoader` and `MemoryConsolidator` (via `TurnMemoryStage`) — pinned by a dedicated
+  parity test (the #48/#67 lesson). New additive `TurnDiagnostics`/`TurnResult` fields
+  `standing_facts_count`/`standing_facts_chars`, populated every turn (both flag states) and
+  mirrored wherever `token_usage` already flows (API schemas, routes, SSE); old
+  `diagnostics_json` rows without the keys deserialize as `None`. Offline D3 replay
+  (`replay_selection --pinning`, read-only): flag off reproduces the pre-#78 baseline (0/47
+  eligible); flag on makes all 3 tag-eligible memories eligible, incl. the blue-seal rule
+  memory `354b8d98` — pinned block measures 352/900 chars, 0 safeguard warnings (no amendment
+  pairs in this transcript). `select_retrieved_chunks_for_prompt`, write-dedup, and the
+  ranking/boost math are untouched.
 
 ## 1.3.0 — 2026-07-12
 

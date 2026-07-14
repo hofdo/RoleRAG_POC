@@ -31,6 +31,7 @@ class MemoryConsolidator:
         consolidation_min_age: int = 0,
         consolidation_batch_cap: int = 0,
         cloud_provider: LlmProvider | None = None,
+        canon_tag_pinning: bool = False,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -43,6 +44,9 @@ class MemoryConsolidator:
         self.consolidation_importance_ceiling = consolidation_importance_ceiling
         self.consolidation_min_age = consolidation_min_age
         self.consolidation_batch_cap = consolidation_batch_cap
+        # docs/26 §3.3, #78: gates the German preserve-tag aliases in
+        # select_consolidatable (byte-identical when False).
+        self.canon_tag_pinning = canon_tag_pinning
 
     async def consolidate_if_needed(
         self,
@@ -70,6 +74,7 @@ class MemoryConsolidator:
                 self.memory_store.list_memories_for_session(session_id),
                 importance_ceiling=self.consolidation_importance_ceiling,
                 min_age=self.consolidation_min_age,
+                canon_tag_pinning=self.canon_tag_pinning,
             )
         except Exception as exc:
             return (f"memory consolidation skipped: {exc}",)

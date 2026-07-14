@@ -437,6 +437,8 @@ def test_post_turn_runs_orchestrator_and_returns_safe_response(tmp_path: Path) -
         "critic_status": "accepted",
         "retrieval": None,
         "token_usage": {"total_tokens": 15},
+        "standing_facts_count": 0,
+        "standing_facts_chars": 0,
     }
     # Memory curation runs after this response on API turns (Task 8); the
     # warning is additive and memory_written stays False until the deferred
@@ -932,6 +934,8 @@ def test_post_turn_stream_returns_buffered_text_then_final_metadata(tmp_path: Pa
                 ],
                 "retrieval": None,
                 "token_usage": {"total_tokens": 15},
+                "standing_facts_count": 0,
+                "standing_facts_chars": 0,
             },
         ),
     ]

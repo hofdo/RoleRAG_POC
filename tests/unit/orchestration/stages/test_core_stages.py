@@ -25,7 +25,7 @@ from app.domain import (
 )
 from app.llm.provider import LlmMessage, LlmProvider, LlmRequest, LlmResponse
 from app.llm.router import ModelProviderName, ModelRoute
-from app.memory import MemoryEpisodeStore
+from app.memory import MemoryEpisodeStore, RecentDialogueStore
 from app.memory.consolidation import CONSOLIDATED_TAG
 from app.memory.deterministic_extractor import DETERMINISTIC_EVENT_IMPORTANCE
 from app.orchestration.context_budget import ContextBudget
@@ -36,10 +36,12 @@ from app.orchestration.stages import (
     TurnPersistenceStage,
     TurnRetrievalStage,
     TurnRoutingStage,
+    TurnSessionLoader,
 )
 from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
 from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult
+from app.persistence import DemoWorldRecord
 from app.rag.ranking import SliceQuotas
 
 
@@ -79,6 +81,160 @@ def _routing() -> TurnRoutingStage:
         local_temperature=0.75,
         cloud_temperature=0.65,
     )
+
+
+class _FakeSessionDataLoader:
+    """Minimal TurnDataLoader: one world/persona/scene, real nominal domain types
+    (a Protocol structurally matches, but its method RETURN types are concrete
+    classes -- DemoWorldRecord/PersonaCard/SceneState -- so a SimpleNamespace stand-in
+    would not satisfy mypy --strict there)."""
+
+    def load_world(self, world_id: str) -> DemoWorldRecord:
+        return DemoWorldRecord(
+            id=world_id,
+            name="Test World",
+            default_scene_id="scene",
+            persona_ids=["persona"],
+            scene_ids=["scene"],
+        )
+
+    def load_persona(self, persona_id: str) -> PersonaCard:
+        return PersonaCard(
+            id=persona_id,
+            name="Archivist",
+            role="npc",
+            public_description="A careful archivist.",
+            speaking_style="Precise.",
+        )
+
+    def load_scene(self, scene_id: str) -> SceneState:
+        return SceneState(
+            id=scene_id,
+            title="Gallery",
+            location="Palace",
+            player_visible_summary="A mirrored gallery.",
+        )
+
+
+def _build_session_loader(
+    *,
+    memories: Sequence[MemoryEpisode] = (),
+    canon_tag_pinning: bool = False,
+) -> TurnSessionLoader:
+    """docs/26 §3.3 (#78) TurnSessionLoader wiring fixture. The memory store is a
+    fake returning exactly the given ``memories`` -- full, deterministic control over
+    each MemoryEpisode's created_at (unlike a real SQLite-backed store, whose
+    wall-clock timestamps would make the stale-fact safeguard's ordering
+    non-deterministic to test)."""
+    session = SessionState(
+        id="session",
+        world_id="world",
+        active_scene_id="scene",
+        active_persona_id="persona",
+        player_name="Player",
+    )
+    memory_store = MemoryEpisodeStore(
+        memory_repository=cast(
+            Any, SimpleNamespace(list_memories_for_session=lambda session_id: list(memories))
+        )
+    )
+    return TurnSessionLoader(
+        loader=_FakeSessionDataLoader(),
+        loader_factory=None,
+        content_root="data",
+        session_repository=cast(Any, SimpleNamespace(get_session=lambda session_id: session)),
+        recent_dialogue_store=RecentDialogueStore(
+            turn_repository=cast(
+                Any, SimpleNamespace(list_recent_turns=lambda session_id, limit: [])
+            ),
+            recent_turns=8,
+        ),
+        memory_store=memory_store,
+        canon_repository=None,
+        canon_importance_floor=4,
+        canon_max_items=8,
+        canon_max_chars=900,
+        canon_tag_pinning=canon_tag_pinning,
+    )
+
+
+def _tagged_memory(
+    memory_id: str,
+    *,
+    summary: str,
+    importance: int = 2,
+    tags: list[str] | None = None,
+    created_at: datetime | None = None,
+) -> MemoryEpisode:
+    return MemoryEpisode(
+        id=memory_id,
+        session_id="session",
+        scene_id="scene",
+        summary=summary,
+        importance=importance,
+        visibility=Visibility.PLAYER,
+        tags=tags if tags is not None else ["rule"],
+        created_at=created_at,
+    )
+
+
+def test_session_loader_flag_off_leaves_sub_floor_tagged_memory_unpinned() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "blue-seal", summary="The player will only trust messages with a blue wax seal."
+            )
+        ]
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == ()
+    assert context.warnings == ()
+
+
+def test_session_loader_flag_on_widens_eligibility_into_context() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "blue-seal", summary="The player will only trust messages with a blue wax seal."
+            )
+        ],
+        canon_tag_pinning=True,
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == (
+        "The player will only trust messages with a blue wax seal.",
+    )
+    assert context.warnings == ()
+
+
+def test_session_loader_flag_on_surfaces_safeguard_drop_as_context_warning() -> None:
+    loader = _build_session_loader(
+        memories=[
+            _tagged_memory(
+                "seal-old",
+                summary="The trust rule is a blue wax seal.",
+                created_at=datetime(2026, 6, 1, tzinfo=UTC),
+            ),
+            _tagged_memory(
+                "seal-new",
+                summary="The trust rule is now a blue wax seal plus a knock at the door.",
+                created_at=datetime(2026, 6, 2, tzinfo=UTC),
+            ),
+        ],
+        canon_tag_pinning=True,
+    )
+
+    context = loader.load(TurnInput(session_id="session", message="hello"))
+
+    assert context.standing_facts == (
+        "The trust rule is now a blue wax seal plus a knock at the door.",
+    )
+    assert len(context.warnings) == 1
+    assert "stale canon fact superseded" in context.warnings[0]
 
 
 def test_retrieval_stage_uses_only_player_visible_scores_for_confidence() -> None:

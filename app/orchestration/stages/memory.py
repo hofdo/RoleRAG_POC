@@ -63,6 +63,7 @@ class TurnMemoryStage:
         consolidation_importance_ceiling: int = 3,
         consolidation_min_age: int = 0,
         consolidation_batch_cap: int = 0,
+        canon_tag_pinning: bool = False,
     ) -> None:
         self.provider = provider
         self.cloud_provider = cloud_provider
@@ -90,6 +91,7 @@ class TurnMemoryStage:
             consolidation_importance_ceiling=consolidation_importance_ceiling,
             consolidation_min_age=consolidation_min_age,
             consolidation_batch_cap=consolidation_batch_cap,
+            canon_tag_pinning=canon_tag_pinning,
         )
 
     async def run(

@@ -251,7 +251,17 @@ def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
     assert settings.canon_importance_floor == 4
     assert settings.canon_max_items == 8
     assert settings.canon_max_chars == 900
+    assert settings.canon_tag_pinning is False
     assert settings.session_memory_max_episodes == 0
+
+
+def test_settings_accept_canon_tag_pinning_override(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("CANON_TAG_PINNING=true\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.canon_tag_pinning is True
 
 
 def test_build_ranking_weights_defaults_match_default_ranking_weights(tmp_path: Path) -> None:

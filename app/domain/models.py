@@ -209,6 +209,15 @@ class TurnDiagnostics(BaseModel):
     # Optional and additive: old persisted rows without this key deserialize with
     # token_usage=None (docs #69).
     token_usage: dict[str, int] | None = None
+    # Standing-facts (Lane A canon pinning) diagnostics (docs/26 §3.3, #78): the
+    # count and total char length of context.standing_facts for this turn, populated
+    # every turn regardless of canon_tag_pinning (counting is not a behavior change --
+    # only whether the flag widens what gets counted). Lets canon-cap saturation
+    # (canon_max_items/canon_max_chars) become VISIBLE rather than silently dropping
+    # the oldest/lowest-importance pinned line. Optional and additive: old persisted
+    # rows without these keys deserialize as None, same contract as token_usage.
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
 
 
 class DeferredMemoryJob(BaseModel):
@@ -242,6 +251,9 @@ class TurnResult(BaseModel):
     stage_timings: dict[str, float] = Field(default_factory=dict)
     # See TurnDiagnostics.token_usage for the same-generation-as-final-text rule.
     token_usage: dict[str, int] | None = None
+    # See TurnDiagnostics.standing_facts_count/standing_facts_chars.
+    standing_facts_count: int | None = None
+    standing_facts_chars: int | None = None
     outcome: TurnOutcome = Field(default=TurnOutcome.SUCCESS, exclude=True)
     deferred_memory: "DeferredMemoryJob | None" = Field(default=None, exclude=True)
 

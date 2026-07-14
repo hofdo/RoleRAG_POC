@@ -42,6 +42,11 @@ class LoadedTurnContext:
     # (CONTROLLED_FAILURE, confirmation required, provider error) never commits a
     # persona switch that the player never actually saw succeed.
     persona_switched: bool = False
+    # Session-load-time audit warnings (currently: the docs/26 §3.3.1 stale-fact
+    # safeguard's drop messages, emitted only when canon_tag_pinning is on). Additive
+    # default () so callers/tests that omit it are unaffected. TurnOrchestrator.run_turn
+    # prepends these to the turn's warnings so a drop is visible in turn diagnostics.
+    warnings: tuple[str, ...] = ()
 
 
 class TurnSessionLoader:
@@ -58,6 +63,7 @@ class TurnSessionLoader:
         canon_importance_floor: int = 4,
         canon_max_items: int = 8,
         canon_max_chars: int = 900,
+        canon_tag_pinning: bool = False,
     ) -> None:
         self.loader = loader
         self.loader_factory = loader_factory
@@ -69,6 +75,9 @@ class TurnSessionLoader:
         self.canon_importance_floor = canon_importance_floor
         self.canon_max_items = canon_max_items
         self.canon_max_chars = canon_max_chars
+        # docs/26 §3.3, #78: gates build_standing_facts's widened eligibility, German
+        # tag aliases, and the stale-fact safeguard (byte-identical when False).
+        self.canon_tag_pinning = canon_tag_pinning
 
     def create_session(
         self,
@@ -152,6 +161,7 @@ class TurnSessionLoader:
             else []
         )
         standing_facts: tuple[str, ...] = ()
+        session_warnings: list[str] = []
         if pinned_canon or memories:
             standing_facts = build_standing_facts(
                 memories,
@@ -159,6 +169,8 @@ class TurnSessionLoader:
                 importance_floor=self.canon_importance_floor,
                 max_items=self.canon_max_items,
                 max_chars=self.canon_max_chars,
+                canon_tag_pinning=self.canon_tag_pinning,
+                warnings=session_warnings,
             )
 
         return LoadedTurnContext(
@@ -169,6 +181,7 @@ class TurnSessionLoader:
             standing_facts=standing_facts,
             session_memories=tuple(memories),
             persona_switched=persona_switched,
+            warnings=tuple(session_warnings),
         )
 
     def loader_for_content_root(self, content_root: str) -> TurnDataLoader:
