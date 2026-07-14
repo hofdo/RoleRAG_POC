@@ -179,6 +179,12 @@ a new "auxiliary task provider" concept that reopens the session-bound-provider 
 record for all background tasks (curator included), a far bigger door than rumors
 justify. **Parked with a named trigger:** revisit only if live evidence shows background
 rumor generation contending with turn latency or memory on the owner's hardware.
+Pre-scouted candidates (2026-07-14 web scan, NOT verified against the task): **Qwen3.5-2B**
+(Apache 2.0, strongest small-tier multilingual/German, right at the 2B cap),
+**Gemma 3 1B** (smallest/fastest, same model family as the 26B roleplay model — shared
+template/style lineage), **EuroLLM-1.7B** (EU-language-first, strong for its size,
+Apache 2.0). All have GGUF/llama.cpp paths (~1 GB at Q4_K_M). Candidate choice is not the
+open question; the trigger firing is.
 
 ## 4. Explicitly not in this design
 
