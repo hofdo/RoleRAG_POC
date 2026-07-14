@@ -21,7 +21,9 @@ from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, StoredTurn, Visibility
 from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
+from app.rag.lexical import LexicalHit, score_memories_lexical
 from app.rag.models import RagCollection
+from app.rag.ranking import SliceQuotas, apply_lexical_slice_quotas
 from app.rag.retriever import build_retrieval_query
 from app.rag.vector_store import _SENTINEL_PAYLOAD_KEY, QdrantVectorStore
 
@@ -1037,7 +1039,41 @@ def inspect_story_event(
         scene_id="rose-gallery",
         top_k=settings.rag_default_top_k,
     )
-    diagnostics = retrieval.diagnostics.model_dump(mode="json")
+    # Lane B selection parity (#79 -> #80, found live in Phase E run 1): real turns
+    # select through TurnRetrievalStage, which applies the lexical slice quotas on
+    # the final prompt window -- a dense-only replay here asserts the pre-Lane-B
+    # bar the engine no longer serves prompts from, failing probes the live turn
+    # would have answered. Mirror the stage's slice application exactly (same
+    # scorer inputs, same settings-driven quotas, same window); quota 0 keeps this
+    # a byte-identical no-op. Unlike the stage this is NOT fail-open: a scorer
+    # error in a validator must fail the run loudly, not degrade silently.
+    slice_quotas = SliceQuotas(
+        lexical=settings.rag_slice_lexical_quota,
+        min_slice_score=settings.rag_slice_min_score,
+    )
+    if slice_quotas.lexical > 0:
+        lexical_hits: tuple[LexicalHit, ...] = tuple(
+            score_memories_lexical(
+                query_text=ROSE_GALLERY_MESSAGES[event.callback_turn - 1],
+                memories=memories,
+            )
+        )
+        slice_result = apply_lexical_slice_quotas(
+            chunks=retrieval.chunks,
+            diagnostics=retrieval.diagnostics,
+            lexical_hits=lexical_hits,
+            memories_by_id={memory.id: memory for memory in memories},
+            quotas=slice_quotas,
+            prompt_window=settings.rag_default_top_k,
+        )
+        diagnostics_source = (
+            slice_result.diagnostics
+            if slice_result.diagnostics is not None
+            else retrieval.diagnostics
+        )
+    else:
+        diagnostics_source = retrieval.diagnostics
+    diagnostics = diagnostics_source.model_dump(mode="json")
     indexed_ids = _qdrant_memory_ids(
         QdrantVectorStore(url=settings.qdrant_url),
         session_id=session_id,

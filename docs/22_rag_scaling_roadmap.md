@@ -631,6 +631,38 @@ Effort S. — [x]
 > reaches the actor prompt via pinning, not via dense rank) recorded explicitly here. P1.1
 > drops to a conditional escalation rung (docs/26 Stage 6), pulled only by a live miss
 > neither lane covers — its spec below is unchanged, plus docs/26's RRF score-scale caveat.
+>
+> **Phase E run 1 attempt (2026-07-14, `26b-mtp`, full Stage 5 preset) — ABORTED at the
+> turn-38 blue-seal inspection; root cause split in two, one fixed session-side, one
+> recorded as open.** `CheckpointError: event blue_seal_trust_rule was not selected by
+> callback retrieval` (artifact `/tmp/rolerag-live-E1`, checkpoint `status: in_progress`,
+> 37 turns; run DB recovered from its WAL on a scratch copy for forensics — the artifact
+> itself untouched). Both lanes were demonstrably live at turn level before the abort:
+> the standing-facts block grew 1→5 pinned facts (557 chars) and never dropped, and 65
+> slice-guaranteed selections fired across 37 turns. The two causes:
+> (1) **Harness fidelity gap — FIXED.** `inspect_story_event` replayed selection
+> dense-only: Lane B's slice quotas apply only inside `TurnRetrievalStage`, so the
+> checkpoint asserted the pre-#79 dense-only bar — a selection path the engine no longer
+> serves prompts from. Offline replay against this run's own 47-memory pool ranks the
+> blue-seal memory **#1 of 16** lexically (score 6.83, matched `{messag, trust}`), i.e.
+> the real turn-38 selection would have served it; only the inspection replay could not.
+> Fix: the inspection now mirrors the stage's slice application exactly (same scorer
+> inputs, settings-driven quotas, same prompt window; quota 0 stays a byte-identical
+> no-op; deliberately NOT fail-open — a scorer error in a validator fails loudly).
+> Pinned by `test_inspect_story_event_applies_lexical_slice_quotas_like_the_turn_stage`.
+> The assertion itself is untouched — a #74-class precision fix, not a loosening.
+> (2) **Lane A tag-vocabulary drift — OPEN, recorded.** This run's curator re-roll
+> tagged the blue-seal memory `["player_decision", "quest_rule", "information_filter"]`
+> (D3: plain `rule`); `CANON_TAGS` eligibility is exact-set-intersection, so
+> `quest_rule` ∉ family and the fact was **not pinned** — Lane A's guarantee is
+> curator-tag-vocabulary-dependent under MTP non-determinism. The #73 acceptance case
+> stays covered by Lane B (rank #1 ≤ quota 2), so this does not block the Phase E
+> re-runs; it does mean the acceptance reinterpretation may need to lean on the "and/or
+> Lane B" clause docs/25 Phase E already provides. Candidate hardening (owner decision,
+> deliberately not built mid-validation): token-split tag matching (`quest_rule` →
+> `{quest, rule}` ∩ family) or a deterministic-extractor trigger for rule-declaration
+> phrasings ("we will trust only …") emitting canonical tags at importance 4; either
+> widens what the flag-on guarantee pins and interacts with §3.3.1's supersession scope.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index

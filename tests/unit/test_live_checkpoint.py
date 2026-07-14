@@ -937,6 +937,100 @@ def test_inspect_story_event_resolves_provenance_via_tracked_definition_turn_ind
     assert attribution_with_override.matching_memory_ids == ("mem-1",)
 
 
+def test_inspect_story_event_applies_lexical_slice_quotas_like_the_turn_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Lane B selection parity (#79 -> #80, Phase E run 1 finding): real turns
+    # select through TurnRetrievalStage's slice-aware path, so the inspection
+    # replay must apply the same quotas -- a dense-only replay fails probes the
+    # live turn would have served (E1: blue-seal lexical rank #1/16, dense-missed,
+    # CheckpointError). Dense returns nothing here; with quota on, the scorer
+    # must inject the rare-term memory into selected so selected_memory_ids is
+    # non-empty. With quota off (default), the dense-only result stands.
+    from app.config import Settings
+    from app.diagnostics.live_checkpoint import inspect_story_event
+    from app.persistence.sqlite import connect_sqlite, initialize_database
+    from app.rag.diagnostics import RetrievalDiagnostics
+
+    # Pick a scripted message with a canon-rare term so the test tracks the
+    # script rather than hard-coding an index.
+    callback_turn = next(
+        index for index, message in enumerate(ROSE_GALLERY_MESSAGES, start=1) if "signal" in message
+    )
+
+    db_path = tmp_path / "checkpoint.db"
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-14T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        ("session-1", "demo_world", "rose-gallery", "archivist", "Player", now, now),
+    )
+    connection.execute(
+        "INSERT INTO memory_episodes "
+        "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+        "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            "mem-lex",
+            "session-1",
+            "rose-gallery",
+            "archivist",
+            "Iria confirmed the hidden three-tap signal on the mirror frame.",
+            2,
+            "player",
+            "[]",
+            now,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    event = StoryEvent(
+        key="synthetic_slice_probe",
+        definition_turn=1,
+        callback_turn=callback_turn,
+        term_groups=(("signal",),),
+    )
+
+    class _EmptyDenseRetriever:
+        def retrieve_for_actor_with_diagnostics(self, **kwargs: Any) -> Any:
+            class _Result:
+                chunks: list[Any] = []
+                diagnostics = RetrievalDiagnostics(query="q", selected=[], rejected=[])
+
+            return _Result()
+
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint.build_actor_context_retriever",
+        lambda settings: _EmptyDenseRetriever(),
+    )
+    monkeypatch.setattr(
+        "app.diagnostics.live_checkpoint._qdrant_memory_ids",
+        lambda vector_store, *, session_id: ("mem-lex",),
+    )
+
+    quota_on = inspect_story_event(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path), rag_slice_lexical_quota=2),
+        session_id="session-1",
+        event=event,
+    )
+    assert quota_on.matching_memory_ids == ("mem-lex",)
+    assert quota_on.selected_memory_ids == ("mem-lex",)
+
+    quota_off = inspect_story_event(
+        database_path=db_path,
+        settings=Settings(database_path=str(db_path)),
+        session_id="session-1",
+        event=event,
+    )
+    assert quota_off.matching_memory_ids == ("mem-lex",)
+    assert quota_off.selected_memory_ids == ()
+
+
 def test_stage_latency_means_are_reported_from_turn_stage_timings() -> None:
     overrides = {
         1: {"stage_timings": {"generation": 10.0, "critique": 4.0, "memory": 2.0}},

@@ -931,6 +931,19 @@ world-chronicle section below (#81–#83).
   the measured survival delta, the derived `min_slice_score`, and the resulting default flip /
   docs/22 confirmation all remain on the owner's machine — this item stays unchecked until
   those land.
+  **Finding 2026-07-14 (Phase E run 1 attempt, aborted turn 38):** `inspect_story_event`
+  replayed selection dense-only while real turns select slice-aware through
+  `TurnRetrievalStage` — the checkpoint asserted a path the engine no longer serves
+  prompts from, failing the blue-seal probe the live turn would have answered (its memory
+  ranked #1/16 lexically on this run's own pool, score 6.83). Fixed session-side: the
+  inspection now mirrors the stage's slice application (quota 0 byte-identical, not
+  fail-open), pinned by a dedicated unit test; assertion untouched (#74-class precision
+  fix). Second, still-open finding from the same run: the curator re-roll tagged the
+  blue-seal memory `quest_rule` instead of D3's `rule`, so exact-intersection CANON_TAGS
+  eligibility did NOT pin it — Lane A's guarantee is curator-tag-vocabulary-dependent
+  under MTP; blue-seal stays covered by Lane B. Hardening options recorded in
+  [docs/22 § P2.2](22_rag_scaling_roadmap.md) (token-split tag matching / deterministic
+  rule-declaration trigger) — owner decision, not built mid-validation.
 
 ## Planned 2026-07-14 — docs/27 world chronicle (Q6 design conversation)
 
