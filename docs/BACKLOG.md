@@ -707,13 +707,43 @@ world-chronicle section below (#81–#83).
   sidecar files appear. `git status` clean under `docs/artifacts/` after every run. Full gate
   green (`ruff`/`mypy --strict`/`pytest`/`regression_runner`); regression runner now 91 checks
   (up from 85).
-- [ ] **#76** *(provenance, M)* **Stage 1 — `memory_episodes.source_turn_id`.** Fifth
+- [x] **#76** *(provenance, M)* **Stage 1 — `memory_episodes.source_turn_id`.** Fifth
   idempotent `_ensure_column` migration + optional `turn_id` threaded through the
   three-signature / two-call-site chain (inline + deferred) + consolidation carry-forward
   (`min()` over the non-null subset of folded originals; `None` if all legacy — never a
   sentinel) + provenance-OR-phrasing probe attribution. Attribution-only: explicitly NOT a
   fact-identity or dedup key (the quote/`fact_key` variant was judge-broken).
   [docs/26 §3.1](26_memory_retrieval_redesign.md#31-provenance-substrate--memory_episodessource_turn_id). ~1.5–2 days.
+  **Shipped:** `memory_episodes.source_turn_id INTEGER` (nullable, fifth `_ensure_column`
+  instance); `MemoryEpisode`/`MemoryCandidate` gain `source_turn_id: int | None = None` (old
+  rows and pre-stamp candidates deserialize as `None`). `TurnMemoryStage.run` →
+  `_run_extraction` → `_persist_and_index` thread an optional `turn_id` kwarg; the stamp is
+  applied once, centrally, in `_persist_and_index` — the single choke point all three
+  candidate producers (curator, deterministic extractor, curator-failure fallback) funnel
+  through before `persist_memories` — so every producer is covered without repeating the
+  assignment at each origin. Both orchestrator call sites pass it: the inline site
+  (`persistence.turn.id`, `turn_orchestrator.py`) and `run_deferred_memory`
+  (`DeferredMemoryJob.turn_id`). `MemoryConsolidator._persist_consolidation` carries
+  provenance forward per §3.1.1 (`min()` over the non-null subset of folded originals' own
+  `source_turn_id`; stays `None`, never a sentinel, when every original is legacy) and
+  appends a `source_ids:<comma-joined-original-episode-ids>` audit tag (reuses `tags_json`,
+  no new schema). Live-checkpoint attribution
+  (`app/diagnostics/live_checkpoint.py::build_event_attribution`) is now provenance-OR-
+  phrasing, gated on a `definition_turn_id` resolved via a direct SQLite lookup
+  (`SQLiteTurnRepository.list_all_turns` inside `inspect_story_event`, matched on
+  `turn_index` — `turns.id` is an internal PK the HTTP API never exposes, so this stays a
+  DB-side lookup rather than adding a new API surface); the multi-memory-definition-turn
+  over-attribution risk §4 flags is implemented as specified (never provenance-only) and
+  pinned by a dedicated test, not silently tightened. Tests: repository round-trip +
+  legacy-row-reads-`None` (`tests/unit/test_repositories.py`); inline/deferred call-site
+  provenance extended onto the existing orchestrator memory tests
+  (`tests/unit/test_turn_orchestrator.py`); three consolidation carry-forward cases —
+  all-provenanced, mixed-NULL, all-NULL — the last folded into the pre-existing threshold
+  test alongside a new audit-tag assertion
+  (`tests/unit/orchestration/stages/test_core_stages.py`); provenance-OR-phrasing incl. the
+  multi-memory-turn residual (`tests/unit/test_live_checkpoint.py`). No Settings/
+  `.env.example`, ranking, retrieval, or write-dedup changes. Gate green (ruff, mypy
+  --strict, 801 pytest, 91-check regression runner); `docs/artifacts/` untouched.
 - [ ] **#77** *(correctness, S)* **Stage 2 — best-match tag/importance fold.** At the
   curator-coverage-drop site (`stages/memory.py:169-177`), fold a covered deterministic
   candidate's tags/importance onto the **best-matching** (argmax coverage, not first-match)

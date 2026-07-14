@@ -135,16 +135,31 @@ class MemoryConsolidator:
         stale Qdrant mirror recovers via ``reindex-memories``.
         """
         assert self.memory_store is not None and self.memory_indexer is not None
+        original_ids = [memory.id for memory in candidates]
+        # Provenance carry-forward (docs/26 §3.1.1, #76): the summary's source_turn_id
+        # is the EARLIEST (min) of the folded originals' non-null source_turn_id
+        # values -- "when was this fact first established." min() is taken over the
+        # non-null subset only: a legacy/unprovenanced original (source_turn_id is
+        # None) must never make min() see None, and an all-legacy fold must leave the
+        # summary's source_turn_id None rather than coercing to a sentinel turn id.
+        non_null_source_turn_ids = [
+            memory.source_turn_id for memory in candidates if memory.source_turn_id is not None
+        ]
+        source_turn_id = min(non_null_source_turn_ids) if non_null_source_turn_ids else None
         summary = MemoryCandidate(
             summary=summary_text,
             visibility=Visibility.PLAYER,
             importance=min(5, self.consolidation_importance_ceiling + 1),
-            tags=[SUMMARY_TAG],
+            # source_ids audit trail (docs/26 §3.1.1): the folded originals' own
+            # episode ids, comma-joined, reusing the existing tags_json column --
+            # no new schema. Independent of source_turn_id: recorded even when every
+            # original was unprovenanced (source_turn_id stays None above).
+            tags=[SUMMARY_TAG, f"source_ids:{','.join(original_ids)}"],
             scene_id=candidates[0].scene_id,
             actor_id=candidates[0].actor_id,
+            source_turn_id=source_turn_id,
         )
         persisted = self.memory_store.persist_memories(session_id=session_id, memories=[summary])
-        original_ids = [memory.id for memory in candidates]
         self.memory_store.mark_memories_consolidated(original_ids)
         # Consolidation removed originals and added one summary; rather than surgically patch
         # the mirror, drop the entry so the next turn rebuilds it from the store. Consolidation

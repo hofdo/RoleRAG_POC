@@ -99,6 +99,7 @@ class TurnMemoryStage:
         assistant_message: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
+        turn_id: int | None = None,
     ) -> MemoryStageResult:
         result = await self._run_extraction(
             session=session,
@@ -108,6 +109,7 @@ class TurnMemoryStage:
             assistant_message=assistant_message,
             retrieval_confidence=retrieval_confidence,
             scene_complexity=scene_complexity,
+            turn_id=turn_id,
         )
         consolidation = await self._consolidator.consolidate_if_needed(
             session_id=session.id,
@@ -132,6 +134,7 @@ class TurnMemoryStage:
         assistant_message: str,
         retrieval_confidence: float | None,
         scene_complexity: int,
+        turn_id: int | None = None,
     ) -> MemoryStageResult:
         if self.memory_curator is None or self.memory_store is None:
             return MemoryStageResult(memory_written=False, warnings=())
@@ -179,6 +182,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=[*curated, *extras],
                 warnings=warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -200,6 +204,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=fallback_candidates,
                 warnings=failure_warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -211,6 +216,7 @@ class TurnMemoryStage:
                 session_id=session.id,
                 candidates=fallback_candidates,
                 warnings=failure_warnings,
+                turn_id=turn_id,
             )
             return MemoryStageResult(
                 memory_written=memory_written,
@@ -223,6 +229,7 @@ class TurnMemoryStage:
         session_id: str,
         candidates: list[MemoryCandidate],
         warnings: list[str],
+        turn_id: int | None = None,
     ) -> bool:
         if not candidates:
             return False
@@ -234,6 +241,7 @@ class TurnMemoryStage:
                 session_id=session_id,
                 candidates=candidates,
                 warnings=warnings,
+                turn_id=turn_id,
             )
         except Exception as exc:
             warnings.append(f"deterministic memory fallback skipped: {exc}")
@@ -245,6 +253,7 @@ class TurnMemoryStage:
         session_id: str,
         candidates: list[MemoryCandidate],
         warnings: list[str],
+        turn_id: int | None = None,
     ) -> bool:
         if not candidates or self.memory_store is None:
             return False
@@ -256,6 +265,16 @@ class TurnMemoryStage:
         )
         if not candidates:
             return False
+        # Provenance stamp (docs/26 §3.1, #76): every candidate producer -- curator,
+        # deterministic extractor (both funnel through the call above), and the
+        # curator-failure fallback (via _fallback_after_curator_failure) -- reaches
+        # persistence through this one choke point, so stamping here covers all
+        # three without duplicating the assignment at each call site.
+        if turn_id is not None:
+            candidates = [
+                candidate.model_copy(update={"source_turn_id": turn_id})
+                for candidate in candidates
+            ]
         persisted = self.memory_store.persist_memories(
             session_id=session_id,
             memories=candidates,

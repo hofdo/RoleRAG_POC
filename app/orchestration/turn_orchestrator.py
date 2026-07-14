@@ -491,6 +491,7 @@ class TurnOrchestrator:
                 assistant_message=final_text,
                 retrieval_confidence=retrieval.confidence,
                 scene_complexity=routing.scene_complexity,
+                turn_id=persistence.turn.id,
             )
         warnings.extend(memory.warnings)
         # Persist turn diagnostics from the same values the TurnResult carries so the
@@ -543,6 +544,7 @@ class TurnOrchestrator:
             assistant_message=job.assistant_message,
             retrieval_confidence=job.retrieval_confidence,
             scene_complexity=job.scene_complexity,
+            turn_id=job.turn_id,
         )
         self.turn_repository.append_memory_outcome(
             job.turn_id,

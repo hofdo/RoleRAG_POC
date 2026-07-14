@@ -17,6 +17,19 @@ records; this file is the quick delta between versions.
   standing-facts eligibility for a preserved live-run artifact with no model or Qdrant
   (run against the D3 artifact: 47 player-visible memories, 3 tag-eligible, 0 eligible at
   the importance floor of 4, confirming docs/26 §3.3). No runtime engine behavior changed.
+- **docs/26 Stage 1 provenance substrate** (#76): `memory_episodes.source_turn_id` (nullable,
+  fifth `_ensure_column` migration) threads an optional `turn_id` through
+  `TurnMemoryStage.run` → `_run_extraction` → `_persist_and_index` from both orchestrator
+  call sites (inline turn persistence and the deferred-memory job), stamping every
+  persisted memory candidate with the turn that produced it. Consolidation carries
+  provenance forward (earliest non-null `source_turn_id` of the folded originals, `None`
+  if all legacy — never a sentinel) plus a `source_ids:` audit tag reusing `tags_json`. The
+  live checkpoint's probe attribution is now provenance-OR-phrasing instead of
+  phrasing-only, closing the paraphrase-fragility measurement gap for facts that survive
+  extraction under a reworded summary — never provenance-only, and the multi-memory
+  definition-turn over-attribution this implies is documented and tested, not silently
+  tightened away. Attribution-only: not a fact-identity or dedup key. No runtime engine,
+  ranking, or retrieval behavior changed.
 
 ## 1.3.0 — 2026-07-12
 

@@ -63,6 +63,12 @@ class MemoryEpisode(BaseModel):
     visibility: Visibility
     tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
+    # Attribution-only provenance (docs/26 §3.1, #76): which turn produced this
+    # episode. Nullable/additive -- legacy rows and any row written before this
+    # stage lands deserialize as None, same contract as TurnDiagnostics.token_usage.
+    # Explicitly NOT a fact-identity or dedup key -- see docs/26 §3.1's "what this
+    # does NOT become".
+    source_turn_id: int | None = None
 
 
 class CanonFact(BaseModel):
@@ -79,6 +85,10 @@ class MemoryCandidate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     scene_id: str | None = None
     actor_id: str | None = None
+    # See MemoryEpisode.source_turn_id. Stamped onto every candidate producer
+    # (curator, deterministic extractor, curator-failure fallback) before
+    # persistence -- see TurnMemoryStage._persist_and_index.
+    source_turn_id: int | None = None
 
 
 class MemoryCuratorResult(BaseModel):

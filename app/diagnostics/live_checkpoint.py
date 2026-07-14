@@ -18,7 +18,7 @@ import httpx
 from app.composition import build_actor_context_retriever, build_file_loader
 from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
-from app.domain import MemoryEpisode, Visibility
+from app.domain import MemoryEpisode, StoredTurn, Visibility
 from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.models import RagCollection
@@ -335,9 +335,33 @@ def build_event_attribution(
     indexed_memory_ids: Sequence[str],
     selected: Sequence[Mapping[str, Any]],
     rejected: Sequence[Mapping[str, Any]] = (),
+    definition_turn_id: int | None = None,
 ) -> EventAttribution:
+    """Build attribution for one probe event.
+
+    A memory counts toward ``matching_memory_ids`` if it phrasing-matches
+    (``semantic_match``, unchanged) OR its ``source_turn_id`` equals
+    ``definition_turn_id`` -- provenance-OR-phrasing, never provenance-only
+    (docs/26 §4's correction to the paraphrase-fragility measurement gap, #76).
+    ``definition_turn_id=None`` (the default) disables the provenance leg
+    entirely, so callers that never resolve it -- and every pre-#76 caller --
+    get exactly the old phrasing-only behavior.
+
+    Multi-memory-turn caveat (docs/26 §3.1, §4): a definition turn that produces
+    several memory episodes links ALL of them to the same source_turn_id. If NONE
+    of them phrasing-match the probe's term groups, provenance alone cannot tell
+    which episode is the probed fact -- every episode from that turn still counts
+    as "matching". This is a deliberate, documented residual (docs/26 explicitly
+    rejects provenance-ONLY attribution for exactly this reason, but ships
+    OR-with-phrasing anyway as the bounded, auditable trade against the worse
+    paraphrase-fragility false negative); see
+    test_build_event_attribution_provenance_over_attributes_on_multi_memory_definition_turn.
+    """
     matching_ids = tuple(
-        memory.id for memory in memories if semantic_match(memory.summary, event.term_groups)
+        memory.id
+        for memory in memories
+        if semantic_match(memory.summary, event.term_groups)
+        or (definition_turn_id is not None and memory.source_turn_id == definition_turn_id)
     )
     matching_set = set(matching_ids)
     selected_memory_ids = tuple(
@@ -791,6 +815,25 @@ def inspect_live_state(
     )
 
 
+def _turn_id_for_index(turns: Sequence[StoredTurn], turn_index: int) -> int | None:
+    """Resolve a 1-based ordinal ``turn_index`` (a StoryEvent's definition_turn) to
+    the persisted ``turns.id`` primary key, for provenance-based attribution (#76).
+
+    Direct SQLite lookup, not an HTTP round-trip: inspect_story_event already reads
+    the session's turns straight from the database (see its ``recent_turns`` call
+    just below), and ``turns.id`` is an internal primary key the HTTP API
+    deliberately never exposes (CreateTurnResponse/RecentTurnResponse/
+    TurnDetailResponse all expose ``turn_index`` only) -- so this stays consistent
+    with that boundary instead of adding a new API surface just for a diagnostics
+    script. None if no turn was ever persisted under that index (degrades to
+    phrasing-only matching for that event rather than raising).
+    """
+    for turn in turns:
+        if turn.turn_index == turn_index:
+            return turn.id
+    return None
+
+
 def inspect_story_event(
     *,
     database_path: Path,
@@ -802,9 +845,13 @@ def inspect_story_event(
     try:
         memory_repository = SQLiteMemoryRepository(connection)
         memories = memory_repository.list_memories_for_session(session_id)
-        recent_turns = SQLiteTurnRepository(connection).list_recent_turns(
+        turn_repository = SQLiteTurnRepository(connection)
+        recent_turns = turn_repository.list_recent_turns(
             session_id,
             settings.recent_dialogue_turns,
+        )
+        definition_turn_id = _turn_id_for_index(
+            turn_repository.list_all_turns(session_id), event.definition_turn
         )
     finally:
         connection.close()
@@ -836,6 +883,7 @@ def inspect_story_event(
         indexed_memory_ids=indexed_ids,
         selected=diagnostics["selected"],
         rejected=diagnostics["rejected"],
+        definition_turn_id=definition_turn_id,
     )
 
 

@@ -351,6 +351,121 @@ def test_build_event_attribution_records_retrieval_miss_rank() -> None:
     assert result.missed_memory_ranks == (3,)
 
 
+# --- #76 provenance-OR-phrasing attribution (docs/26 §3.1, §4's correction) ---
+#
+# A memory counts toward matching_memory_ids if it phrasing-matches (semantic_match,
+# pre-#76 behavior, unchanged) OR its source_turn_id equals the probe's resolved
+# definition-turn id -- never provenance-only. definition_turn_id=None (the default,
+# and what every pre-#76 caller passes) disables the provenance leg entirely, which
+# is exactly what the two tests above already exercise.
+
+
+def test_build_event_attribution_matches_via_provenance_when_phrasing_fails() -> None:
+    # The curator's paraphrase drifted far enough that semantic_match fails, but the
+    # episode still carries the probe's definition-turn provenance -- this is the
+    # concrete paraphrase-fragility class #76 exists to close (docs/26 §4, the
+    # "symbol of a pact/promise" live finding).
+    event = STORY_EVENTS[0]  # before_dawn_promise, definition_turn=3
+    memories = [
+        MemoryEpisode(
+            id="paraphrased",
+            session_id="session",
+            scene_id="rose-gallery",
+            summary="A pact was sealed regarding a future return.",  # no phrasing match
+            importance=4,
+            visibility=Visibility.PLAYER,
+            source_turn_id=3,
+        ),
+    ]
+
+    result = build_event_attribution(
+        event=event,
+        query="real query",
+        memories=memories,
+        indexed_memory_ids=["paraphrased"],
+        selected=[],
+        definition_turn_id=3,
+    )
+
+    assert result.matching_memory_ids == ("paraphrased",)
+
+
+def test_build_event_attribution_phrasing_still_matches_when_provenance_points_elsewhere() -> None:
+    # The OR is not an AND: a memory whose phrasing matches counts even when its
+    # source_turn_id does not equal the resolved definition-turn id (e.g. the
+    # episode came from a different turn, or provenance could not be resolved for
+    # this particular memory).
+    event = STORY_EVENTS[0]  # before_dawn_promise, definition_turn=3
+    memories = [
+        MemoryEpisode(
+            id="match",
+            session_id="session",
+            scene_id="rose-gallery",
+            summary="The player promised to return before dawn.",
+            importance=4,
+            visibility=Visibility.PLAYER,
+            source_turn_id=99,  # not the resolved definition turn (3)
+        ),
+    ]
+
+    result = build_event_attribution(
+        event=event,
+        query="real query",
+        memories=memories,
+        indexed_memory_ids=["match"],
+        selected=[],
+        definition_turn_id=3,
+    )
+
+    assert result.matching_memory_ids == ("match",)
+
+
+def test_build_event_attribution_provenance_over_attributes_on_multi_memory_definition_turn() -> (
+    None
+):
+    # Documented residual (docs/26 §4): a definition turn that produces SEVERAL
+    # memory episodes links ALL of them to the same source_turn_id. If NEITHER
+    # phrasing-matches the probe, provenance alone cannot tell which one is the
+    # probed fact -- BOTH count as "matching" via the OR. This is the bounded
+    # trade docs/26 accepts (never provenance-ONLY, but still not immune to this
+    # specific multi-memory ambiguity) -- pinned here, not silently tightened away.
+    event = STORY_EVENTS[0]  # before_dawn_promise, definition_turn=3
+    memories = [
+        MemoryEpisode(
+            id="unrelated-fact-same-turn",
+            session_id="session",
+            scene_id="rose-gallery",
+            summary="The player also asked about the west corridor guard schedule.",
+            importance=2,
+            visibility=Visibility.PLAYER,
+            source_turn_id=3,
+        ),
+        MemoryEpisode(
+            id="another-unrelated-fact-same-turn",
+            session_id="session",
+            scene_id="rose-gallery",
+            summary="The player noted the gallery's clock had stopped.",
+            importance=2,
+            visibility=Visibility.PLAYER,
+            source_turn_id=3,
+        ),
+    ]
+
+    result = build_event_attribution(
+        event=event,
+        query="real query",
+        memories=memories,
+        indexed_memory_ids=["unrelated-fact-same-turn", "another-unrelated-fact-same-turn"],
+        selected=[],
+        definition_turn_id=3,
+    )
+
+    assert set(result.matching_memory_ids) == {
+        "unrelated-fact-same-turn",
+        "another-unrelated-fact-same-turn",
+    }
+
+
 def test_extraction_miss_is_report_only_when_not_strict() -> None:
     summary = _run(
         strict=False,

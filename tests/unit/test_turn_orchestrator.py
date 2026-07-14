@@ -490,6 +490,15 @@ async def test_turn_orchestrator_sets_memory_written_when_curator_persists_memor
 
     assert result.memory_written is True
     assert result.warnings == []
+    # #76 (docs/26 §3.1) inline call site: the turn's memories are stamped with
+    # the just-persisted turn's own id (turn_orchestrator.py's memory-stage call
+    # passes persistence.turn.id).
+    stored_turns = orchestrator.turn_repository.list_all_turns("demo-session")
+    assert len(stored_turns) == 1
+    assert orchestrator.memory_store is not None
+    memories = orchestrator.memory_store.list_memories_for_session("demo-session")
+    assert memories
+    assert all(memory.source_turn_id == stored_turns[0].id for memory in memories)
 
 
 @pytest.mark.asyncio
@@ -1571,6 +1580,12 @@ async def test_run_deferred_memory_writes_and_updates_diagnostics(tmp_path: Path
     stored = orchestrator.turn_repository.list_all_turns("demo-session")[-1]
     assert stored.diagnostics is not None
     assert stored.diagnostics.memory_written is True
+    # #76 (docs/26 §3.1) deferred call site: run_deferred_memory passes
+    # DeferredMemoryJob.turn_id through, so the job's persisted memories carry it.
+    assert orchestrator.memory_store is not None
+    memories = orchestrator.memory_store.list_memories_for_session("demo-session")
+    assert memories
+    assert all(memory.source_turn_id == result.deferred_memory.turn_id for memory in memories)
 
 
 @pytest.mark.asyncio

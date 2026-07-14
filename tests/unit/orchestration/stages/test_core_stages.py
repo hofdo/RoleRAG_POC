@@ -1064,6 +1064,7 @@ class RecordingMemoryStore:
                 importance=candidate.importance,
                 visibility=candidate.visibility,
                 tags=list(candidate.tags),
+                source_turn_id=candidate.source_turn_id,
             )
             for index, candidate in enumerate(memories)
         ]
@@ -1173,6 +1174,124 @@ async def test_memory_stage_consolidates_when_threshold_reached() -> None:
     assert set(store.consolidated_ids) == set(original_ids)
     assert set(indexer.unindexed) == set(original_ids)
     assert any("rolled up 3 memories" in warning for warning in result.warnings)
+    # docs/26 §3.1.1 (#76), all-NULL case: every folded original here came from
+    # _seed_filler, which never sets source_turn_id -- so the non-null subset is
+    # empty and the summary's source_turn_id must stay None, never a sentinel.
+    # The source_ids audit trail is recorded regardless of provenance.
+    assert store.persisted[-1].source_turn_id is None
+    assert f"source_ids:{','.join(original_ids)}" in store.persisted[-1].tags
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_source_turn_id_min_when_all_provenanced() -> None:
+    # docs/26 §3.1.1 (#76), all-provenanced case: the summary's source_turn_id is
+    # the EARLIEST (min) of the folded originals' own source_turn_id values --
+    # "when was this fact first established" -- regardless of fold order.
+    from app.domain import MemoryCandidate
+
+    store = RecordingMemoryStore()
+    context = _context()
+    store.persist_memories(
+        session_id=context.session.id,
+        memories=[
+            MemoryCandidate(
+                summary=f"Filler observation {index}",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=source_turn_id,
+            )
+            for index, source_turn_id in enumerate((30, 10, 20))
+        ],
+    )
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=3,
+        consolidation_importance_ceiling=3,
+    )
+
+    await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:3]]
+    summary = store.persisted[-1]
+    assert summary.source_turn_id == 10
+    assert f"source_ids:{','.join(original_ids)}" in summary.tags
+
+
+@pytest.mark.asyncio
+async def test_memory_stage_consolidation_source_turn_id_min_of_non_null_when_mixed() -> None:
+    # docs/26 §3.1.1 (#76), mixed-NULL case: one legacy/unprovenanced original
+    # (source_turn_id=None) folded together with one provenanced original in the
+    # same pass. min() must be taken over the non-null subset only -- it must never
+    # see None (Python's min() has no defined behavior comparing int and None) --
+    # and the result here is the provenanced original's own value.
+    from app.domain import MemoryCandidate
+
+    store = RecordingMemoryStore()
+    context = _context()
+    store.persist_memories(
+        session_id=context.session.id,
+        memories=[
+            MemoryCandidate(
+                summary="Legacy filler with no provenance.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=None,
+            ),
+            MemoryCandidate(
+                summary="Provenanced filler.",
+                visibility=Visibility.PLAYER,
+                importance=1,
+                tags=["mood"],
+                scene_id="scene",
+                actor_id="persona",
+                source_turn_id=15,
+            ),
+        ],
+    )
+    indexer = _RecordingIndexer()
+    stage = TurnMemoryStage(
+        provider=UnusedProvider(),
+        memory_store=cast(MemoryEpisodeStore, store),
+        memory_curator=_ConsolidatingCurator(),
+        memory_indexer=indexer,
+        routing_stage=_routing(),
+        consolidation_threshold=2,
+        consolidation_importance_ceiling=3,
+    )
+
+    await stage.run(
+        session=context.session,
+        scene=context.scene,
+        persona=context.persona,
+        user_message="I look around the quiet gallery.",
+        assistant_message="The mirrors are still.",
+        retrieval_confidence=None,
+        scene_complexity=1,
+    )
+
+    original_ids = [episode.id for episode in store.persisted[:2]]
+    summary = store.persisted[-1]
+    assert summary.source_turn_id == 15
+    assert f"source_ids:{','.join(original_ids)}" in summary.tags
 
 
 @pytest.mark.asyncio

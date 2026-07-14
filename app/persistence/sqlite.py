@@ -103,6 +103,12 @@ def initialize_database(connection: sqlite3.Connection) -> None:
         column="provider",
         ddl="ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT 'local'",
     )
+    _ensure_column(
+        connection,
+        table="memory_episodes",
+        column="source_turn_id",
+        ddl="ALTER TABLE memory_episodes ADD COLUMN source_turn_id INTEGER",
+    )
     connection.commit()
 
 
