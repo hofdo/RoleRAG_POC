@@ -735,8 +735,15 @@ requires Stage 5 to *measure* the actual delta, not assume the multiplication ho
 > **Owner answers 2026-07-14** (the questions below are kept verbatim; answers recorded here
 > rather than rewriting them):
 >
-> 1. **Open — separate discussion requested.** The continuity-contract framing is not yet
->    confirmed; Stage 3 (backlog #78) stays gated on it.
+> 1. **Resolved 2026-07-14 (post-sprint follow-up): minimal contract confirmed.** The
+>    guaranteed never-silently-drops tier is exactly the durable-commitment tag family
+>    (promise/rule/agreement/entrusted/deadline, plus this stage's German aliases);
+>    lore, color, and relationship moments stay best-effort behind Lane B's general
+>    rare-term safety net (shipped as #79, which independently rescues the blue-seal
+>    case at lexical rank 1/15 on the D3 pool). The chronicle's wider carry-over set
+>    (docs/27 decision 4: commitments + defining moments) remains a separate,
+>    cross-session contract — deliberately not folded into the in-session guarantee
+>    tier. #78 unblocked.
 > 2. **Wait.** No preemptive canon-consolidation mechanism; raise the caps per-campaign if
 >    the new `standing_facts_count`/`_chars` diagnostics ever show saturation in live play.
 > 3. **Keep both.** The conservative over-inclusion trade-off is confirmed: ambiguous

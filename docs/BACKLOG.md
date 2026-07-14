@@ -652,8 +652,9 @@ judge-broken (docs/26 §3.5, §7). Ship stages in order; each is additive, defau
 changes runtime behavior, and closes with the full deterministic gate before any live run.
 Owner answers recorded 2026-07-14 in
 [docs/26 §8](26_memory_retrieval_redesign.md#8-open-questions-for-the-owner): Q2 wait /
-Q3 keep-both / Q4 yes-both / Q5 English-first (N2 stays deferred). **Q1 (continuity-contract
-framing) is still open — separate discussion requested; it gates #78.** Q6 was resolved
+Q3 keep-both / Q4 yes-both / Q5 English-first (N2 stays deferred). Q1 resolved 2026-07-14
+(post-sprint): **minimal contract** — the guarantee tier is the durable-commitment tag
+family only; see the docs/26 §8 answer block. Q6 was resolved
 2026-07-14 by the [docs/27](27_world_chronicle_design.md) design conversation — see the
 world-chronicle section below (#81–#83).
 
