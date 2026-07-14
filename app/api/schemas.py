@@ -147,6 +147,11 @@ class RetrievalCandidateResponse(BaseModel):
     adjusted_score: float
     applied_boosts: dict[str, float] = Field(default_factory=dict)
     selected_rank: int | None = None
+    # Lane B lexical slice labels (docs/26 §3.4, #79); additive, no-slice defaults so
+    # a slice pick is never a silent cosine mystery in the inspection payload.
+    slice_score: float | None = None
+    slice_matched_terms: list[str] = Field(default_factory=list)
+    slice_guaranteed: bool = False
 
 
 class RetrievalDiagnosticsResponse(BaseModel):

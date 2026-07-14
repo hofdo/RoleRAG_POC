@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # Opt-in: enable a small value (~0.02-0.04) and validate 50-turn recall via live-smoke before
     # relying on it -- offline evals do not fully exercise long-session recency reordering.
     rag_recency_weight: float = Field(default=0.0, ge=0.0)
+    # Lane B lexical slice quotas (docs/26 §3.4, #79). RAG_SLICE_LEXICAL_QUOTA reserves that many
+    # prompt slots for the highest session-pool-IDF lexical matches to the player's message,
+    # guaranteeing a rare-term direct-answer memory reaches the actor prompt regardless of dense
+    # rank. 0 = off (byte-identical); the live preset uses 2. RAG_SLICE_MIN_SCORE is fix 2's
+    # summed-IDF floor -- it ships UNSET (None = no floor, matching pre-fix semantics); a measured
+    # value is recorded at docs/26 Stage 5 (#80), deliberately not guessed here.
+    rag_slice_lexical_quota: int = Field(default=0, ge=0)
+    rag_slice_min_score: float | None = None
     # Memories below this importance are persisted to SQLite but not indexed for
     # retrieval. 1 indexes everything (no behavior change).
     rag_index_importance_floor: int = Field(default=1, ge=1, le=5)
@@ -162,6 +170,16 @@ class Settings(BaseSettings):
     @field_validator("structured_output_failure_log_dir", mode="before")
     @classmethod
     def _empty_structured_failure_log_dir_disables(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("rag_slice_min_score", mode="before")
+    @classmethod
+    def _empty_slice_min_score_disables(cls, value: object) -> object:
+        # RAG_SLICE_MIN_SCORE ships as an empty .env.example value (unset = no floor);
+        # coerce the empty string to None so an unedited .env parses, mirroring the
+        # structured-failure-log-dir treatment.
         if isinstance(value, str) and not value.strip():
             return None
         return value

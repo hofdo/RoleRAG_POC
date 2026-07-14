@@ -14,6 +14,7 @@ from app.domain import (
     CriticResult,
     MemoryCandidate,
     MemoryCuratorResult,
+    MemoryEpisode,
     PersonaCard,
     RetrievedChunk,
     SceneState,
@@ -39,6 +40,7 @@ from app.orchestration.stages import (
 from app.orchestration.stages.generation import GenerationStageResult, TurnGenerationStage
 from app.orchestration.stages.retrieval import RetrievalStageResult
 from app.orchestration.stages.routing import RoutingStageResult
+from app.rag.ranking import SliceQuotas
 
 
 def _context() -> LoadedTurnContext:
@@ -2448,3 +2450,224 @@ async def test_memory_stage_auto_gating_runs_curator_for_assistant_durable_terms
     )
 
     assert curator.calls == 1
+
+
+# --- Lane B lexical slice quotas at the stage level (docs/26 §3.4, #79) -----------
+
+
+def _memory_episode(
+    memory_id: str,
+    summary: str,
+    *,
+    tags: list[str] | None = None,
+) -> MemoryEpisode:
+    return MemoryEpisode(
+        id=memory_id,
+        session_id="session",
+        scene_id="scene",
+        summary=summary,
+        importance=2,
+        visibility=Visibility.PLAYER,
+        tags=tags or [],
+    )
+
+
+def _context_with_memories(memories: list[MemoryEpisode]) -> LoadedTurnContext:
+    base = _context()
+    return LoadedTurnContext(
+        session=base.session,
+        persona=base.persona,
+        scene=base.scene,
+        recent_turns=base.recent_turns,
+        session_memories=tuple(memories),
+    )
+
+
+def _dense_result(chunks: list[RetrievedChunk]) -> object:
+    from app.rag.diagnostics import (
+        ChunkRetrievalDiagnostic,
+        RetrievalDiagnostics,
+        RetrievalResult,
+    )
+    from app.rag.models import RagCollection
+
+    diagnostics = RetrievalDiagnostics(
+        query="q",
+        selected=[
+            ChunkRetrievalDiagnostic(
+                id=chunk.id,
+                source=chunk.source,
+                source_type=chunk.source_type,
+                collection=RagCollection.SESSION_MEMORY,
+                visibility=chunk.visibility,
+                tags=list(chunk.tags),
+                original_score=chunk.score,
+                adjusted_score=chunk.score,
+                applied_boosts={},
+                selected_rank=index,
+            )
+            for index, chunk in enumerate(chunks, start=1)
+        ],
+        rejected=[],
+    )
+    return RetrievalResult(chunks=chunks, diagnostics=diagnostics)
+
+
+def _dense_chunk(chunk_id: str, *, score: float, text: str) -> RetrievedChunk:
+    return RetrievedChunk(
+        id=chunk_id,
+        source=f"memory_episode:{chunk_id}",
+        source_type="session_memory",
+        text=text,
+        score=score,
+        visibility=Visibility.PLAYER,
+        session_id="session",
+    )
+
+
+_BLUE_SEAL_QUERY = "what rule did we agree to trust"
+
+
+def test_retrieval_stage_quota_off_ignores_memories_and_is_byte_identical() -> None:
+    # Default quotas (lexical=0): the scorer never runs, session_memories are ignored,
+    # and the stage output is exactly the retriever's -- no reorder, no slice labels,
+    # no scorer warning.
+    dense = [_dense_chunk("scene-1", score=0.6, text="iria stands by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.chunks == tuple(dense)
+    assert result.confidence == 0.6
+    assert result.warnings == ()
+    assert result.diagnostics is not None
+    assert all(entry.slice_guaranteed is False for entry in result.diagnostics.selected)
+
+
+def test_retrieval_stage_injects_lexical_hit_not_in_dense_results() -> None:
+    dense = [
+        _dense_chunk("scene-1", score=0.58, text="iria stands quietly by the tall window"),
+        _dense_chunk("scene-2", score=0.52, text="the palace market is crowded today"),
+    ]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [
+        _memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"]),
+        _memory_episode("chatter", "iria mentioned the market", tags=[]),
+    ]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    ids = [chunk.id for chunk in result.chunks]
+    assert ids[0] == "blue"  # the rare-term direct answer is promoted to the front
+    assert ids.count("blue") == 1  # injected once, never duplicated
+    # It reaches the actual actor prompt window through the UNCHANGED select walk.
+    from app.orchestration.context_budget import select_retrieved_chunks_for_prompt
+
+    selected = select_retrieved_chunks_for_prompt(
+        result.chunks, budget=ContextBudget(retrieved_chunks=5)
+    )
+    assert "blue" in {chunk.id for chunk in selected}
+    entry = next(e for e in result.diagnostics.selected if e.id == "blue")  # type: ignore[union-attr]
+    assert entry.slice_guaranteed is True
+    assert entry.slice_score is not None and entry.slice_score > 0
+    assert "rule" in entry.slice_matched_terms and "trust" in entry.slice_matched_terms
+
+
+def test_retrieval_stage_slice_only_rescue_is_not_low_confidence() -> None:
+    # The flagged confidence interaction (docs/26 §3.4): dense results are all weak
+    # (0.2), the turn is rescued entirely by an injected lexical hit (score 0.0), and
+    # the confidence must NOT read as low (below the 0.45 default) on exactly that turn.
+    from app.rag.ranking import SLICE_CONFIDENCE_EQUIVALENT
+
+    dense = [_dense_chunk("scene-1", score=0.20, text="iria stands quietly by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=1),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.confidence == SLICE_CONFIDENCE_EQUIVALENT
+    assert result.confidence >= 0.45  # not low-confidence despite dense max being 0.20
+
+
+def test_retrieval_stage_survives_retriever_failure_with_lexical_leg() -> None:
+    # Fail-open direction 1 (fix 4): a dense/Qdrant exception must NOT take the
+    # lexical leg down with it -- the stage degrades to a lexical-only prompt built
+    # from the pre-retriever hits, strictly better than today's empty fallback.
+    def boom(**_: object) -> object:
+        raise RuntimeError("qdrant offline")
+
+    stage = TurnRetrievalStage(
+        actor_context_retriever=SimpleNamespace(retrieve_for_actor_with_diagnostics=boom),
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert [chunk.id for chunk in result.chunks] == ["blue"]
+    assert result.confidence is not None and result.confidence >= 0.45
+    assert any("retrieval degraded to lexical slice" in warning for warning in result.warnings)
+
+
+def test_retrieval_stage_scorer_failure_degrades_to_dense_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Fail-open direction 2: a lexical-scorer exception degrades Lane B to a no-op
+    # (dense-only) with a warning, never failing the turn.
+    def boom(**_: object) -> object:
+        raise RuntimeError("scorer exploded")
+
+    monkeypatch.setattr("app.orchestration.stages.retrieval.score_memories_lexical", boom)
+    dense = [_dense_chunk("scene-1", score=0.6, text="iria stands by the window")]
+    retriever = SimpleNamespace(
+        retrieve_for_actor_with_diagnostics=lambda **_: _dense_result(dense)
+    )
+    stage = TurnRetrievalStage(
+        actor_context_retriever=retriever,
+        context_budget=ContextBudget(retrieved_chunks=5),
+        slice_quotas=SliceQuotas(lexical=2),
+    )
+    memories = [_memory_episode("blue", "the trust rule is a blue wax seal", tags=["rule"])]
+
+    result = stage.run(
+        turn_input=TurnInput(session_id="session", message=_BLUE_SEAL_QUERY),
+        context=_context_with_memories(memories),
+    )
+
+    assert result.chunks == tuple(dense)  # dense-only
+    assert result.confidence == 0.6
+    assert any("lexical slice scorer skipped" in warning for warning in result.warnings)

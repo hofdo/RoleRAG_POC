@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
 
-from app.domain import PersonaCard, SceneState, SessionState, StoredTurn, TurnInput
+from app.domain import MemoryEpisode, PersonaCard, SceneState, SessionState, StoredTurn, TurnInput
 from app.llm.router import ModelProviderName
 from app.memory import RecentDialogueStore
 from app.memory.store import MemoryEpisodeStore
@@ -32,6 +32,10 @@ class LoadedTurnContext:
     scene: SceneState
     recent_turns: tuple[StoredTurn, ...]
     standing_facts: tuple[str, ...] = ()
+    # All PLAYER/GM session memories loaded this turn for the Standing-facts block,
+    # reused by Lane B lexical slice scoring (docs/26 §3.4, #79) with ZERO extra
+    # queries. Additive default () so callers/tests that omit it are unaffected.
+    session_memories: tuple[MemoryEpisode, ...] = ()
     # True when this turn carries a valid persona override that has not yet been
     # written to the session repository. The durable write is deferred until the
     # turn actually persists (see TurnOrchestrator.run_turn), so a failed turn
@@ -163,6 +167,7 @@ class TurnSessionLoader:
             scene=loader.load_scene(session.active_scene_id),
             recent_turns=tuple(self.recent_dialogue_store.load_recent_dialogue(session.id)),
             standing_facts=standing_facts,
+            session_memories=tuple(memories),
             persona_switched=persona_switched,
         )
 

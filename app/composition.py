@@ -198,6 +198,8 @@ def build_orchestrator_config(settings: Settings, *, content_root: str) -> TurnO
         memory_consolidation_batch_cap=settings.memory_consolidation_batch_cap,
         model_context_window_tokens=settings.model_context_window_tokens,
         context_warn_ratio=settings.context_warn_ratio,
+        rag_slice_lexical_quota=settings.rag_slice_lexical_quota,
+        rag_slice_min_score=settings.rag_slice_min_score,
     )
 
 

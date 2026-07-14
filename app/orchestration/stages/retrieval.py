@@ -9,10 +9,16 @@ from app.domain import (
     TurnInput,
     TurnRetrievalDiagnostics,
 )
-from app.domain.visibility import Visibility
 from app.orchestration.context_budget import ContextBudget
 from app.orchestration.stages.session import LoadedTurnContext
 from app.rag.diagnostics import ChunkRetrievalDiagnostic, RetrievalDiagnostics, RetrievalResult
+from app.rag.lexical import LexicalHit, score_memories_lexical
+from app.rag.ranking import (
+    DEFAULT_SLICE_QUOTAS,
+    SliceQuotas,
+    apply_lexical_slice_quotas,
+    slice_aware_confidence,
+)
 from app.rag.retriever import build_retrieval_query
 
 
@@ -44,9 +50,14 @@ class TurnRetrievalStage:
         *,
         actor_context_retriever: ActorContextRetrieving | None,
         context_budget: ContextBudget,
+        slice_quotas: SliceQuotas = DEFAULT_SLICE_QUOTAS,
     ) -> None:
         self.actor_context_retriever = actor_context_retriever
         self.context_budget = context_budget
+        # Lane B lexical slice quotas (docs/26 §3.4, #79). Default is a byte-identical
+        # no-op: quota 0 means the scorer never runs and the reorder returns its input
+        # unchanged, so this whole stage reproduces the pre-Lane-B behavior exactly.
+        self.slice_quotas = slice_quotas
 
     def run(
         self,
@@ -57,6 +68,26 @@ class TurnRetrievalStage:
         if self.actor_context_retriever is None:
             return RetrievalStageResult(chunks=(), confidence=None, warnings=())
 
+        # Lane B: score the lexical slice from the session memories already loaded
+        # for the Standing-facts block -- BEFORE the retriever call (fix 4) and
+        # reusing context.session_memories, so no extra query runs and a later
+        # dense/Qdrant failure cannot take the lexical leg down with it. A scorer
+        # exception degrades Lane B to a no-op (dense-only) with a warning; it never
+        # fails the turn. When the quota is off the scorer does not run at all.
+        lexical_hits: tuple[LexicalHit, ...] = ()
+        warnings: tuple[str, ...] = ()
+        if self.slice_quotas.lexical > 0:
+            try:
+                lexical_hits = tuple(
+                    score_memories_lexical(
+                        query_text=turn_input.message,
+                        memories=context.session_memories,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - Lane B is fail-open (dense-only)
+                warnings = (f"lexical slice scorer skipped: {exc}",)
+
+        memories_by_id = {memory.id: memory for memory in context.session_memories}
         query = build_retrieval_query(
             user_message=turn_input.message,
             scene=context.scene,
@@ -95,7 +126,7 @@ class TurnRetrievalStage:
                 + len(context.standing_facts)
                 + max(self.context_budget.retrieved_chunks - 1, 0)
             )
-            chunks, diagnostics = self._retrieve(
+            chunks, rag_diagnostics = self._retrieve(
                 query=query,
                 lexical_query=turn_input.message,
                 world_id=context.session.world_id,
@@ -104,22 +135,68 @@ class TurnRetrievalStage:
                 scene_id=context.session.active_scene_id,
                 top_k=top_k,
             )
-            scores = [
-                chunk.score for chunk in chunks if chunk.visibility == Visibility.PLAYER
-            ]
-            confidence = max(scores) if scores else 0.0
-            return RetrievalStageResult(
-                chunks=tuple(chunks),
-                confidence=confidence,
-                warnings=(),
-                diagnostics=diagnostics,
-            )
         except Exception as exc:
+            # Dense/Qdrant failure. Lane B survives (fix 4): if the lexical slice found
+            # anything, degrade to a lexical-only prompt -- strictly better than today's
+            # empty-chunks fallback -- instead of losing the lexical leg with the dense one.
+            if self.slice_quotas.lexical > 0 and lexical_hits:
+                fallback = apply_lexical_slice_quotas(
+                    chunks=(),
+                    diagnostics=None,
+                    lexical_hits=lexical_hits,
+                    memories_by_id=memories_by_id,
+                    quotas=self.slice_quotas,
+                    prompt_window=self.context_budget.retrieved_chunks,
+                )
+                if fallback.chunks:
+                    return RetrievalStageResult(
+                        chunks=tuple(fallback.chunks),
+                        confidence=slice_aware_confidence(
+                            fallback.chunks, fallback.slice_member_ids
+                        ),
+                        warnings=(*warnings, f"retrieval degraded to lexical slice: {exc}"),
+                        diagnostics=None,
+                    )
             return RetrievalStageResult(
                 chunks=(),
                 confidence=None,
-                warnings=(f"retrieval skipped: {exc}",),
+                warnings=(*warnings, f"retrieval skipped: {exc}"),
             )
+
+        # Dense retrieval succeeded. Apply the Lane B reorder on the FINAL prompt
+        # window. This too is fail-open: a reorder exception degrades to dense-only
+        # with a warning rather than failing the turn (quota-off is a no-op).
+        try:
+            slice_result = apply_lexical_slice_quotas(
+                chunks=chunks,
+                diagnostics=rag_diagnostics,
+                lexical_hits=lexical_hits,
+                memories_by_id=memories_by_id,
+                quotas=self.slice_quotas,
+                prompt_window=self.context_budget.retrieved_chunks,
+            )
+        except Exception as exc:  # noqa: BLE001 - Lane B is fail-open (dense-only)
+            warnings = (*warnings, f"lexical slice reorder skipped: {exc}")
+            slice_result = apply_lexical_slice_quotas(
+                chunks=chunks,
+                diagnostics=rag_diagnostics,
+                lexical_hits=(),
+                memories_by_id=memories_by_id,
+                quotas=self.slice_quotas,
+                prompt_window=self.context_budget.retrieved_chunks,
+            )
+
+        turn_diagnostics = (
+            _to_turn_diagnostics(slice_result.diagnostics)
+            if slice_result.diagnostics is not None
+            else None
+        )
+        return RetrievalStageResult(
+            chunks=tuple(slice_result.chunks),
+            confidence=slice_aware_confidence(slice_result.chunks, slice_result.slice_member_ids),
+            warnings=warnings,
+            diagnostics=turn_diagnostics,
+        )
 
     def _retrieve(
         self,
@@ -131,7 +208,7 @@ class TurnRetrievalStage:
         persona_id: str,
         scene_id: str | None,
         top_k: int,
-    ) -> tuple[list[RetrievedChunk], TurnRetrievalDiagnostics | None]:
+    ) -> tuple[list[RetrievedChunk], RetrievalDiagnostics | None]:
         retriever = self.actor_context_retriever
         assert retriever is not None
         with_diagnostics = getattr(retriever, "retrieve_for_actor_with_diagnostics", None)
@@ -145,7 +222,7 @@ class TurnRetrievalStage:
                 scene_id=scene_id,
                 top_k=top_k,
             )
-            return list(result.chunks), _to_turn_diagnostics(result.diagnostics)
+            return list(result.chunks), result.diagnostics
         chunks = retriever.retrieve_for_actor(
             query=query,
             lexical_query=lexical_query,
@@ -178,4 +255,7 @@ def _to_candidate(entry: ChunkRetrievalDiagnostic) -> RetrievalCandidateDiagnost
         adjusted_score=entry.adjusted_score,
         applied_boosts=entry.applied_boosts,
         selected_rank=entry.selected_rank,
+        slice_score=entry.slice_score,
+        slice_matched_terms=entry.slice_matched_terms,
+        slice_guaranteed=entry.slice_guaranteed,
     )

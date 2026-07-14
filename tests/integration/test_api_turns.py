@@ -1342,6 +1342,10 @@ def test_api_get_turn_detail_returns_stored_fields_and_diagnostics(tmp_path: Pat
             "adjusted_score",
             "applied_boosts",
             "selected_rank",
+            # Lane B slice labels (docs/26 §3.4, #79): metadata-only, still no chunk text.
+            "slice_score",
+            "slice_matched_terms",
+            "slice_guaranteed",
         }
 
 

@@ -9,10 +9,14 @@ import pytest
 from app.diagnostics.replay_selection import (
     DEFAULT_IMPORTANCE_FLOOR,
     MemoryEligibility,
+    load_memories,
     main,
+    replay_lexical,
     replay_selection,
     summarize,
+    target_rank,
 )
+from app.memory.consolidation import CONSOLIDATED_TAG
 from app.persistence.sqlite import connect_sqlite, initialize_database
 
 _SESSION_ID = "replay-session"
@@ -173,3 +177,114 @@ def test_main_cli_prints_per_memory_lines_and_summary(
     assert "elig-all importance=4 tags=['promise'] canon_tags=['promise'] eligible=yes" in out
     assert "elig-tag importance=2 tags=['rule'] canon_tags=['rule'] eligible=no" in out
     assert "player_memories=4" in out
+
+
+# --- Lane B lexical replay (docs/26 Stage 4, #79) --------------------------------
+
+_LEXICAL_QUERY = "what rule did we agree to trust"
+
+
+def _seed_lexical_database(db_path: Path) -> None:
+    """A synthetic artifact-shaped DB for the lexical scorer -- never the real D3."""
+    connection = connect_sqlite(db_path)
+    initialize_database(connection)
+    now = "2026-07-12T00:00:00Z"
+    connection.execute(
+        "INSERT INTO sessions "
+        "(id, world_id, active_scene_id, active_persona_id, player_name, created_at, "
+        "updated_at) VALUES (?,?,?,?,?,?,?)",
+        (_SESSION_ID, "world", "scene", "persona", "Player", now, now),
+    )
+    rows = [
+        # id, summary, visibility, tags -- "target" is the only memory carrying the
+        # rare terms (rule/trust) the query shares; fillers share nothing.
+        ("target", "the trust rule uses a blue wax seal", "player", ["rule"]),
+        ("filler1", "iria stood near the busy market", "player", []),
+        ("filler2", "the palace courtyard was quiet", "player", []),
+        # Excluded from the pool: gm visibility, and a consolidation-retired original.
+        ("gmrow", "the trust rule uses a blue wax seal", "gm", ["rule"]),
+        ("retired", "the trust rule uses a blue wax seal", "player", ["rule", CONSOLIDATED_TAG]),
+    ]
+    for memory_id, summary, visibility, tags in rows:
+        connection.execute(
+            "INSERT INTO memory_episodes "
+            "(id, session_id, scene_id, actor_id, summary, importance, visibility, "
+            "tags_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                memory_id,
+                _SESSION_ID,
+                "scene",
+                "persona",
+                summary,
+                2,
+                visibility,
+                json.dumps(tags),
+                now,
+            ),
+        )
+    connection.commit()
+    connection.close()
+
+
+def test_replay_lexical_ranks_the_rare_term_target_first(tmp_path: Path) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_lexical_database(db_path)
+
+    hits = replay_lexical(
+        database_path=db_path, session_id=_SESSION_ID, query_text=_LEXICAL_QUERY
+    )
+
+    # Only "target" carries the rare rule/trust terms; gm + consolidated rows are
+    # excluded from the pool entirely.
+    assert [hit.memory_id for hit in hits] == ["target"]
+    assert target_rank(hits, target_prefix="target") == 1
+
+
+def test_replay_lexical_target_absent_when_no_terms_match(tmp_path: Path) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_lexical_database(db_path)
+
+    hits = replay_lexical(
+        database_path=db_path, session_id=_SESSION_ID, query_text="unrelated words entirely"
+    )
+
+    assert target_rank(hits, target_prefix="target") is None
+
+
+def test_load_memories_is_read_only_and_leaves_no_sidecar_files(tmp_path: Path) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_lexical_database(db_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["synthetic.db"]
+
+    memories = load_memories(database_path=db_path, session_id=_SESSION_ID)
+
+    assert len(memories) == 5  # all rows loaded; the scorer applies the pool filter
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["synthetic.db"]
+
+
+def test_main_cli_lexical_mode_reports_rank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "synthetic.db"
+    _seed_lexical_database(db_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "replay_selection",
+            "--database-path",
+            str(db_path),
+            "--session-id",
+            _SESSION_ID,
+            "--lexical-query",
+            _LEXICAL_QUERY,
+            "--target-id",
+            "target",
+        ],
+    )
+
+    main()
+
+    out = capsys.readouterr().out
+    assert "#1 target" in out
+    assert "target=target -> rank 1/1" in out

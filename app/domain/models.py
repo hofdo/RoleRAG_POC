@@ -178,6 +178,13 @@ class RetrievalCandidateDiagnostic(BaseModel):
     adjusted_score: float
     applied_boosts: dict[str, float] = Field(default_factory=dict)
     selected_rank: int | None = Field(default=None, ge=1)
+    # Lane B lexical slice labels (docs/26 §3.4, #79); additive, no-slice defaults.
+    # slice_score is the matched terms' summed session-pool IDF, kept as a dedicated
+    # field rather than folded into applied_boosts so the adjusted==original+boosts
+    # identity holds for injected members too. See ChunkRetrievalDiagnostic.
+    slice_score: float | None = None
+    slice_matched_terms: list[str] = Field(default_factory=list)
+    slice_guaranteed: bool = False
 
 
 class TurnRetrievalDiagnostics(BaseModel):

@@ -796,7 +796,7 @@ world-chronicle section below (#81–#83).
   `standing_facts_count`/`_chars` diagnostics. Offline-checkable today via #75's replay script
   against D3. Q3 confirmed 2026-07-14 (keep-both); still gated on Q1.
   [docs/26 §3.3](26_memory_retrieval_redesign.md#33-lane-a--tag-eligible-canon-pinning-retrieval-free-guarantee). ~1–1.5 days.
-- [ ] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
+- [x] **#79** *(retrieval, M/L — the general #73 fix)* **Stage 4 / Lane B — lexical slice
   quotas.** Session-pool-IDF lexical scorer (`app/rag/lexical.py`, pure, reuses
   `content_terms()`) + reserved slots reordered on the **final** top-5 selection window (not
   the ~13-item rerank window — the load-bearing placement detail), `RAG_SLICE_LEXICAL_QUOTA=0`
@@ -806,6 +806,39 @@ world-chronicle section below (#81–#83).
   pre-retriever fail-open ordering; plus the named confidence-gating test. Offline-falsifiable
   against D3 (blue-seal query terms hit 4/48 pool memories) before any live run.
   [docs/26 §3.4](26_memory_retrieval_redesign.md#34-lane-b--lexical-slice-quotas-retrieval-time-guarantee-general-case). ~2–3 days.
+  **Shipped:** new pure `app/rag/lexical.py` (`score_memories_lexical`, `LexicalHit`,
+  `idf_over`; pool filter = PLAYER **and** `CONSOLIDATED_TAG` not in tags = fix 1; per-memory
+  doc terms = `content_terms(summary) | content_terms(" ".join(tags))`; `idf = log(N/df)` over
+  the session's own pool; deterministic order `(-score, -importance, -created_ordinal,
+  memory_id)` with `created_ordinal = -inf` for `None` created_at, explicitly tested).
+  `app/rag/ranking.py` gains frozen `SliceQuotas{lexical=0, min_slice_score=None}` +
+  `apply_lexical_slice_quotas` + `slice_aware_confidence` + `SLICE_CONFIDENCE_EQUIVALENT=0.5`.
+  The reorder operates on the retriever's `(chunks, RetrievalDiagnostics)` — the flow currency
+  that feeds `select_retrieved_chunks_for_prompt` — front-loading the top-quota eligible hits
+  so the UNCHANGED prompt-window walk selects them: a member already inside the natural top-5
+  is only reordered (no dense eviction), a member deeper than the window or not dense-fetched
+  is pulled in / injected from `context.session_memories` (fix 3: injected as
+  `original_score=0.0`/`applied_boosts={}` with a dedicated `slice_score` on the diagnostic, so
+  `adjusted == original + sum(boosts)` holds for every chunk; a memory never appears twice —
+  a dense hit is promoted in place, and any duplicate `rejected` entry is dropped). The stage
+  (`app/orchestration/stages/retrieval.py`) computes lexical hits from `context.session_memories`
+  (added to `LoadedTurnContext`, zero extra queries) BEFORE the retriever (fix 4): a dense/Qdrant
+  failure degrades to a lexical-only prompt (`retrieval degraded to lexical slice`) instead of
+  empty, and a scorer/reorder exception degrades to dense-only with a warning — Lane B is
+  fail-open both directions. `retrieval_confidence` is slice-aware (a guaranteed slot floors at
+  0.5 so a slice-only rescue is not low-confidence; byte-identical with quotas off) — the named
+  test `test_retrieval_stage_slice_only_rescue_is_not_low_confidence` pins it. New
+  `RAG_SLICE_LEXICAL_QUOTA=0` / `RAG_SLICE_MIN_SCORE=` (unset) Settings mirrored in `.env.example`
+  and wired via `build_orchestrator_config` (both roots). Diagnostics + API inspection payload
+  gain `slice_score`/`slice_matched_terms`/`slice_guaranteed`. **`context_budget.py` and the
+  additive-boost rerank math are byte-identical** (quotas=0 golden test); no new store/table/LLM
+  call site/vector-store feature, so no `InMemoryVectorStore` parity work (Lane B runs outside
+  the store). **Offline D3 replay** (`replay_selection --lexical-query`, read-only, `docs/artifacts/`
+  untouched): blue-seal memory `354b8d98` ranks **#1 of 15** (score 10.45, matched
+  `[messag, rule, trust]`) for the callback query — well within a quota of 2, so #73's blue-seal
+  instance is guaranteed into the actor prompt via Lane B (independent of Lane A #78). Full gate
+  green (ruff, mypy --strict 182 files, 852 pytest, 93-check regression runner); +42 tests
+  (`test_lexical.py`, `test_slice_quotas.py`, stage/config/replay/diagnostics extensions).
 - [ ] **#80** *(validation, M — owner's machine; closes docs/22 P2.2)* **Stage 5 — live
   validation + default flip.** At least **two** full docs/25 Phase D 100-turn runs (MTP
   non-determinism makes one green run weak evidence) with `CANON_TAG_PINNING=on`,

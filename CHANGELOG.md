@@ -42,6 +42,32 @@ records; this file is the quick delta between versions.
   thresholds, reversal markers, and framing-strip are unmodified. This is a real, narrow
   runtime behavior change (a previously-silent tag/importance loss is now recovered and
   audited); write-dedup, ranking, and retrieval are untouched.
+- **docs/26 Stage 4 Lane B lexical slice quotas** (#79, opt-in, byte-identical default): new
+  pure `app/rag/lexical.py` scorer ranks the session's own memory pool by summed
+  session-pool IDF of the terms it shares with the player's message (reuses `content_terms`;
+  IDF self-calibrates so frame vocabulary is free and rare terms expensive; no new
+  tokenizer). `app/rag/ranking.py` gains `SliceQuotas` + `apply_lexical_slice_quotas`, which
+  reorders/injects the top-quota lexical hits to the FRONT of the selection list so the
+  UNCHANGED `select_retrieved_chunks_for_prompt` walk lands them in the final prompt window
+  (a member already in the window is only reordered — no dense eviction; a deeper or
+  non-dense-fetched hit is pulled in / injected from the memory). All four judge fixes ship:
+  `CONSOLIDATED_TAG` pool exclusion (fix 1); `RAG_SLICE_MIN_SCORE` floor mechanism present
+  but shipped UNSET / no-floor pending Stage 5 measurement (fix 2); a dedicated `slice_score`
+  diagnostic field, not folded into `applied_boosts`, so `adjusted == original + sum(boosts)`
+  holds for every chunk including injected `original=0.0` members (fix 3); lexical hits
+  computed from `context.session_memories` BEFORE the retriever call, so a dense/Qdrant
+  failure degrades to a lexical-only prompt instead of empty (fix 4). `retrieval_confidence`
+  is slice-aware — a chunk holding a guaranteed slot floors at `SLICE_CONFIDENCE_EQUIVALENT`
+  (0.5, clears the 0.45 `low_retrieval_confidence` default) so a slice-only rescue does not
+  read as low-confidence — and is byte-identical with quotas off. New `RAG_SLICE_LEXICAL_QUOTA`
+  (default 0; live preset 2) / `RAG_SLICE_MIN_SCORE` (default unset) Settings, mirrored in
+  `.env.example` and wired through `build_orchestrator_config` (both composition roots).
+  Retrieval diagnostics + the API inspection payload gain labeled slice info (matched terms,
+  score, guaranteed flag). Offline D3 replay (`replay_selection --lexical-query`) ranks the
+  blue-seal rule memory `354b8d98` #1/15 for the #73 callback query — guaranteed into the
+  prompt at quota 2. `context_budget.py` and the additive-boost rerank math are byte-identical
+  (proven by a quotas=0 golden test); no new table, store, LLM call site, or vector-store
+  feature, so no `InMemoryVectorStore` parity work (Lane B runs outside the store).
 
 ## 1.3.0 — 2026-07-12
 

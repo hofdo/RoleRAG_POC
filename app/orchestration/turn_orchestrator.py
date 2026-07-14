@@ -68,6 +68,7 @@ from app.orchestration.stages import (
 )
 from app.persistence.repositories import CanonRepository, SessionRepository, TurnRepository
 from app.rag.embeddings import EmbeddingProvider
+from app.rag.ranking import SliceQuotas
 
 
 def _visible_texts(
@@ -145,6 +146,10 @@ class TurnOrchestratorConfig:
     # entirely (byte-identical -- no estimate, no warning, no behavior change).
     model_context_window_tokens: int = 0
     context_warn_ratio: float = 0.85
+    # Lane B lexical slice quotas (docs/26 §3.4, #79). Defaults mirror Settings: quota 0
+    # is a byte-identical no-op; min-score None means no floor (ships unset).
+    rag_slice_lexical_quota: int = 0
+    rag_slice_min_score: float | None = None
 
 
 class TurnOrchestrator:
@@ -210,6 +215,10 @@ class TurnOrchestrator:
         self.retrieval_stage = TurnRetrievalStage(
             actor_context_retriever=actor_context_retriever,
             context_budget=self.context_budget,
+            slice_quotas=SliceQuotas(
+                lexical=config.rag_slice_lexical_quota,
+                min_slice_score=config.rag_slice_min_score,
+            ),
         )
         self.generation_stage = TurnGenerationStage(
             provider=provider,
