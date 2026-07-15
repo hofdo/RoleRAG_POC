@@ -115,6 +115,15 @@ export interface RetrievalCandidate {
   original_score: number;
   adjusted_score: number;
   applied_boosts: Record<string, number>;
+  // Additive fields the backend has always sent (RetrievalCandidateResponse) but the
+  // UI ignored until the debug panel needed them (#85). Optional so older fixtures
+  // and tests without them stay valid.
+  id?: string;
+  source_type?: string;
+  tags?: string[];
+  slice_score?: number | null;
+  slice_matched_terms?: string[];
+  slice_guaranteed?: boolean;
 }
 
 export interface RetrievalDiagnostics {
@@ -213,6 +222,65 @@ export interface EvalRunsResponse {
 export interface SessionTurnDetailsResponse {
   session_id: string;
   turns: TurnDetailResponse[];
+}
+
+// --- RAG debug/vector-map surface (POST /diagnostics/rag-map, /diagnostics/chunk-texts, #85) ---
+
+export interface RagMapRequest {
+  query_text?: string | null;
+  include_hidden?: boolean;
+}
+
+export interface RagMapPoint {
+  id: string;
+  collection: string;
+  x: number;
+  y: number;
+  source: string;
+  source_type: string;
+  visibility: string;
+  tags: string[];
+  world_id: string | null;
+  scene_id: string | null;
+  persona_id: string | null;
+  session_id: string | null;
+  actor_id: string | null;
+  importance: number | null;
+  created_at: string | null;
+  text_preview: string | null;
+  text_redacted: boolean;
+}
+
+export interface RagMapResponse {
+  points: RagMapPoint[];
+  point_count: number;
+  truncated: boolean;
+  explained_variance: number[];
+  query_point: number[] | null;
+  embedding_model: string;
+}
+
+export interface ChunkTextItemRequest {
+  collection: string;
+  id: string;
+}
+
+export interface ChunkTextsRequest {
+  items: ChunkTextItemRequest[];
+  include_hidden?: boolean;
+}
+
+export interface ChunkTextResponse {
+  id: string;
+  collection: string;
+  visibility: string | null;
+  text: string | null;
+  text_redacted: boolean;
+  found: boolean;
+}
+
+export interface ChunkTextsResponse {
+  chunks: ChunkTextResponse[];
 }
 
 // Eval drill-down = the raw conversation-checkpoint.json. Loosely typed: the UI reads a few

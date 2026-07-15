@@ -3,6 +3,8 @@ import type {
   AddCanonFactRequest,
   CanonFact,
   CanonFactsResponse,
+  ChunkTextsRequest,
+  ChunkTextsResponse,
   ContentCatalog,
   CreateSessionRequest,
   CreateSessionResponse,
@@ -11,6 +13,8 @@ import type {
   EvalRunDetail,
   EvalRunsResponse,
   GetSessionResponse,
+  RagMapRequest,
+  RagMapResponse,
   RecentSessionsResponse,
   RuntimeStatus,
   SessionMemoriesResponse,
@@ -226,6 +230,15 @@ export class ApiService {
 
   getEvalRun(runId: string): Promise<EvalRunDetail> {
     return requestJson(`/diagnostics/eval-runs/${encodeURIComponent(runId)}`);
+  }
+
+  // RAG debug surface (#85). POST because query_text is the multi-line retrieval query.
+  getRagMap(request: RagMapRequest = {}): Promise<RagMapResponse> {
+    return requestJson('/diagnostics/rag-map', { method: 'POST', body: request });
+  }
+
+  getChunkTexts(request: ChunkTextsRequest): Promise<ChunkTextsResponse> {
+    return requestJson('/diagnostics/chunk-texts', { method: 'POST', body: request });
   }
 
   getCanon(sessionId: string): Promise<CanonFactsResponse> {

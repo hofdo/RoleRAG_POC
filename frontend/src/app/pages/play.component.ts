@@ -5,10 +5,11 @@ import { TranscriptComponent } from '../components/transcript.component';
 import { MessageInputComponent } from '../components/message-input.component';
 import { MemoryPanelComponent } from '../components/memory-panel.component';
 import { CanonPanelComponent } from '../components/canon-panel.component';
+import { RagDebugPanelComponent } from '../components/rag-debug-panel.component';
 
-// Phase 1 play loop: status banner + setup picker + transcript + composer, with memory and
-// canon side panels. Each leaf component injects SessionStore directly — this container only
-// arranges them and kicks off the initial status/catalog loads.
+// Phase 1 play loop: status banner + setup picker + transcript + composer, with memory,
+// canon and live RAG-debug side panels (#85). Each leaf component injects SessionStore
+// directly — this container only arranges them and kicks off the initial status/catalog loads.
 @Component({
   selector: 'app-play',
   imports: [
@@ -17,6 +18,7 @@ import { CanonPanelComponent } from '../components/canon-panel.component';
     MessageInputComponent,
     MemoryPanelComponent,
     CanonPanelComponent,
+    RagDebugPanelComponent,
   ],
   template: `
     <section class="play">
@@ -31,6 +33,7 @@ import { CanonPanelComponent } from '../components/canon-panel.component';
       <aside class="play__aside">
         <app-memory-panel />
         <app-canon-panel />
+        <app-rag-debug-panel />
       </aside>
     </section>
   `,
