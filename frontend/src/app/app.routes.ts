@@ -13,6 +13,11 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/inspector.component').then((m) => m.InspectorComponent),
   },
   {
+    path: 'map',
+    title: 'Vector Map',
+    loadComponent: () => import('./pages/vector-map.component').then((m) => m.VectorMapComponent),
+  },
+  {
     path: 'analytics',
     title: 'Analytics',
     loadComponent: () => import('./pages/analytics.component').then((m) => m.AnalyticsComponent),

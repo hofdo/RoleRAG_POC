@@ -8,10 +8,11 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
   styleUrl: './app.component.scss',
 })
 export class AppComponent {
-  // Sigils per view (the design system's mono glyphs): prose, retrieval, analytics, eval.
+  // Sigils per view (the design system's mono glyphs): prose, retrieval, map, analytics, eval.
   readonly nav = [
     { path: '/play', label: 'Play', sigil: '▌' },
     { path: '/inspector', label: 'Inspector', sigil: '⟩' },
+    { path: '/map', label: 'Map', sigil: '◈' },
     { path: '/analytics', label: 'Analytics', sigil: '∴' },
     { path: '/eval', label: 'Eval', sigil: '⊘' },
   ];
