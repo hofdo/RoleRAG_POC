@@ -12,7 +12,7 @@ from app.rag.retriever import (
     _clip_line,
     build_retrieval_query,
 )
-from app.rag.vector_store import InMemoryVectorStore
+from app.rag.vector_store import InMemoryVectorStore, StoredPoint
 
 
 class FakeEmbeddingProvider:
@@ -67,6 +67,12 @@ class FakeVectorStore:
     ) -> list[RetrievedChunk]:
         self.search_calls.append((collection, list(vector), filters, limit))
         return self.chunks
+
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        raise AssertionError("scroll_points should not be called during retrieval")
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        raise AssertionError("get_chunks should not be called during retrieval")
 
 
 def test_retriever_filters_out_non_player_visible_chunks() -> None:

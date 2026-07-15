@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import NAMESPACE_URL, uuid5
@@ -27,6 +28,14 @@ except ImportError:  # pragma: no cover - exercised only when optional dependenc
 _FINGERPRINT_SENTINEL_ID = str(uuid5(NAMESPACE_URL, "rolerag:__embedding_model_fingerprint__"))
 _SENTINEL_PAYLOAD_KEY = "__rolerag_sentinel__"
 _FINGERPRINT_PAYLOAD_KEY = "embedding_model"
+
+
+@dataclass(frozen=True)
+class StoredPoint:
+    """A point read back from a vector store, for debug/visualization surfaces."""
+
+    chunk: RagChunk
+    vector: list[float]
 
 
 class VectorStoreDimensionMismatch(ValueError):
@@ -99,6 +108,14 @@ class VectorStore(Protocol):
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None: ...
 
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None: ...
+
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        """Return every real point with its vector, excluding the internal sentinel meta point."""
+        ...
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        """Fetch chunks by chunk id. Missing ids are silently absent from the result."""
+        ...
 
 
 class InMemoryVectorStore:
@@ -224,6 +241,20 @@ class InMemoryVectorStore:
             )
             for score, chunk in matches[:limit]
         ]
+
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        # No sentinel to filter here: unlike QdrantVectorStore (which stores the P1.4
+        # fingerprint as an in-collection sentinel point), this store keeps the model
+        # fingerprint in a separate dict (_model_fingerprints), so every entry in
+        # self._entries is a real chunk.
+        return [
+            StoredPoint(chunk=chunk, vector=list(vector))
+            for chunk, vector in self._entries[collection]
+        ]
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        by_id = {chunk.id: chunk for chunk, _ in self._entries[collection]}
+        return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
 class QdrantVectorStore:
@@ -436,6 +467,69 @@ class QdrantVectorStore:
             for result in results
         ]
 
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return []
+        models = _require_qdrant_models()
+        scroll_filter = models.Filter(
+            must_not=[
+                models.FieldCondition(
+                    key=_SENTINEL_PAYLOAD_KEY,
+                    match=models.MatchValue(value=True),
+                )
+            ]
+        )
+        points: list[StoredPoint] = []
+        offset: Any = None
+        while True:
+            records, next_offset = self.client.scroll(
+                collection_name=collection.value,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True,
+                scroll_filter=scroll_filter,
+            )
+            for record in records:
+                payload = record.payload or {}
+                # Defensive: the filter above already excludes the sentinel; skip it again
+                # in case a payload carrying the sentinel key ever slips through.
+                if payload.get(_SENTINEL_PAYLOAD_KEY):
+                    continue
+                # Defensive: only accept an unnamed single-vector config's plain vector
+                # list; skip records with named vectors or no vector.
+                if not isinstance(record.vector, list):
+                    continue
+                points.append(
+                    StoredPoint(
+                        chunk=_payload_to_rag_chunk(payload),
+                        vector=list(record.vector),
+                    )
+                )
+            if next_offset is None:
+                break
+            offset = next_offset
+        return points
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        if not chunk_ids:
+            return []
+        if not self.client.collection_exists(collection_name=collection.value):
+            return []
+        records = self.client.retrieve(
+            collection_name=collection.value,
+            ids=[_qdrant_point_id(collection, chunk_id) for chunk_id in chunk_ids],
+            with_payload=True,
+        )
+        by_chunk_id: dict[str, RagChunk] = {}
+        for record in records:
+            payload = record.payload or {}
+            if payload.get(_SENTINEL_PAYLOAD_KEY):
+                continue
+            chunk = _payload_to_rag_chunk(payload)
+            by_chunk_id[chunk.id] = chunk
+        return [by_chunk_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_chunk_id]
+
 
 def _build_qdrant_filter(filters: RetrievalFilter) -> Any:
     models = _require_qdrant_models()
@@ -556,6 +650,24 @@ def _payload_to_retrieved_chunk(payload: dict[str, Any] | None, *, score: float)
         actor_id=raw_payload.get("actor_id"),
         importance=raw_payload.get("importance"),
         created_at=_parse_payload_datetime(raw_payload.get("created_at")),
+    )
+
+
+def _payload_to_rag_chunk(payload: dict[str, Any]) -> RagChunk:
+    return RagChunk(
+        id=str(payload["id"]),
+        source=str(payload["source"]),
+        source_type=str(payload["source_type"]),
+        text=str(payload["text"]),
+        visibility=payload["visibility"],
+        tags=list(payload.get("tags", [])),
+        world_id=payload.get("world_id"),
+        scene_id=payload.get("scene_id"),
+        persona_id=payload.get("persona_id"),
+        session_id=payload.get("session_id"),
+        actor_id=payload.get("actor_id"),
+        importance=payload.get("importance"),
+        created_at=_parse_payload_datetime(payload.get("created_at")),
     )
 
 
