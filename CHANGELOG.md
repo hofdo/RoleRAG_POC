@@ -7,6 +7,20 @@ records; this file is the quick delta between versions.
 
 ### Added
 
+- **RAG debug panel + vector map** (#85): live per-turn debug panel on the Play page
+  (retrieval candidates with `original → adjusted` score and per-boost breakdown, lexical-slice
+  labels, lazy chunk-text drill-down, new-memory diff, Inspector deep link — fed by the SSE
+  final frame the backend already sent) and a new Vector Map page (`/app/map`) rendering every
+  point in all three vector-store collections as an interactive 2-D scatter (server-side
+  deterministic numpy PCA, ECharts lazy-loaded with the route; filters, last-turn
+  selected/rejected highlight, query-vector overlay, click-to-inspect). Backed by two new
+  read-only endpoints, `POST /diagnostics/rag-map` and `POST /diagnostics/chunk-texts`, with
+  server-enforced hidden-text redaction (non-`player` text is null unless the request opts in
+  via `include_hidden`; pinned by an integration test). New `VectorStore.scroll_points`/
+  `get_chunks` read paths (InMemory↔Qdrant parity-tested, sentinel excluded) and
+  `app/rag/projection.py`; numpy promoted to a direct dependency; persisted turn diagnostics
+  remain metadata-only. [docs/28](docs/28_rag_debug_and_vector_map.md).
+
 - **docs/26 Stage 0 instrumentation** (#75, closes #74's harness half): new
   `memory_write_lifecycle` regression category drives the real `TurnMemoryStage` (real
   deterministic extractor + real write-dedup, faked curator LLM call only) and replays the

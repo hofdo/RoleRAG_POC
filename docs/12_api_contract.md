@@ -1,6 +1,6 @@
 # 12 - API Contract
 
-> Reviewed: 2026-07-11 @ a20bfc5
+> Reviewed: 2026-07-15 @ c69baf0
 
 ## Scope
 
@@ -29,6 +29,8 @@ Available endpoints:
 - `DELETE /sessions/{session_id}/turns/last`
 - `GET /diagnostics/eval-runs`
 - `GET /diagnostics/eval-runs/{run_id}`
+- `POST /diagnostics/rag-map`
+- `POST /diagnostics/chunk-texts`
 
 The Angular SPA is served as static files at `/app` (the root `/` redirects there); it is not an
 API endpoint and is excluded from OpenAPI.
@@ -245,6 +247,26 @@ them verbatim and is local-use only, like the rest of the surface.
 The tooling that produces these run artifacts — the live-smoke checkpoint, the model bake-off,
 and the RAG-knob sweep — is documented in
 [19_verification_and_eval_tooling.md](19_verification_and_eval_tooling.md).
+
+## RAG Debug Map & Chunk Texts
+
+`POST /diagnostics/rag-map` (body: `query_text?`, `include_hidden?`) scrolls every real point in
+all three vector-store collections (the internal sentinel meta point is excluded), fits a
+deterministic 2-D PCA server-side, and returns each point as `{id, collection, x, y, source,
+source_type, visibility, tags, world_id, scene_id, persona_id, session_id, actor_id, importance,
+created_at, text_preview, text_redacted}` plus `point_count`, `truncated` (hard cap 20 000),
+`explained_variance` (`[pc1, pc2]`), `embedding_model`, and — when `query_text` is given —
+`query_point` (`[x, y]`, projected with the same fit). An empty index returns an empty `200`;
+an unreachable vector store returns `503 retrieval_unavailable`. Backs the SPA Vector Map page.
+
+`POST /diagnostics/chunk-texts` (body: `items: [{collection, id}]` ≤50, `include_hidden?`)
+returns full chunk text per item in request order; unknown ids come back `found=false`.
+
+Both endpoints apply the same server-enforced redaction rule: text for a non-`player`-visibility
+chunk is `null` with `text_redacted=true` unless the request explicitly sets
+`include_hidden=true`. Persisted turn diagnostics remain metadata-only; these endpoints never
+touch an LLM provider. Policy, rationale, and the pinning test:
+[28_rag_debug_and_vector_map.md](28_rag_debug_and_vector_map.md).
 
 ## Session Memories
 
