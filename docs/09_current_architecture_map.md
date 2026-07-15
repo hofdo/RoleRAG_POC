@@ -1,6 +1,6 @@
 # 09 — Current Architecture Map
 
-> Reviewed: 2026-07-10 @ 9097877
+> Reviewed: 2026-07-15 @ c69baf0
 
 ## Overview
 
@@ -58,7 +58,7 @@ graph TD
 |---|---|
 | `app/cli.py` | local operational interface for config, sessions, routes, ingestion, and turns |
 | `app/main.py` + `app/api/` | HTTP interface with thin route handlers |
-| `frontend/` | Angular 21 SPA (play, inspector, analytics, eval) served at `/app`; see [frontend/README.md](../frontend/README.md) |
+| `frontend/` | Angular 21 SPA (play, inspector, analytics, eval, vector map) served at `/app`; see [frontend/README.md](../frontend/README.md) |
 | `app/composition.py` | central wiring for providers, repositories, retriever, and orchestrator |
 | `app/domain/` | typed data models and visibility values |
 | `app/orchestration/` | turn lifecycle as an injectable stage pipeline (`stages/`, 13 stage modules) plus `canon_builder.py`, `draft_validator.py`, `turn_errors.py`, prompt assembly, and context budgeting |
@@ -66,7 +66,7 @@ graph TD
 | `app/llm/` | provider abstraction, OpenAI-compatible adapter, deterministic routing |
 | `app/persistence/` | JSON loading plus SQLite schema and repositories |
 | `app/memory/` | recent-dialogue window, durable-memory store, vector indexing, semantic write-dedup, and consolidation |
-| `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, and vector-store adapters |
+| `app/rag/` | chunking, embedding abstraction, ingestion, retrieval, vector-store adapters, and the deterministic 2-D PCA projection (`projection.py`) behind the vector map |
 | `app/diagnostics/` | runtime environment checks, deterministic end-to-end smoke verification, eval-run serving, and the live-checkpoint/bake-off/containment-probe harnesses (10 modules) — see [docs/19_verification_and_eval_tooling.md](19_verification_and_eval_tooling.md) |
 | `app/content/` | standalone scenario-pack validation and template generation |
 | `app/evals/` | deterministic regression fixtures and report runner |
@@ -86,6 +86,9 @@ graph TD
   (JSON + buffered SSE), last-turn deletion (reroll), per-turn and bulk turn diagnostics,
   durable memories, session canon, and eval-run summaries — see
   [docs/12_api_contract.md](12_api_contract.md) for the full surface
+- adds a text-bearing local debug surface (`app/api/debug_routes.py`: vector-map projection and
+  chunk-text lookup with server-enforced hidden-text redaction) — see
+  [docs/28_rag_debug_and_vector_map.md](28_rag_debug_and_vector_map.md)
 - serves the built SPA as static files at `/app` (root `/` redirects there)
 - does not duplicate orchestration logic
 - buffers player-visible SSE text until validation and persistence complete; metadata-only
@@ -97,7 +100,8 @@ graph TD
 - runs turns over buffered SSE and renders safe session, transcript, route, memory, canon, and
   warning data
 - adds read-only diagnostic pages: RAG inspector (per-turn retrieval drill-down), analytics
-  (stage timings), and eval-run trends
+  (stage timings), eval-run trends, and the vector map (`/app/map`, 2-D scatter of the whole
+  vector store); the Play page carries a live per-turn RAG debug panel (#85)
 - does not own orchestration, scenario-pack selection, retrieval, validation, routing,
   persistence, or memory behavior
 
@@ -147,7 +151,9 @@ graph TD
 - source weighting distinguishes `session_memory`, `persona_memory`, and `canon_lore`
 - metadata-only retrieval ranking diagnostics are exposed via both the CLI and API turn
   responses (turn execution JSON + SSE final frame, `GET /turns/{i}`, `GET /turn-details`);
-  chunk text and prompts remain excluded everywhere
+  chunk text and prompts remain excluded from all turn/diagnostic responses — the sole,
+  deliberate exception is the redaction-gated debug surface in `app/api/debug_routes.py`
+  ([docs/28](28_rag_debug_and_vector_map.md))
 
 ### Local/cloud abstraction
 

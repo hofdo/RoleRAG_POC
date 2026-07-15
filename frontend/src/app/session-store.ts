@@ -59,6 +59,11 @@ export class SessionStore {
   readonly memoryError = signal<string | null>(null);
   readonly canonError = signal<string | null>(null);
   readonly lastDebug = signal<TurnDebug | null>(null);
+  // Full last-turn payload (incl. retrieval diagnostics) for the RAG debug panel (#85).
+  readonly lastTurn = signal<TurnResult | null>(null);
+  // Memory ids present just before the last turn's applyTurn ran, so the debug panel can
+  // diff against the post-turn memory list and show what was newly written.
+  readonly memoryIdsBeforeLastTurn = signal<ReadonlySet<string>>(new Set());
   readonly recentSessions = signal<RecentSessionResponse[]>([]);
   // Persona to use for the *next* turn only; the backend switches the session's
   // active persona once that turn lands (see TurnSessionLoader.load).
@@ -204,11 +209,13 @@ export class SessionStore {
   }
 
   private applyTurn(message: string, turn: TurnResult): void {
+    this.memoryIdsBeforeLastTurn.set(new Set(this.memories().map((memory) => memory.id)));
     this.transcript.update((entries) => [
       ...entries,
       { role: 'player', text: message, source: 'new' },
       { role: 'assistant', text: turn.text, source: 'new' },
     ]);
+    this.lastTurn.set(turn);
     if (turn.route) {
       this.lastDebug.set({
         provider: turn.route.provider,

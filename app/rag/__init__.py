@@ -10,7 +10,7 @@ from app.rag.ingestion import (
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
 from app.rag.ranking import RetrievalRankingContext
 from app.rag.retriever import ActorContextRetriever, Retriever, build_retrieval_query
-from app.rag.vector_store import InMemoryVectorStore, QdrantVectorStore, VectorStore
+from app.rag.vector_store import InMemoryVectorStore, QdrantVectorStore, StoredPoint, VectorStore
 
 __all__ = [
     "ChunkingConfig",
@@ -29,6 +29,7 @@ __all__ = [
     "RetrievalRankingContext",
     "RetrievalResult",
     "Retriever",
+    "StoredPoint",
     "VectorStore",
     "build_retrieval_query",
     "chunk_text",

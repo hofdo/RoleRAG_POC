@@ -1,4 +1,5 @@
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../api.service';
 import { formatRetrievalDiagnostics, formatRecentSessionOption, formatStageTimings } from '../play-model';
 import type { RecentSessionResponse, TurnDetailResponse } from '../models';
@@ -6,6 +7,8 @@ import type { RecentSessionResponse, TurnDetailResponse } from '../models';
 // Phase 2: per-session turn timeline → drill into one turn's retrieval ranking (selected vs
 // rejected chunks, scores, applied boosts), stage timings, critic status and structured errors.
 // Read-only; reuses the tested play-model formatters. State is component-local (no store needed).
+// Supports a deep link from the Play page's RAG debug panel (#85): ?session=<id> selects that
+// session and jumps to its latest turn, or a specific turn via &turn=<index>.
 @Component({
   selector: 'app-inspector',
   imports: [],
@@ -146,6 +149,7 @@ import type { RecentSessionResponse, TurnDetailResponse } from '../models';
 })
 export class InspectorComponent implements OnInit {
   private readonly api = inject(ApiService);
+  private readonly route = inject(ActivatedRoute);
 
   readonly sessions = signal<RecentSessionResponse[]>([]);
   readonly selectedId = signal<string>('');
@@ -162,6 +166,7 @@ export class InspectorComponent implements OnInit {
 
   ngOnInit(): void {
     void this.loadSessions();
+    void this.applyDeepLink();
   }
 
   label(session: RecentSessionResponse): string {
@@ -199,5 +204,24 @@ export class InspectorComponent implements OnInit {
   selectTurn(turn: TurnDetailResponse): void {
     this.selectedIndex.set(turn.turn_index);
     this.selectedTurn.set(turn);
+  }
+
+  // Deep link support (#85): ?session=<id>[&turn=<index>] from the Play page's RAG debug
+  // panel. Runs independently of loadSessions() — selectSession fetches turn-details directly
+  // and doesn't need the session list to be loaded first.
+  private async applyDeepLink(): Promise<void> {
+    const params = this.route.snapshot.queryParamMap;
+    const sessionId = params.get('session');
+    if (!sessionId) return;
+    await this.selectSession(sessionId);
+    const turns = this.turns();
+    if (turns.length === 0) return;
+    const requestedIndex = params.has('turn') ? Number(params.get('turn')) : null;
+    const requested =
+      requestedIndex !== null ? turns.find((t) => t.turn_index === requestedIndex) : undefined;
+    const latest = turns.reduce((best, candidate) =>
+      candidate.turn_index > best.turn_index ? candidate : best,
+    );
+    this.selectTurn(requested ?? latest);
   }
 }

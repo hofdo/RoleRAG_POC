@@ -9,6 +9,7 @@ from app.content.validator import LoreDocumentMetadata, LoreManifest
 from app.domain import RetrievedChunk, Visibility
 from app.rag.ingestion import IngestionRequest, ingest_document, ingest_lore_manifest
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
+from app.rag.vector_store import StoredPoint
 
 
 class FakeEmbeddingProvider:
@@ -67,6 +68,12 @@ class RecordingVectorStore:
         limit: int,
     ) -> list[RetrievedChunk]:
         raise AssertionError("search should not be called during ingestion")
+
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        raise AssertionError("scroll_points should not be called during ingestion")
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        raise AssertionError("get_chunks should not be called during ingestion")
 
 
 def test_ingest_document_attaches_required_metadata_and_replaces_source(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-14 @ 03ec2cc
+> Reviewed: 2026-07-15 @ c69baf0
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -974,6 +974,18 @@ probe first.
   status reconciliation (confirmed/debunked/faded) at chronicle boundaries only — no
   spread simulation. Dedicated small rumor-model idea parked with a named trigger.
   [docs/27 §3.5](27_world_chronicle_design.md#35-living-world-layer-rumors-same-day-addendum-decisions-912).
+
+## Shipped 2026-07-15 — RAG observability
+
+- [x] **#85** *(feature, M — observability)* **RAG debug panel + vector map.** Live per-turn
+  debug panel on the Play page (retrieval candidates with score/boost breakdown from the SSE
+  final frame, lazy chunk-text drill-down, new-memory diff, Inspector deep link), a Vector Map
+  page (`/app/map`) plotting every vector-store point via deterministic server-side 2-D PCA
+  (ECharts scatter, filters, last-turn highlight, query-vector overlay), and the backing
+  read-only endpoints `POST /diagnostics/rag-map` + `POST /diagnostics/chunk-texts` with
+  server-enforced hidden-text redaction (`include_hidden` opt-in). New vector-store read paths
+  (`scroll_points`/`get_chunks`, InMemory↔Qdrant parity-tested); persisted diagnostics stay
+  metadata-only. [docs/28](28_rag_debug_and_vector_map.md).
 
 ## Not doing (personal-use scope)
 

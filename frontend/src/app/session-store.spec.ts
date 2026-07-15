@@ -178,6 +178,45 @@ describe('SessionStore turn flow', () => {
     expect(store.busy()).toBe(false);
   });
 
+  it('populates lastTurn with the full turn payload, including retrieval passthrough', async () => {
+    const { store, api } = setup();
+    const retrieval = {
+      query: 'what happened at dawn',
+      selected: [
+        {
+          selected_rank: 1,
+          source: 'scene:rose-gallery',
+          collection: 'scenes',
+          visibility: 'player',
+          original_score: 0.5,
+          adjusted_score: 0.6,
+          applied_boosts: { recency: 0.1 },
+        },
+      ],
+      rejected: [],
+    };
+    api.next = { ...completedTurn('an answer'), retrieval };
+
+    await store.sendMessage('a question');
+
+    expect(store.lastTurn()).toEqual(api.next);
+    expect(store.lastTurn()?.retrieval).toEqual(retrieval);
+  });
+
+  it('snapshots pre-turn memory ids into memoryIdsBeforeLastTurn before refreshMemories runs', async () => {
+    const { store, api } = setup();
+    store.memories.set([
+      { id: 'm1', scene_id: 'sc', actor_id: null, summary: 'kept', importance: 1, visibility: 'player', tags: [] },
+    ]);
+    // getSessionMemories resolves to an empty list by default, so if the snapshot were taken
+    // after refreshMemories (or not at all) this would observe the post-refresh (empty) state.
+    api.next = completedTurn('an answer');
+
+    await store.sendMessage('a question');
+
+    expect(store.memoryIdsBeforeLastTurn()).toEqual(new Set(['m1']));
+  });
+
   it('sendMessage sends only message and active_persona_id (no cloud flags)', async () => {
     const { store, api } = setup();
 

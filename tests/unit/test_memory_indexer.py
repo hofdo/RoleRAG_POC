@@ -9,7 +9,7 @@ from app.domain import MemoryCandidate, MemoryEpisode, RetrievedChunk, SessionSt
 from app.memory import MemoryEpisodeStore, MemoryIndexer
 from app.persistence import SQLiteMemoryRepository, SQLiteSessionRepository
 from app.persistence.sqlite import connect_sqlite, initialize_database
-from app.rag import InMemoryVectorStore, RagChunk, RagCollection, RetrievalFilter
+from app.rag import InMemoryVectorStore, RagChunk, RagCollection, RetrievalFilter, StoredPoint
 
 
 class FakeEmbeddingProvider:
@@ -73,6 +73,12 @@ class RecordingVectorStore:
         limit: int,
     ) -> list[RetrievedChunk]:
         raise AssertionError("search should not be used for memory indexing")
+
+    def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
+        raise AssertionError("scroll_points should not be used for memory indexing")
+
+    def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
+        raise AssertionError("get_chunks should not be used for memory indexing")
 
 
 def _episode() -> MemoryEpisode:

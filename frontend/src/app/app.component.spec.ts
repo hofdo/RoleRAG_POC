@@ -16,11 +16,11 @@ describe('AppComponent', () => {
     expect(fixture.componentInstance).toBeTruthy();
   });
 
-  it('should render the brand and four nav links', () => {
+  it('should render the brand and five nav links', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.shell__brand')?.textContent).toContain('RoleRAG');
-    expect(el.querySelectorAll('.shell__nav a').length).toBe(4);
+    expect(el.querySelectorAll('.shell__nav a').length).toBe(5);
   });
 });
