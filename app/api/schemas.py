@@ -14,9 +14,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain import TurnError, TurnRetrievalDiagnostics
+from app.rag.models import RagCollection
 
 ErrorLocation: TypeAlias = str | int
 
@@ -317,3 +318,79 @@ class EvalRunsResponse(BaseModel):
 class SessionTurnDetailsResponse(BaseModel):
     session_id: str
     turns: list[TurnDetailResponse] = Field(default_factory=list)
+
+
+# RAG debug/visualization surface (backlog #85, docs/28): text-bearing local-only
+# request/response models. See app.api.debug_routes for the redaction contract these
+# shapes support (text is null and text_redacted=True unless the caller opts into
+# include_hidden).
+class RagMapRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query_text: str | None = Field(default=None, max_length=8000)
+    include_hidden: bool = False
+
+
+class RagMapPointResponse(BaseModel):
+    id: str
+    collection: str
+    x: float
+    y: float
+    source: str
+    source_type: str
+    visibility: str
+    tags: list[str] = Field(default_factory=list)
+    world_id: str | None = None
+    scene_id: str | None = None
+    persona_id: str | None = None
+    session_id: str | None = None
+    actor_id: str | None = None
+    importance: int | None = None
+    created_at: datetime | None = None
+    text_preview: str | None = None
+    text_redacted: bool = False
+
+
+class RagMapResponse(BaseModel):
+    points: list[RagMapPointResponse] = Field(default_factory=list)
+    point_count: int
+    truncated: bool = False
+    explained_variance: list[float] = Field(default_factory=list)
+    query_point: list[float] | None = None
+    embedding_model: str
+
+
+class ChunkTextItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection: str
+    id: str
+
+    @field_validator("collection")
+    @classmethod
+    def _collection_must_be_known(cls, value: str) -> str:
+        try:
+            RagCollection(value)
+        except ValueError as exc:
+            raise ValueError(f"Unknown collection: {value!r}") from exc
+        return value
+
+
+class ChunkTextsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ChunkTextItemRequest] = Field(min_length=1, max_length=50)
+    include_hidden: bool = False
+
+
+class ChunkTextResponse(BaseModel):
+    id: str
+    collection: str
+    visibility: str | None = None
+    text: str | None = None
+    text_redacted: bool = False
+    found: bool
+
+
+class ChunkTextsResponse(BaseModel):
+    chunks: list[ChunkTextResponse] = Field(default_factory=list)
