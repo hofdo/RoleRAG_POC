@@ -944,6 +944,16 @@ world-chronicle section below (#81–#83).
   under MTP; blue-seal stays covered by Lane B. Hardening options recorded in
   [docs/22 § P2.2](22_rag_scaling_roadmap.md) (token-split tag matching / deterministic
   rule-declaration trigger) — owner decision, not built mid-validation.
+  **Finding 2026-07-15 (Phase E run 1, 94 turns):** FAILED at the turn-95 long-gap probe
+  with docs/25's own anticipated consolidation question, now measured: the preset's 3×15
+  consolidation batches folded the turn-17 bookend memory and the 15→1 roll-up summary
+  dropped the fact (`bookend`/`note`/`shelf` all absent) — real, audited information loss;
+  the probe asserts index retention for a fact the docs/26 §8 Q1 minimal contract classes
+  as best-effort. Everything else in the run passed: 94/94 success turns, 7/7 inspections
+  incl. blue-seal via Lane B live, Lane A cap saturation observed (8/890 at turn 56, one
+  visible eviction), 173 slice selections (score deciles recorded in docs/22), 0 retries.
+  Four resolution paths recorded in docs/22 § P2.2; owner decision pending — nothing
+  loosened.
 
 ## Planned 2026-07-14 — docs/27 world chronicle (Q6 design conversation)
 

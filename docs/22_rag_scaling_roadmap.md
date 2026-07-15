@@ -663,6 +663,40 @@ Effort S. — [x]
 > `{quest, rule}` ∩ family) or a deterministic-extractor trigger for rule-declaration
 > phrasings ("we will trust only …") emitting canonical tags at importance 4; either
 > widens what the flag-on guarantee pins and interacts with §3.3.1's supersession scope.
+>
+> **Phase E run 1 (2026-07-15, `26b-mtp`, full Stage 5 preset, inspection slice-parity fix
+> in) — FAILED at the turn-95 `hollow_bookend_note` inspection with the docs/25-anticipated
+> consolidation finding; 94/94 turns success and 7/7 prior inspections PASSED first.**
+> `CheckpointError: event hollow_bookend_note has extracted memories missing from Qdrant`
+> (artifact `/tmp/rolerag-live-E1`, preserved incl. run DB; two earlier aborts the same
+> evening were environment, not engine: an Ollama-pinned 9.8 GB model OOMing Metal at first
+> decode, then a battery-power idle sleep freezing turn 73's wall clock into a 504).
+> The failing probe is exactly docs/25 Phase D's named validation question — and the answer
+> is measured, not assumed: **the preset (`THRESHOLD=40 MAX_IMPORTANCE=2 MIN_AGE=10
+> BATCH_CAP=15`) does not preserve long-gap best-effort facts.** Consolidation fired 3×15
+> batches (45 of 109 memories folded); the turn-17 bookend memory (`178d4dc3`, importance 2,
+> tags `item/location/secret` — not durable-commitment family, so neither `_PRESERVE_TAGS`
+> nor Lane A protected it, correctly per the docs/26 §8 Q1 minimal contract) was folded, and
+> its batch's roll-up summary (`d4335302`, 15→1 compression) retains none of
+> `bookend`/`note`/`shelf` — the fact is gone from every prompt-reachable path (dense index,
+> Lane B pool, Lane A block), surviving only as the audited SQLite tombstone + `source_ids`
+> tag. Positive evidence from the same run: blue-seal passed its inspection through the Lane
+> B slice (the 2026-07-14 fidelity fix verified live), Lane A saturated the 8/900 cap at
+> turn 56 with one visible eviction (docs/26 §8 Q2's case, observed), 173 slice-guaranteed
+> selections with summed-IDF scores 0.69–19.08 (deciles 2.0/3.04/3.7/4.03/4.91/5.42/6.29/
+> 8.58/10.46 — run 1's half of the `min_slice_score` derivation data), zero definition
+> retries needed, zero fail-closed turns. **Open decision (owner):** the probe predates the
+> Q1 minimal contract and asserts hard index-retention for a fact the contract classes as
+> best-effort; no knob set both exercises consolidation inside 100 turns and preserves an
+> unprotected turn-17 fact to turn 95 (MIN_AGE>78 or MAX_IMPORTANCE=1 each starve the
+> threshold). Candidate paths: (a) make the probe's definition turn a durable declaration so
+> the fact enters the protected family (scenario change, assertions untouched); (b) refine
+> the assertion to contract-tier semantics (folded original whose roll-up carries the match
+> = pass, roll-up lost it = recorded loss, gating only for guarantee-tier facts — the same
+> correction the SQLite/Qdrant count parity check received 2026-07-11); (c) tame the preset
+> and give up in-run consolidation evidence; (d) decouple: validate Lanes A+B with
+> consolidation off, consolidation preset separately. Recorded here pending the owner call —
+> no assertion, threshold, or preset value was changed to route around the failure.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
