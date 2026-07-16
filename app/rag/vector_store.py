@@ -29,6 +29,22 @@ _FINGERPRINT_SENTINEL_ID = str(uuid5(NAMESPACE_URL, "rolerag:__embedding_model_f
 _SENTINEL_PAYLOAD_KEY = "__rolerag_sentinel__"
 _FINGERPRINT_PAYLOAD_KEY = "embedding_model"
 
+# Payload fields every search filters on (_build_qdrant_filter / _chunk_to_payload), indexed
+# for query speed at scale (P2.1, docs/22): a full collection scan per filtered search is fine
+# at POC scale but not at 10k-1M points. Keyword schema matches how each field is queried
+# (MatchValue/MatchAny equality, never a range).
+_PAYLOAD_INDEX_FIELDS: tuple[str, ...] = (
+    "visibility",
+    "world_id",
+    "session_id",
+    "persona_id",
+    "scene_id",
+    "tags",
+    # backlog #86/#87: delete-by-source (replace_source/delete_source_points) and the new
+    # list-by-source read (list_source_chunk_ids) both filter on this field.
+    "source",
+)
+
 
 @dataclass(frozen=True)
 class StoredPoint:
@@ -107,6 +123,15 @@ class VectorStore(Protocol):
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None: ...
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        """Delete every chunk whose ``source`` payload field equals ``source`` exactly.
+
+        Mirrors ``delete_session_points``, keyed on ``source`` instead of ``session_id``.
+        Used by ``ingest-scenario-lore --prune`` (backlog #87) to remove chunks whose source
+        document was removed or renamed out of a manifest.
+        """
+        ...
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None: ...
 
     def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
@@ -115,6 +140,17 @@ class VectorStore(Protocol):
 
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         """Fetch chunks by chunk id. Missing ids are silently absent from the result."""
+        ...
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        """Return the set of chunk ids currently stored for ``source`` in ``collection``.
+
+        Chunk ids are deterministic hashes of ``(source, index, text)`` (see
+        ``ingestion._chunk_id``), so an unchanged document always reproduces exactly the same
+        id set on re-ingest. ``ingest_document``'s content-fingerprint skip (backlog #86)
+        compares this set against the freshly chunked document to decide whether embedding +
+        ``replace_source`` are redundant work. Excludes the P1.4 fingerprint sentinel.
+        """
         ...
 
 
@@ -197,6 +233,13 @@ class InMemoryVectorStore:
             if chunk.session_id != session_id
         ]
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        self._entries[collection] = [
+            (chunk, vector)
+            for chunk, vector in self._entries[collection]
+            if chunk.source != source
+        ]
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
         drop = set(chunk_ids)
         if not drop:
@@ -256,11 +299,20 @@ class InMemoryVectorStore:
         by_id = {chunk.id: chunk for chunk, _ in self._entries[collection]}
         return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        return {
+            chunk.id for chunk, _ in self._entries[collection] if chunk.source == source
+        }
+
 
 class QdrantVectorStore:
-    def __init__(self, *, url: str) -> None:
+    def __init__(self, *, url: str, scalar_quantization: bool = False) -> None:
         self._url = url
         self._client: Any | None = None
+        # Opt-in INT8 scalar quantization (P2.1, docs/22), default off. Only affects the
+        # `create_collection` call below -- an already-existing collection keeps whatever
+        # quantization it was created with regardless of this flag's current value.
+        self._scalar_quantization = scalar_quantization
 
     @property
     def client(self) -> Any:
@@ -281,15 +333,48 @@ class QdrantVectorStore:
             if existing != vector_size:
                 raise VectorStoreDimensionMismatch(collection, existing, vector_size)
             self._check_or_adopt_fingerprint(collection, vector_size, model_key)
+            # P2.1: also run on the already-exists path so a pre-P2.1 collection (or one
+            # created before indexes existed) gets indexed on its next contact, not just
+            # brand-new collections.
+            self._ensure_payload_indexes(collection, models)
             return
-        self.client.create_collection(
-            collection_name=collection.value,
-            vectors_config=models.VectorParams(
+        create_kwargs: dict[str, Any] = {
+            "collection_name": collection.value,
+            "vectors_config": models.VectorParams(
                 size=vector_size,
                 distance=models.Distance.COSINE,
             ),
-        )
+        }
+        if self._scalar_quantization:
+            create_kwargs["quantization_config"] = models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(type=models.ScalarType.INT8)
+            )
+        self.client.create_collection(**create_kwargs)
         self._check_or_adopt_fingerprint(collection, vector_size, model_key)
+        self._ensure_payload_indexes(collection, models)
+
+    def _ensure_payload_indexes(self, collection: RagCollection, models: Any) -> None:
+        """Create keyword payload indexes for the fields every search filters on (P2.1).
+
+        Index creation is a query-speed optimization, not a correctness requirement --
+        filtering already works correctly without an index (Qdrant falls back to an
+        unindexed scan) -- so an unexpected failure here (e.g. a transient server error)
+        must never break collection creation/use; it's swallowed rather than propagated,
+        matching the repo's fail-open-for-optimizations stance. Idempotent: repeat calls
+        (every ensure_collection contact) re-request the same indexes, which Qdrant accepts
+        as a no-op. In qdrant-client's embedded local mode (``QdrantClient(":memory:")``,
+        used by the deterministic test suite) create_payload_index is itself already a
+        no-op, so this fallback is not exercised by those tests.
+        """
+        try:
+            for field_name in _PAYLOAD_INDEX_FIELDS:
+                self.client.create_payload_index(
+                    collection_name=collection.value,
+                    field_name=field_name,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
+        except Exception:  # optimization only -- never break collection creation/use
+            pass
 
     def drop_collection(self, collection: RagCollection) -> None:
         if self.client.collection_exists(collection_name=collection.value):
@@ -369,16 +454,7 @@ class QdrantVectorStore:
 
         self.client.delete(
             collection_name=collection.value,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="source",
-                            match=models.MatchValue(value=source),
-                        )
-                    ]
-                )
-            ),
+            points_selector=models.FilterSelector(filter=_source_filter(models, source)),
         )
 
         if not chunks:
@@ -431,6 +507,15 @@ class QdrantVectorStore:
                     ]
                 )
             ),
+        )
+
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return
+        models = _require_qdrant_models()
+        self.client.delete(
+            collection_name=collection.value,
+            points_selector=models.FilterSelector(filter=_source_filter(models, source)),
         )
 
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
@@ -529,6 +614,62 @@ class QdrantVectorStore:
             chunk = _payload_to_rag_chunk(payload)
             by_chunk_id[chunk.id] = chunk
         return [by_chunk_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_chunk_id]
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return set()
+        models = _require_qdrant_models()
+        scroll_filter = models.Filter(
+            must=[_source_condition(models, source)],
+            must_not=[
+                models.FieldCondition(
+                    key=_SENTINEL_PAYLOAD_KEY,
+                    match=models.MatchValue(value=True),
+                )
+            ],
+        )
+        chunk_ids: set[str] = set()
+        offset: Any = None
+        while True:
+            # Deliberate deviation from a literal with_payload=False: the app-level chunk id
+            # (what this method must return) lives only in the payload's "id" key -- Qdrant's
+            # own point id is a one-way uuid5 hash of it (_qdrant_point_id) and cannot be
+            # inverted. Projecting to just ["id"] keeps the read cheap (skips "text" and
+            # everything else) while still being correct.
+            records, next_offset = self.client.scroll(
+                collection_name=collection.value,
+                limit=256,
+                offset=offset,
+                with_payload=["id"],
+                with_vectors=False,
+                scroll_filter=scroll_filter,
+            )
+            for record in records:
+                payload = record.payload or {}
+                chunk_id = payload.get("id")
+                if chunk_id is not None:
+                    chunk_ids.add(str(chunk_id))
+            if next_offset is None:
+                break
+            offset = next_offset
+        return chunk_ids
+
+
+def _source_condition(models: Any, source: str) -> Any:
+    """``FieldCondition`` matching points whose ``source`` payload field equals ``source``."""
+    return models.FieldCondition(
+        key="source",
+        match=models.MatchValue(value=source),
+    )
+
+
+def _source_filter(models: Any, source: str) -> Any:
+    """Filter matching every point whose ``source`` payload field equals ``source`` exactly.
+
+    Shared by ``replace_source``'s delete-then-upsert and ``delete_source_points`` so the two
+    delete-by-source call sites can't drift.
+    """
+    return models.Filter(must=[_source_condition(models, source)])
 
 
 def _build_qdrant_filter(filters: RetrievalFilter) -> Any:

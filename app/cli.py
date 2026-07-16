@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -42,9 +43,11 @@ from app.content import (
 )
 from app.content.validator import ContentValidationStatus
 from app.diagnostics import (
+    SUPPORTED_TRANSCRIPT_FORMATS,
     RuntimeDiagnosticsReport,
     SmokeRunSummary,
     build_runtime_diagnostics,
+    render_transcript,
     run_smoke,
 )
 from app.domain import TurnInput, TurnResult, Visibility
@@ -64,8 +67,10 @@ from app.persistence import (
 from app.rag import (
     ChunkingConfig,
     IngestionRequest,
+    IngestionResult,
     RagCollection,
     RetrievalResult,
+    VectorStore,
     build_retrieval_query,
     ingest_document,
     ingest_lore_manifest,
@@ -110,9 +115,14 @@ def _auto_ingest_scenario_lore(settings: Settings, content_root: Path) -> None:
             err=True,
         )
         return
+    # Additive (backlog #86): byte-identical when nothing was skipped (the common first-ever
+    # ingest case); only appends a clause once a repeat contact actually skips something.
+    skipped_note = (
+        f", {outcome.skipped_count} unchanged (skipped)" if outcome.skipped_count else ""
+    )
     typer.secho(
         f"auto-ingested {outcome.chunk_count} lore chunk(s) from {outcome.document_count} "
-        "document(s)",
+        f"document(s){skipped_note}",
         fg=typer.colors.GREEN,
         err=True,
     )
@@ -385,6 +395,54 @@ def route(
     typer.echo(json.dumps(chosen_route.model_dump(), indent=2, sort_keys=True))
 
 
+def _echo_ingestion_status(result: IngestionResult) -> None:
+    """Colored, stderr-only per-document feedback (backlog #86); stdout stays machine-pure
+    JSON for both ``ingest`` and ``ingest-scenario-lore``."""
+    if result.skipped:
+        typer.secho(f"skipped (unchanged): {result.source}", fg=typer.colors.GREEN, err=True)
+    else:
+        typer.secho(
+            f"ingested: {result.source} ({result.chunk_count} chunk(s))",
+            fg=typer.colors.GREEN,
+            err=True,
+        )
+
+
+def _prune_orphaned_lore_sources(
+    *,
+    vector_store: VectorStore,
+    content_root: Path,
+    ingested_sources: set[str],
+) -> list[str]:
+    """Delete CANON_LORE chunks under ``content_root``'s documents/ dir that no longer belong
+    to any manifest entry (backlog #87) -- e.g. a lore file removed or renamed out of the
+    manifest since the last ingest.
+
+    The path-prefix scoping (``<content_root>/documents/`` incl. the trailing separator, so a
+    sibling directory that merely starts with the same characters, e.g. ``documents_old/``,
+    can never match) is the safety boundary: it guarantees other scenarios' lore (a different
+    content_root) and non-lore collections are untouchable, even though this reads/writes the
+    same shared CANON_LORE collection every scenario ingests into.
+    """
+    prefix = str(content_root / "documents") + os.sep
+    stored_sources = {
+        point.chunk.source for point in vector_store.scroll_points(RagCollection.CANON_LORE)
+    }
+    orphans = sorted(
+        source
+        for source in stored_sources
+        if source.startswith(prefix) and source not in ingested_sources
+    )
+    for source in orphans:
+        vector_store.delete_source_points(RagCollection.CANON_LORE, source)
+        typer.secho(f"pruned (orphaned): {source}", fg=typer.colors.YELLOW, err=True)
+    if orphans:
+        typer.secho(f"pruned {len(orphans)} orphaned source(s)", fg=typer.colors.YELLOW, err=True)
+    else:
+        typer.secho("prune: no orphaned sources found", fg=typer.colors.GREEN, err=True)
+    return orphans
+
+
 @app.command()
 def ingest(
     path: Annotated[Path, typer.Argument(help="Markdown or text document to ingest")],
@@ -399,6 +457,16 @@ def ingest(
     scene_id: Annotated[str | None, typer.Option(help="Optional scene scope")] = None,
     persona_id: Annotated[str | None, typer.Option(help="Optional persona scope")] = None,
     session_id: Annotated[str | None, typer.Option(help="Optional session scope")] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Bypass the unchanged-document skip and always re-embed, even if the store "
+                "already holds this exact content (backlog #86)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     settings = get_settings()
     try:
@@ -419,12 +487,15 @@ def ingest(
             chunking_config=ChunkingConfig(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+                structure_aware=settings.rag_structure_aware_chunking,
             ),
             model_key=settings.embedding_model,
+            force=force,
         )
     except (FileNotFoundError, ImportError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
+    _echo_ingestion_status(result)
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
@@ -434,22 +505,58 @@ def ingest_scenario_lore(
         Path,
         typer.Option(help="Scenario pack content root containing documents/manifest.json"),
     ],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help=(
+                "Bypass the unchanged-document skip and always re-embed every manifest "
+                "document, even ones the store already holds unchanged (backlog #86)."
+            ),
+        ),
+    ] = False,
+    prune: Annotated[
+        bool,
+        typer.Option(
+            "--prune",
+            help=(
+                "After ingesting the manifest, delete CANON_LORE chunks whose source path "
+                "starts with <content_root>/documents/ and is no longer referenced by the "
+                "manifest (e.g. a removed or renamed lore file). That path prefix is the "
+                "safety boundary: other scenarios' lore (a different content_root) and "
+                "non-lore collections are never touched. Opt-in and destructive -- default "
+                "off, and never run automatically on session start (backlog #87)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     settings = get_settings()
     try:
         validation_report = validate_content(content_root=content_root)
         if validation_report.status == ContentValidationStatus.FAIL:
             raise ValueError("content validation failed")
+        vector_store = _build_vector_store(settings)
         results = ingest_lore_manifest(
             content_root,
             embedding_provider=_build_embedding_provider(settings),
-            vector_store=_build_vector_store(settings),
+            vector_store=vector_store,
             chunking_config=ChunkingConfig(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+                structure_aware=settings.rag_structure_aware_chunking,
             ),
             model_key=settings.embedding_model,
+            force=force,
         )
+        for result in results:
+            _echo_ingestion_status(result)
+        pruned: list[str] = []
+        if prune:
+            pruned = _prune_orphaned_lore_sources(
+                vector_store=vector_store,
+                content_root=content_root,
+                ingested_sources={result.source for result in results},
+            )
     except (FileNotFoundError, ImportError, ValueError) as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
@@ -462,6 +569,7 @@ def ingest_scenario_lore(
                     for result in results
                 ],
                 "total_chunk_count": sum(result.chunk_count for result in results),
+                "pruned_sources": pruned,
             },
             indent=2,
             sort_keys=True,
@@ -954,6 +1062,51 @@ def export_session(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(envelope, indent=2, sort_keys=True), encoding="utf-8")
     typer.echo(json.dumps({"exported": session_id, "output": str(output)}))
+
+
+@app.command("export-transcript")
+def export_transcript(
+    session_id: Annotated[str, typer.Option(help="Session identifier to export")],
+    output: Annotated[Path, typer.Option(help="Output transcript file path")],
+    output_format: Annotated[
+        str,
+        typer.Option("--format", help="Transcript format: markdown or html"),
+    ] = "markdown",
+) -> None:
+    """Render a session's turns into a shareable markdown/HTML transcript.
+
+    Player-facing only (docs/SIDE_PROJECTS.md Transcript Exporter): player
+    messages, served replies, turn/persona attribution, and outcome markers.
+    Never reads turn diagnostics or authored hidden fields.
+    """
+    if output_format not in SUPPORTED_TRANSCRIPT_FORMATS:
+        typer.secho(
+            f"Unsupported format: {output_format!r} (choose from: "
+            f"{', '.join(SUPPORTED_TRANSCRIPT_FORMATS)})",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    connection, sessions, turns, _ = _open_repositories()
+    session = sessions.get_session(session_id)
+    if session is None:
+        connection.close()
+        typer.secho(f"Unknown session id: {session_id}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    stored_turns = turns.list_all_turns(session_id)
+    connection.close()
+    content = render_transcript(session, stored_turns, output_format)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(content, encoding="utf-8")
+    typer.echo(
+        json.dumps(
+            {
+                "exported": session_id,
+                "output": str(output),
+                "format": output_format,
+                "turns": len(stored_turns),
+            }
+        )
+    )
 
 
 @app.command("import-session")

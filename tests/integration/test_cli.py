@@ -17,6 +17,7 @@ from app.domain import (
     SceneState,
     SessionState,
     TurnDiagnostics,
+    TurnOutcome,
     TurnRetrievalDiagnostics,
     Visibility,
 )
@@ -91,10 +92,14 @@ class FakeLoader:
 class FakeEmbeddingProvider:
     dimension = 2
 
+    def __init__(self) -> None:
+        self.batches: list[list[str]] = []
+
     def embed_text(self, text: str) -> list[float]:
         return [1.0, float(len(text))]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.batches.append(list(texts))
         return [[1.0, float(len(text))] for text in texts]
 
 
@@ -105,6 +110,7 @@ class RecordingVectorStore:
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
         self.drop_calls: list[RagCollection] = []
         self.delete_session_calls: list[tuple[RagCollection, str]] = []
+        self.delete_source_calls: list[tuple[RagCollection, str]] = []
 
     def ensure_collection(
         self, collection: RagCollection, vector_size: int, model_key: str | None = None
@@ -116,6 +122,15 @@ class RecordingVectorStore:
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         self.delete_session_calls.append((collection, session_id))
+
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        self.delete_source_calls.append((collection, source))
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        # A pure recorder never has anything on file, so ingest_document always takes the
+        # full embed+replace path against this fake -- matching every pre-existing test's
+        # first-time-ingest assertions.
+        return set()
 
     def replace_source(
         self,
@@ -557,6 +572,52 @@ def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
     assert source.endswith("documents/lore.md")
 
 
+def test_cli_start_session_auto_ingest_honors_structure_aware_chunking_setting(
+    tmp_path: Path,
+) -> None:
+    # docs/22 P1.3. auto_ingest_scenario_lore (app/composition.py) is the composition root
+    # shared by the CLI's start-session and the API's POST /sessions -- proving the flag
+    # reaches ChunkingConfig here is proof for both surfaces, matching the #48/#67 drift
+    # concern this file's sibling tests guard against for orchestrator wiring.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.composition.build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "structure-aware-session",
+                "--content-root",
+                str(pack_root),
+                "--world-id",
+                "custom_world",
+                "--scene-id",
+                "custom-opening",
+                "--active-persona-id",
+                "custom-narrator",
+            ],
+            env={
+                "DATABASE_PATH": str(tmp_path / "sessions.db"),
+                "RAG_STRUCTURE_AWARE_CHUNKING": "true",
+            },
+        )
+
+    assert result.exit_code == 0
+    assert len(vector_store.replace_calls) == 1
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    # The pack's lore.md is "# Custom Lore\n\nA custom banner hangs in the hall." -- its own
+    # H1 is both the derived doc_title and the only heading's section path, so
+    # _section_header deduplicates the shared root segment: "Custom Lore", never
+    # "Custom Lore › Custom Lore".
+    assert chunks[0].text == "Custom Lore\n\nA custom banner hangs in the hall."
+
+
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
     with (
         patch("app.composition.build_local_provider", return_value=FakeProvider()),
@@ -701,6 +762,42 @@ def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path
     assert chunks[0].world_id == "demo_world"
 
 
+def test_cli_ingest_honors_structure_aware_chunking_setting(tmp_path: Path) -> None:
+    # docs/22 P1.3: RAG_STRUCTURE_AWARE_CHUNKING must reach the ChunkingConfig built
+    # inline in app.cli's own `ingest` command -- a separate construction site from
+    # app.composition.auto_ingest_scenario_lore (see the start-session sibling test).
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers drift between mirrors and roses.",
+        encoding="utf-8",
+    )
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "ingest",
+                str(document),
+                "--visibility",
+                Visibility.PLAYER.value,
+                "--source-type",
+                "lore",
+                "--world-id",
+                "demo_world",
+            ],
+            env={"RAG_STRUCTURE_AWARE_CHUNKING": "true"},
+        )
+
+    assert result.exit_code == 0
+    assert len(vector_store.replace_calls) == 1
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert chunks[0].text == "Rose Gallery\n\nCourtiers drift between mirrors and roses."
+
+
 def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None:
     pack_root = tmp_path / "pack"
     _write_scenario_pack(pack_root)
@@ -726,6 +823,212 @@ def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None
     assert chunks[0].world_id == "custom_world"
     assert chunks[0].scene_id == "custom-opening"
     assert chunks[0].persona_id == "custom-narrator"
+
+
+# ---------------------------------------------------------------------------
+# backlog #86 (content-fingerprint skip) / #87 (--prune) -- real InMemoryVectorStore is used
+# here instead of RecordingVectorStore, since these scenarios need genuine store semantics
+# (persisted chunk ids across repeated ingests, real deletion) that a hand-rolled recorder
+# can't fake without reimplementing the feature under test.
+# ---------------------------------------------------------------------------
+
+
+def test_cli_ingest_skips_reembedding_unchanged_document(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers drift between mirrors and roses.",
+        encoding="utf-8",
+    )
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+    ingest_args = [
+        "ingest",
+        str(document),
+        "--visibility",
+        Visibility.PLAYER.value,
+        "--source-type",
+        "lore",
+    ]
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        first = runner.invoke(app, ingest_args)
+        second = runner.invoke(app, ingest_args)
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert '"skipped": false' in first.stdout
+    assert '"skipped": true' in second.stdout
+    assert "skipped (unchanged)" in second.output
+    # The second, unchanged-content call never re-embedded.
+    assert len(embedding_provider.batches) == 1
+
+
+def test_cli_ingest_force_reembeds_unchanged_document(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers drift.", encoding="utf-8")
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+    base_args = [
+        "ingest",
+        str(document),
+        "--visibility",
+        Visibility.PLAYER.value,
+        "--source-type",
+        "lore",
+    ]
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, base_args)
+        forced = runner.invoke(app, [*base_args, "--force"])
+
+    assert forced.exit_code == 0
+    assert '"skipped": false' in forced.stdout
+    assert len(embedding_provider.batches) == 2
+
+
+def test_cli_ingest_scenario_lore_reports_skipped_documents_on_second_run(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+        second = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root)]
+        )
+
+    assert second.exit_code == 0
+    assert "skipped (unchanged)" in second.output
+    payload = json.loads(second.stdout)
+    assert payload["documents"][0]["skipped"] is True
+    # Only the first run embedded; the second was a full skip.
+    assert len(embedding_provider.batches) == 1
+
+
+def test_cli_ingest_scenario_lore_force_reingests_unchanged_documents(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+        forced = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root), "--force"]
+        )
+
+    assert forced.exit_code == 0
+    payload = json.loads(forced.stdout)
+    assert payload["documents"][0]["skipped"] is False
+    assert len(embedding_provider.batches) == 2
+
+
+def test_cli_ingest_scenario_lore_prune_deletes_only_orphaned_sources(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    (pack_root / "documents" / "old_lore.md").write_text(
+        "# Old Lore\n\nA forgotten passage once led to the cellar.", encoding="utf-8"
+    )
+    manifest_path = pack_root / "documents" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["documents"].append(
+        {
+            "path": "old_lore.md",
+            "visibility": Visibility.PLAYER.value,
+            "source_type": "lore",
+            "tags": [],
+            "world_id": "custom_world",
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    # Seed a chunk from a totally different scenario pack in the same shared CANON_LORE
+    # collection, to prove prune never touches lore outside this content_root's prefix.
+    vector_store.ensure_collection(RagCollection.CANON_LORE, embedding_provider.dimension)
+    other_pack_source = str(tmp_path / "other-pack" / "documents" / "unrelated.md")
+    vector_store.upsert_chunks(
+        RagCollection.CANON_LORE,
+        [
+            RagChunk(
+                id="other-scenario-chunk",
+                source=other_pack_source,
+                source_type="lore",
+                text="Unrelated scenario lore that must survive pruning.",
+                visibility=Visibility.PLAYER,
+            )
+        ],
+        [[1.0, 1.0]],
+    )
+
+    old_lore_source = str(pack_root / "documents" / "old_lore.md")
+    lore_source = str(pack_root / "documents" / "lore.md")
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        # First run: both lore.md and old_lore.md land in the store.
+        first = runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+
+        # Remove old_lore.md from the manifest (simulating a renamed/removed doc) and re-run
+        # WITHOUT --prune -- the orphan must survive untouched.
+        manifest["documents"].pop()
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        no_prune_result = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root)]
+        )
+        stored_after_no_prune = {
+            point.chunk.source for point in vector_store.scroll_points(RagCollection.CANON_LORE)
+        }
+
+        # Re-run WITH --prune -- only the orphan is removed.
+        prune_result = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root), "--prune"]
+        )
+
+    assert first.exit_code == 0
+    assert no_prune_result.exit_code == 0
+    assert prune_result.exit_code == 0
+    assert old_lore_source in stored_after_no_prune  # no --prune => no deletion
+
+    assert "pruned" in prune_result.output
+    assert old_lore_source in prune_result.output
+    prune_payload = json.loads(prune_result.stdout)
+    assert prune_payload["pruned_sources"] == [old_lore_source]
+
+    stored_after_prune = {
+        point.chunk.source for point in vector_store.scroll_points(RagCollection.CANON_LORE)
+    }
+    assert old_lore_source not in stored_after_prune
+    assert lore_source in stored_after_prune  # still-manifest source untouched
+    assert other_pack_source in stored_after_prune  # out-of-prefix source untouched
+
+
+def test_cli_ingest_scenario_lore_help_documents_prune_safety_scope() -> None:
+    result = runner.invoke(app, ["ingest-scenario-lore", "--help"])
+
+    assert result.exit_code == 0
+    assert "--prune" in result.output
+    assert "--force" in result.output
+    assert "content_root" in result.output
 
 
 def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunks(
@@ -1321,3 +1624,207 @@ def test_cli_reset_db_purges_persona_memory_vectors_for_every_session(
         calls_by_collection.setdefault(collection, set()).add(session_id)
     assert calls_by_collection[RagCollection.SESSION_MEMORY] == {"session-a", "session-b"}
     assert calls_by_collection[RagCollection.PERSONA_MEMORY] == {"session-a", "session-b"}
+
+
+def _seed_session_with_special_characters_and_failure_turn(
+    database_path: Path, *, session_id: str
+) -> None:
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    SQLiteSessionRepository(connection).create_session(
+        SessionState(
+            id=session_id,
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turns = SQLiteTurnRepository(connection)
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=256,
+        temperature=0.7,
+        reason="default local route",
+    )
+    turns.append_turn(
+        session_id=session_id,
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message='<b>Hello</b> & "friend"',
+        assistant_message="Welcome, traveler.",
+        route=route,
+    )
+    turns.append_turn(
+        session_id=session_id,
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="What happened?",
+        assistant_message=(
+            "The system could not produce a response that passed validation. "
+            "No memory or world state was changed."
+        ),
+        route=route,
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+    connection.close()
+
+
+def test_cli_export_transcript_writes_markdown_with_status_json(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=2)
+    output_path = tmp_path / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "exported": "demo-session",
+        "output": str(output_path),
+        "format": "markdown",
+        "turns": 2,
+    }
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("# Transcript: demo-session")
+    assert "- **World:** demo_world" in content
+    assert "## Turn 1" in content
+    assert "**Player:** Question 0" in content
+    assert "**archivist:** Answer 0" in content
+    assert "## Turn 2" in content
+
+
+def test_cli_export_transcript_html_format_escapes_content_and_marks_controlled_failure(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_special_characters_and_failure_turn(database_path, session_id="demo-session")
+    output_path = tmp_path / "transcript.html"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+            "--format",
+            "html",
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["format"] == "html"
+    assert payload["turns"] == 2
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("<!doctype html>")
+    assert "<style>" in content
+    # Raw HTML from the player message must never appear unescaped.
+    assert "<b>Hello</b>" not in content
+    assert "&lt;b&gt;Hello&lt;/b&gt; &amp; &quot;friend&quot;" in content
+    # A controlled-failure turn renders a distinct marker, never the canned
+    # system string attributed to the persona as dialogue.
+    assert "turn ended in controlled failure" in content
+    assert "could not produce a response" not in content
+
+
+def test_cli_export_transcript_unknown_session_id_fails(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "missing-session",
+            "--output",
+            str(tmp_path / "transcript.md"),
+        ],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+
+    assert result.exit_code == 1
+    assert "Unknown session id: missing-session" in result.stdout
+    assert not (tmp_path / "transcript.md").exists()
+
+
+def test_cli_export_transcript_rejects_unsupported_format(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=1)
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(tmp_path / "transcript.pdf"),
+            "--format",
+            "pdf",
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 1
+    assert "pdf" in result.stdout
+    assert not (tmp_path / "transcript.pdf").exists()
+
+
+def test_cli_export_transcript_creates_output_parent_directories(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=1)
+    output_path = tmp_path / "nested" / "dirs" / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+
+
+def test_cli_export_transcript_empty_session_renders_header_only(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=0)
+    output_path = tmp_path / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["turns"] == 0
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("# Transcript: demo-session")
+    assert "_No turns recorded yet._" in content
+    assert "## Turn" not in content

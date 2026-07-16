@@ -7,6 +7,49 @@ records; this file is the quick delta between versions.
 
 ### Added
 
+- **Transcript Exporter** (docs/SIDE_PROJECTS.md Tier A, zero new backend, zero schema change):
+  new `export-transcript` CLI command renders a session's turns into a shareable markdown or
+  HTML transcript -- player messages, served replies, turn/persona attribution, and
+  controlled-failure turns marked distinctly (never the canned system string attributed to the
+  persona as dialogue). Pure read of SQLite via the existing repositories; rendering lives in
+  `app/diagnostics/transcript_export.py` (pure functions, no CLI coupling). HTML output is a
+  single self-contained file (inline CSS, `html.escape` on every session/turn-originated field);
+  no new dependency.
+- **Structure-aware chunking + contextual chunk headers** (docs/22 P1.3, opt-in, default
+  off, byte-identical when off): new `RAG_STRUCTURE_AWARE_CHUNKING` / `ChunkingConfig.
+  structure_aware` flag. When on, `chunk_text` splits documents on markdown ATX headings
+  into a hierarchy-aware section path (`A › B › C`, never straddling a section boundary),
+  packs oversized blocks at sentence- then word-boundaries before falling back to the
+  original fixed-window hard split, and prepends a `<doc title> › <section path>` header
+  to every chunk's embedded text (`ingest_document` derives `doc_title` from the
+  document's first `# ` line, else the filename stem). Flipping the flag changes chunk
+  text and therefore chunk ids, so the #86 content-fingerprint skip correctly re-ingests
+  on the next contact per source. Deliberately does NOT add a `section:<path>` chunk tag
+  as originally proposed: `app/rag/ranking.py`'s lexical rerank boost reads `chunk.tags`
+  for every chunk unconditionally, so a section-path tag would silently perturb rerank
+  scores rather than stay inert diagnostics metadata. Semantic-quality validation
+  (recall/nDCG with the flag on vs off) is pending an owner-side `rolerag
+  semantic-benchmark` run before any default flip -- see docs/22 P1.3.
+- **Ingest content-fingerprint skip** (#86, default on, byte-identical end state):
+  `ingest_document`/`ingest_lore_manifest` now skip re-embedding a document whose content is
+  unchanged since its last ingest. Chunk ids are deterministic hashes of `(source, index,
+  text)`, so comparing the freshly chunked document's id set against a new
+  `VectorStore.list_source_chunk_ids` read (InMemory↔Qdrant parity-tested) is enough to prove
+  nothing changed, skipping both `embed_batch` and `replace_source`. `ensure_collection`'s
+  dimension/model-fingerprint guards still run before the skip decision, so a mismatched
+  embedding model still fails loud. New `force: bool = False` parameter (CLI
+  `ingest`/`ingest-scenario-lore --force`) bypasses the skip; a store-read failure fails open
+  to a full re-ingest rather than breaking. Every `start-session`/`POST /sessions` auto-ingest
+  gets this for free, since the whole manifest corpus was previously re-embedded on every
+  session start regardless of whether anything changed.
+- **`ingest-scenario-lore --prune`** (#87, opt-in, default off): deletes CANON_LORE chunks
+  whose source path is under `<content_root>/documents/` but no longer referenced by the
+  manifest (e.g. a removed or renamed lore file), via a new
+  `VectorStore.delete_source_points`. The path-prefix scoping is the safety boundary -- other
+  scenarios' lore (a different content_root) and non-lore collections are never touched.
+  Never wired into `auto_ingest_scenario_lore` -- silent deletion on session start stays out
+  of scope.
+
 - **RAG debug panel + vector map** (#85): live per-turn debug panel on the Play page
   (retrieval candidates with `original → adjusted` score and per-boost breakdown, lexical-slice
   labels, lazy chunk-text drill-down, new-memory diff, Inspector deep link — fed by the SSE
@@ -131,6 +174,21 @@ records; this file is the quick delta between versions.
   `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. New docs/25 Phase E runbook section. +10 unit tests
   pinning the offset/retry mechanics. The live 100-turn validation runs and any resulting
   default flip remain on the owner's machine (#80 stays open in docs/BACKLOG.md).
+- **Qdrant payload indexes + opt-in scalar quantization** (docs/22 P2.1): `ensure_collection`
+  now creates keyword payload indexes for the six fields every search filters on
+  (`visibility`, `world_id`, `session_id`, `persona_id`, `scene_id`, `tags`) on both the
+  freshly-created-collection path and the already-exists early-return path, so pre-P2.1
+  collections get indexed too, not just new ones; idempotent, and an unexpected
+  `create_payload_index` failure is caught around the index loop so it can never break
+  collection creation/use. New opt-in `QDRANT_SCALAR_QUANTIZATION` Settings field
+  (`qdrant_scalar_quantization`, default `false`) threads through `build_vector_store`
+  (`app.cli._build_vector_store` is a plain alias, pinned by a new identity test against the
+  #48/#67 drift class); when enabled, new collections are created with INT8
+  `ScalarQuantization`, otherwise the `create_collection` call is byte-identical to before.
+  Applies only at first collection creation (`rolerag reset-index` + re-ingest to apply to an
+  existing collection). `InMemoryVectorStore` unchanged (parity holds -- indexes/quantization
+  are pure Qdrant-side storage details). Live latency numbers on a real Qdrant server at scale
+  remain owner-side.
 
 ## 1.3.0 — 2026-07-12
 

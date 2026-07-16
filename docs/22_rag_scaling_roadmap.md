@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-14 @ 747bbd2
+> Reviewed: 2026-07-16 @ a82f711
 >
 > **Update 2026-07-14 (docs/26 synthesis).** The four Phase D live failures recorded under
 > [§ P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence) were
@@ -394,6 +394,70 @@ the runbook bricks on a stale one. Effort S–M. — [x]
 
 ### P1.3 Structure-aware chunking + contextual chunk headers
 
+> **Shipped 2026-07-16 — offline half (opt-in, default off).** `ChunkingConfig` gained
+> `structure_aware: bool = False` (`app/rag/chunking.py`), paired with
+> `Settings.rag_structure_aware_chunking` / `RAG_STRUCTURE_AWARE_CHUNKING=false`
+> (`app/config.py`, `.env.example`) and threaded into every Settings-driven
+> `ChunkingConfig(...)` construction site (`app/composition.py`'s
+> `auto_ingest_scenario_lore` -- the composition root shared by the CLI's `start-session`
+> and the API's `POST /sessions` -- both CLI `ingest`/`ingest-scenario-lore` commands, and
+> the deterministic smoke runner). `chunk_text` gained a keyword-only
+> `doc_title: str | None = None`, ignored entirely on the legacy path -- proven by a
+> golden-baseline test that hardcodes the exact output of the PRE-P1.3 chunker on three
+> fixtures (nested headings, an oversized paragraph, plain multi-paragraph), captured
+> before `chunking.py` was touched, including regardless-of-doc_title byte-identity.
+> Flag on: the document splits on markdown ATX headings (levels 1-6) into sections with a
+> hierarchy-aware path (`A › B › C`; a new heading pops every stack entry at its level or
+> deeper first); paragraphs accumulate within a section only -- chunks never straddle a
+> heading boundary, and overlap seeding resets per section. An oversized block now
+> cascades sentence-boundary packing -> word-boundary packing -> the original fixed-window
+> hard split (last resort only, e.g. a single unbroken token) -- never a mid-word cut while
+> any boundary exists at some tier. Every emitted chunk gets a first line
+> `<doc title> › <section path>` plus a blank line, skipping whichever part is absent (no
+> header line at all if both are absent), and deduplicating the common lore shape whose
+> only H1 is the document's own title -- when the section path's root segment already IS
+> the doc title, the title is not repeated (`Title › Sub`, never `Title › Title › Sub`);
+> the header is free budget-wise (a chunk may
+> exceed `chunk_size_chars` by the header's length -- documented on `chunk_text`, simpler
+> and more predictable than shrinking the body budget). `ingest_document` derives
+> `doc_title` from the document's first `# ` (H1) line, else the filename stem, and passes
+> it unconditionally (harmless on the legacy path).
+>
+> **Tag decision -- deviation from this section's original "store section path in chunk
+> metadata/tags" text, with evidence.** Did NOT add a `section:<path>` chunk tag. Before
+> adding it, checked every reader of `chunk.tags` at retrieval/ranking time as this item's
+> own validate step implies: `app/rag/ranking.py`'s `_lexical_overlap_boost` folds
+> `content_terms(" ".join(chunk.tags))` into the lexical rerank score of **every** chunk
+> with no filter gate (`ranking.py:294`) -- so a section-path tag is not inert metadata, it
+> would silently perturb rerank scores for any structure-aware-ingested lore chunk whose
+> section title happens to share vocabulary with a query. That is exactly the kind of
+> semantic-quality effect this whole feature is gated on measuring before shipping, not
+> something to introduce as an unmeasured side effect of a "diagnostics-only" tag. (Tag
+> *filtering* is separately confirmed inert on this path -- actor retrieval never sets
+> `RetrievalFilter.tags`, and `app/rag/lexical.py`'s Lane B scores `MemoryEpisode.tags` for
+> session-memory lexical slicing, never lore `RagChunk.tags` -- but ranking's unconditional
+> read is the one that actually matters here.) Section identity still reaches the embedded
+> text via the contextual header itself, which is this item's core ask regardless of the
+> tag question. Pinned by
+> `test_ingest_document_structure_aware_does_not_add_section_tags`.
+>
+> **#86 interplay.** Flipping the flag changes chunk text -> chunk ids
+> (`sha256(source:index:text)`), so the content-fingerprint skip (backlog #86) sees a
+> different id set on the next ingest per source and correctly falls through to a full
+> re-ingest rather than skipping -- pinned by
+> `test_ingest_document_structure_aware_flag_flip_changes_chunk_ids_and_reingests`.
+>
+> **Validation status (mirrors § P0.4's own honesty pattern).** Offline half only.
+> Deterministic chunking/ingestion/config/wiring tests are green
+> (`tests/unit/test_chunking.py`, `test_ingestion.py`, `test_config.py`,
+> `tests/integration/test_cli.py`) -- but per this doc's own measure-first workflow, a
+> keyword-embedding suite cannot show whether the contextual header actually helps
+> recall/nDCG; it only proves the mechanism is wired and byte-identical when off. Semantic
+> validation is pending owner-side: `rolerag semantic-benchmark --model
+> sentence-transformers/all-MiniLM-L6-v2` with the flag on vs off against the docs/24
+> calibrated floors (recall@10 >= 0.75, nDCG@10 >= 0.70, German recall@10 >= 0.55), then
+> live-smoke, before any default flip.
+
 **Problem.** Chunking is blind paragraph accumulation
 ([app/rag/chunking.py](../app/rag/chunking.py)): chunks straddle markdown section
 boundaries; oversized blocks split at fixed character offsets (mid-word,
@@ -408,13 +472,50 @@ it aids the model too); store section path in chunk metadata/tags for diagnostic
 Chunk ids already hash `source:index:text`, so re-ingest replaces cleanly.
 
 **Validate.** Chunking unit tests; P0.4 recall (headers typically help both legs of P1.1).
-Effort M. — [ ]
+Effort M. — [~]
 
 ---
 
 ## P2 — scale, latency, and long campaigns
 
 ### P2.1 Qdrant payload indexes (and optional quantization)
+
+> **Shipped 2026-07-16.** `QdrantVectorStore.ensure_collection` now creates keyword payload
+> indexes for all six fields every search filters on (`visibility`, `world_id`, `session_id`,
+> `persona_id`, `scene_id`, `tags`) via the existing `_require_qdrant_models()` lazy-import
+> pattern -- on **both** the freshly-created-collection path and the already-exists
+> early-return path, so a pre-P2.1 collection gets indexed on its next `ensure_collection`
+> contact, not just brand-new ones (the roadmap's own callout). Idempotent -- repeat contact
+> re-requests the same six indexes, which Qdrant accepts as a no-op -- and fail-open for the
+> index step specifically: an unexpected `create_payload_index` error is caught around the
+> whole per-collection loop (index creation is a query-speed optimization, not a correctness
+> requirement -- filtering still works without an index -- so it can never break collection
+> creation/use). Opt-in INT8 scalar quantization shipped alongside: new Settings field
+> `qdrant_scalar_quantization` (`QDRANT_SCALAR_QUANTIZATION`, default `false`) threads
+> through `app.composition.build_vector_store`, the single function that actually
+> constructs `QdrantVectorStore` -- `app.cli._build_vector_store` is a plain alias of that
+> same function, not an independent construction path, now pinned by an identity test in
+> `tests/unit/test_composition_config_parity.py` against the #48/#67 drift class. When
+> enabled, `create_collection` receives `quantization_config=ScalarQuantization(scalar=
+> ScalarQuantizationConfig(type=ScalarType.INT8))`; when off (default) the call is
+> byte-identical to pre-P2.1 -- no `quantization_config` key at all, not even `None`. Applies
+> only at first collection creation, as documented on the setting (`rolerag reset-index` +
+> re-ingest to apply it to an existing collection). `InMemoryVectorStore` unchanged, as
+> anticipated -- indexes/quantization are pure Qdrant-side filtering/storage details, so
+> search semantics and the existing parity tests are unaffected. Unit-tested: both
+> `ensure_collection` paths call `create_payload_index` for all six fields (incl. idempotent
+> repeat contact on the already-exists path); the quantization kwarg is present with INT8
+> when enabled and entirely absent when off; a monkeypatched `create_payload_index` failure
+> leaves `ensure_collection` succeeding and the store usable (upsert + search still work
+> afterward). Validated: full deterministic gate (`ruff`, `mypy --strict`, pytest, regression
+> runner) green. Caveat: qdrant-client's embedded local mode (`QdrantClient(":memory:")`,
+> used by every test here, including the filter-parity suites) accepts `create_payload_index`
+> as a no-op with a `UserWarning`, so the fail-open fallback is exercised only by the
+> dedicated monkeypatched-failure test, not incidentally by the others. **Still open
+> (owner-side):** live latency numbers on a real Qdrant server at the P0.4 corpus scale --
+> this doc's own validation ask -- since payload indexes only pay off against a real
+> server's query planner, not the embedded local-mode client the deterministic suite runs
+> against.
 
 **Problem.** Collections are created with vectors only
 ([vector_store.py `ensure_collection`](../app/rag/vector_store.py)); every search filters
@@ -429,7 +530,7 @@ config, default off. `InMemoryVectorStore` needs no change (indexes are an imple
 detail of filtering, semantics identical — parity holds).
 
 **Validate.** Existing tests (semantics unchanged); latency numbers on the P0.4 corpus.
-Effort S. — [ ]
+Effort S. — [x]
 
 ### P2.2 Long-campaign preset (enable the shipped-but-off machinery, with evidence)
 
@@ -618,8 +719,13 @@ it with a note.
 
 - *Chunking/ingestion:* stale-chunk orphans — source identity is the raw path string;
   nothing sweeps chunks of removed/renamed manifest documents (re-ingest only replaces
-  matching paths). / CLI `start-session` re-embeds the whole manifest corpus every start
-  (no content fingerprint to skip unchanged docs) — cost grows linearly with corpus size.
+  matching paths) — **confirmed 2026-07-16 and shipped as BACKLOG #87** (`ingest-scenario-lore
+  --prune`, opt-in/default-off, path-prefix scoped so other scenarios' lore and non-lore
+  collections stay untouchable). / CLI `start-session` re-embeds the whole manifest corpus
+  every start (no content fingerprint to skip unchanged docs) — cost grows linearly with
+  corpus size — **confirmed 2026-07-16 and shipped as BACKLOG #86** (content-fingerprint skip
+  via chunk-id set equality, default on, byte-identical end state, `--force` escape hatch,
+  fail-open on a store-read failure).
 - *Context budget:* the recent-dialogue window is the largest prompt consumer (~up to 3.6K
   tokens) with uniform 900-char clipping — importance-uneven turns get equal budget.
 - *Memory lifecycle:* consolidation summaries may leak into durable cross-session

@@ -197,6 +197,7 @@ def run_smoke(*, settings: Settings | None = None, real_runtime: bool = False) -
             chunking_config=ChunkingConfig(
                 chunk_size_chars=resolved_settings.rag_chunk_size_chars,
                 chunk_overlap_chars=resolved_settings.rag_chunk_overlap_chars,
+                structure_aware=resolved_settings.rag_structure_aware_chunking,
             ),
         )
         ingested_chunk_count = ingestion_result.chunk_count
