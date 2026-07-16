@@ -7,6 +7,14 @@ records; this file is the quick delta between versions.
 
 ### Added
 
+- **Transcript Exporter** (docs/SIDE_PROJECTS.md Tier A, zero new backend, zero schema change):
+  new `export-transcript` CLI command renders a session's turns into a shareable markdown or
+  HTML transcript -- player messages, served replies, turn/persona attribution, and
+  controlled-failure turns marked distinctly (never the canned system string attributed to the
+  persona as dialogue). Pure read of SQLite via the existing repositories; rendering lives in
+  `app/diagnostics/transcript_export.py` (pure functions, no CLI coupling). HTML output is a
+  single self-contained file (inline CSS, `html.escape` on every session/turn-originated field);
+  no new dependency.
 - **Structure-aware chunking + contextual chunk headers** (docs/22 P1.3, opt-in, default
   off, byte-identical when off): new `RAG_STRUCTURE_AWARE_CHUNKING` / `ChunkingConfig.
   structure_aware` flag. When on, `chunk_text` splits documents on markdown ATX headings

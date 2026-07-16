@@ -1,6 +1,6 @@
 # RoleRAG_POC
 
-> Reviewed: 2026-07-12 @ b854814
+> Reviewed: 2026-07-16 @ 7f112ba
 
 Personal-use RoleRAG engine built around a CLI-first roleplay loop, an Angular SPA
 (play, RAG inspector, analytics, eval dashboards), a small FastAPI API, SQLite persistence,
@@ -280,7 +280,7 @@ provider — they carry only ids, titles, names, and the completed turn's dialog
 
 ## Runtime Components
 
-- `CLI`: [app/cli.py](app/cli.py) exposes 24 commands — `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`, `embedding-ab`, `turn`, `turn-history`, `list-sessions`, `backup`, `delete-session`, `export-session`, `import-session`, `inspect-memories`, `reset-db`, and `reset-index`. Run `rolerag --help` for the authoritative list with descriptions.
+- `CLI`: [app/cli.py](app/cli.py) exposes 25 commands — `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `create-scenario-template`, `start-session`, `resume`, `route`, `ingest`, `ingest-scenario-lore`, `reindex-memories`, `retrieve-debug`, `embedding-ab`, `turn`, `turn-history`, `list-sessions`, `backup`, `delete-session`, `export-session`, `import-session`, `export-transcript`, `inspect-memories`, `reset-db`, and `reset-index`. Run `rolerag --help` for the authoritative list with descriptions.
 - `FastAPI API`: [app/main.py](app/main.py) and [app/api/routes.py](app/api/routes.py) expose the same orchestrator through HTTP.
 - `TurnOrchestrator`: [app/orchestration/turn_orchestrator.py](app/orchestration/turn_orchestrator.py) owns the bounded turn pipeline.
 - `ActorAgent`: [app/agents/actor_agent.py](app/agents/actor_agent.py) performs text generation only.

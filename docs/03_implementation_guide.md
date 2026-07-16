@@ -1,6 +1,6 @@
 # 03 — MVP Implementation and Operation Guide
 
-> Reviewed: 2026-07-04 @ 571acc8
+> Reviewed: 2026-07-16 @ 7f112ba
 
 ## Purpose
 
@@ -61,7 +61,8 @@ authoritative list. Grouped:
 
 - diagnostics: `config`, `health`, `doctor`, `smoke-run`, `validate-content`, `embedding-ab`
 - sessions / maintenance: `start-session`, `resume`, `turn`, `list-sessions`, `inspect-memories`,
-  `turn-history`, `export-session`, `import-session`, `delete-session`, `backup`, `reset-db`
+  `turn-history`, `export-session`, `import-session`, `export-transcript`, `delete-session`,
+  `backup`, `reset-db`
 - retrieval / content: `ingest`, `ingest-scenario-lore`, `reindex-memories`, `reset-index`,
   `retrieve-debug`, `create-scenario-template`, `route`
 

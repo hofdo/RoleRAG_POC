@@ -17,6 +17,7 @@ from app.domain import (
     SceneState,
     SessionState,
     TurnDiagnostics,
+    TurnOutcome,
     TurnRetrievalDiagnostics,
     Visibility,
 )
@@ -1623,3 +1624,207 @@ def test_cli_reset_db_purges_persona_memory_vectors_for_every_session(
         calls_by_collection.setdefault(collection, set()).add(session_id)
     assert calls_by_collection[RagCollection.SESSION_MEMORY] == {"session-a", "session-b"}
     assert calls_by_collection[RagCollection.PERSONA_MEMORY] == {"session-a", "session-b"}
+
+
+def _seed_session_with_special_characters_and_failure_turn(
+    database_path: Path, *, session_id: str
+) -> None:
+    connection = connect_sqlite(database_path)
+    initialize_database(connection)
+    SQLiteSessionRepository(connection).create_session(
+        SessionState(
+            id=session_id,
+            world_id="demo_world",
+            active_scene_id="rose-gallery",
+            active_persona_id="archivist",
+            player_name="Avery",
+        )
+    )
+    turns = SQLiteTurnRepository(connection)
+    route = ModelRoute(
+        provider=ModelProviderName.LOCAL,
+        model="local-model",
+        max_tokens=256,
+        temperature=0.7,
+        reason="default local route",
+    )
+    turns.append_turn(
+        session_id=session_id,
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message='<b>Hello</b> & "friend"',
+        assistant_message="Welcome, traveler.",
+        route=route,
+    )
+    turns.append_turn(
+        session_id=session_id,
+        scene_id="rose-gallery",
+        persona_id="archivist",
+        user_message="What happened?",
+        assistant_message=(
+            "The system could not produce a response that passed validation. "
+            "No memory or world state was changed."
+        ),
+        route=route,
+        outcome=TurnOutcome.CONTROLLED_FAILURE,
+    )
+    connection.close()
+
+
+def test_cli_export_transcript_writes_markdown_with_status_json(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=2)
+    output_path = tmp_path / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "exported": "demo-session",
+        "output": str(output_path),
+        "format": "markdown",
+        "turns": 2,
+    }
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("# Transcript: demo-session")
+    assert "- **World:** demo_world" in content
+    assert "## Turn 1" in content
+    assert "**Player:** Question 0" in content
+    assert "**archivist:** Answer 0" in content
+    assert "## Turn 2" in content
+
+
+def test_cli_export_transcript_html_format_escapes_content_and_marks_controlled_failure(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_special_characters_and_failure_turn(database_path, session_id="demo-session")
+    output_path = tmp_path / "transcript.html"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+            "--format",
+            "html",
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["format"] == "html"
+    assert payload["turns"] == 2
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("<!doctype html>")
+    assert "<style>" in content
+    # Raw HTML from the player message must never appear unescaped.
+    assert "<b>Hello</b>" not in content
+    assert "&lt;b&gt;Hello&lt;/b&gt; &amp; &quot;friend&quot;" in content
+    # A controlled-failure turn renders a distinct marker, never the canned
+    # system string attributed to the persona as dialogue.
+    assert "turn ended in controlled failure" in content
+    assert "could not produce a response" not in content
+
+
+def test_cli_export_transcript_unknown_session_id_fails(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "missing-session",
+            "--output",
+            str(tmp_path / "transcript.md"),
+        ],
+        env={"DATABASE_PATH": str(tmp_path / "sessions.db")},
+    )
+
+    assert result.exit_code == 1
+    assert "Unknown session id: missing-session" in result.stdout
+    assert not (tmp_path / "transcript.md").exists()
+
+
+def test_cli_export_transcript_rejects_unsupported_format(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=1)
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(tmp_path / "transcript.pdf"),
+            "--format",
+            "pdf",
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 1
+    assert "pdf" in result.stdout
+    assert not (tmp_path / "transcript.pdf").exists()
+
+
+def test_cli_export_transcript_creates_output_parent_directories(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=1)
+    output_path = tmp_path / "nested" / "dirs" / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert output_path.exists()
+
+
+def test_cli_export_transcript_empty_session_renders_header_only(tmp_path: Path) -> None:
+    database_path = tmp_path / "sessions.db"
+    _seed_session_with_turns(database_path, session_id="demo-session", turn_count=0)
+    output_path = tmp_path / "transcript.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "export-transcript",
+            "--session-id",
+            "demo-session",
+            "--output",
+            str(output_path),
+        ],
+        env={"DATABASE_PATH": str(database_path)},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["turns"] == 0
+    content = output_path.read_text(encoding="utf-8")
+    assert content.startswith("# Transcript: demo-session")
+    assert "_No turns recorded yet._" in content
+    assert "## Turn" not in content

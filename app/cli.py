@@ -43,9 +43,11 @@ from app.content import (
 )
 from app.content.validator import ContentValidationStatus
 from app.diagnostics import (
+    SUPPORTED_TRANSCRIPT_FORMATS,
     RuntimeDiagnosticsReport,
     SmokeRunSummary,
     build_runtime_diagnostics,
+    render_transcript,
     run_smoke,
 )
 from app.domain import TurnInput, TurnResult, Visibility
@@ -1060,6 +1062,51 @@ def export_session(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(envelope, indent=2, sort_keys=True), encoding="utf-8")
     typer.echo(json.dumps({"exported": session_id, "output": str(output)}))
+
+
+@app.command("export-transcript")
+def export_transcript(
+    session_id: Annotated[str, typer.Option(help="Session identifier to export")],
+    output: Annotated[Path, typer.Option(help="Output transcript file path")],
+    output_format: Annotated[
+        str,
+        typer.Option("--format", help="Transcript format: markdown or html"),
+    ] = "markdown",
+) -> None:
+    """Render a session's turns into a shareable markdown/HTML transcript.
+
+    Player-facing only (docs/SIDE_PROJECTS.md Transcript Exporter): player
+    messages, served replies, turn/persona attribution, and outcome markers.
+    Never reads turn diagnostics or authored hidden fields.
+    """
+    if output_format not in SUPPORTED_TRANSCRIPT_FORMATS:
+        typer.secho(
+            f"Unsupported format: {output_format!r} (choose from: "
+            f"{', '.join(SUPPORTED_TRANSCRIPT_FORMATS)})",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    connection, sessions, turns, _ = _open_repositories()
+    session = sessions.get_session(session_id)
+    if session is None:
+        connection.close()
+        typer.secho(f"Unknown session id: {session_id}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    stored_turns = turns.list_all_turns(session_id)
+    connection.close()
+    content = render_transcript(session, stored_turns, output_format)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(content, encoding="utf-8")
+    typer.echo(
+        json.dumps(
+            {
+                "exported": session_id,
+                "output": str(output),
+                "format": output_format,
+                "turns": len(stored_turns),
+            }
+        )
+    )
 
 
 @app.command("import-session")
