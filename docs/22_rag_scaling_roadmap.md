@@ -706,6 +706,19 @@ Effort S. — [x]
 > becomes the preset's compression-quality meter. Semantics + the four-case split pinned by
 > `test_build_event_attribution_contract_tier_consolidation_split`; docs/25 Phase E carries
 > the same note. Phase E runs restart under these semantics.
+>
+> **Phase E restart run (2026-07-16, contract-tier semantics in) — failed fast at turn 55
+> with the first live retry-survival data point.** `amber_ring_token`'s definition turn
+> ended `controlled_failure`; the #80 retry was consumed and ALSO ended
+> `controlled_failure` — identical failure envelope (same scripted message, same critic
+> rejection text, same warnings) on both attempts. This is a fully correlated double
+> failure, exactly the correlation docs/26 §4 warned about when it rejected the naive
+> `0.067² ≈ 0.45%` independence math — recorded as data point #1 for the measured delta
+> (N=1: retry did not rescue). #75's fail-fast named the cause at turn 55 instead of a
+> misleading recall miss at 65; #80's offset bookkeeping held (both attempts recorded,
+> step-keyed). 55 prior turns: all success, 5/5 inspections passed. Artifact preserved
+> (scratchpad E1-attempt5). Not a preset or lane defect — the known ~6.7% fail-closed
+> rate landing on a probe definition turn twice; rerun follows, each attempt recorded.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
