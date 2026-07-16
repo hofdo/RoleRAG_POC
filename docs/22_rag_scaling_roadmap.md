@@ -655,8 +655,13 @@ it with a note.
 
 - *Chunking/ingestion:* stale-chunk orphans — source identity is the raw path string;
   nothing sweeps chunks of removed/renamed manifest documents (re-ingest only replaces
-  matching paths). / CLI `start-session` re-embeds the whole manifest corpus every start
-  (no content fingerprint to skip unchanged docs) — cost grows linearly with corpus size.
+  matching paths) — **confirmed 2026-07-16 and shipped as BACKLOG #87** (`ingest-scenario-lore
+  --prune`, opt-in/default-off, path-prefix scoped so other scenarios' lore and non-lore
+  collections stay untouchable). / CLI `start-session` re-embeds the whole manifest corpus
+  every start (no content fingerprint to skip unchanged docs) — cost grows linearly with
+  corpus size — **confirmed 2026-07-16 and shipped as BACKLOG #86** (content-fingerprint skip
+  via chunk-id set equality, default on, byte-identical end state, `--force` escape hatch,
+  fail-open on a store-read failure).
 - *Context budget:* the recent-dialogue window is the largest prompt consumer (~up to 3.6K
   tokens) with uniform 900-char clipping — importance-uneven turns get equal budget.
 - *Memory lifecycle:* consolidation summaries may leak into durable cross-session

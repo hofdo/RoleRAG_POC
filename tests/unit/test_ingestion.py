@@ -9,7 +9,7 @@ from app.content.validator import LoreDocumentMetadata, LoreManifest
 from app.domain import RetrievedChunk, Visibility
 from app.rag.ingestion import IngestionRequest, ingest_document, ingest_lore_manifest
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
-from app.rag.vector_store import StoredPoint
+from app.rag.vector_store import InMemoryVectorStore, StoredPoint, VectorStoreModelMismatch
 
 
 class FakeEmbeddingProvider:
@@ -29,6 +29,7 @@ class RecordingVectorStore:
     def __init__(self) -> None:
         self.ensure_calls: list[tuple[RagCollection, int]] = []
         self.replace_calls: list[tuple[RagCollection, str, list[RagChunk], list[list[float]]]] = []
+        self.list_source_calls: list[tuple[RagCollection, str]] = []
 
     def ensure_collection(
         self, collection: RagCollection, vector_size: int, model_key: str | None = None
@@ -57,6 +58,9 @@ class RecordingVectorStore:
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         raise AssertionError("delete_session_points should not be called during ingestion")
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        raise AssertionError("delete_source_points should not be called during ingestion")
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
         raise AssertionError("delete_points should not be called during ingestion")
 
@@ -74,6 +78,14 @@ class RecordingVectorStore:
 
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         raise AssertionError("get_chunks should not be called during ingestion")
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        # Real ingest_document behavior (backlog #86): called on every non-force ingest to
+        # decide whether the document is unchanged. This recorder never has anything on file,
+        # so every ingest in these tests takes the full embed+replace path, matching their
+        # existing assertions.
+        self.list_source_calls.append((collection, source))
+        return set()
 
 
 def test_ingest_document_attaches_required_metadata_and_replaces_source(tmp_path: Path) -> None:
@@ -193,4 +205,129 @@ def test_ingest_document_rejects_empty_documents(tmp_path: Path) -> None:
             ),
             embedding_provider=FakeEmbeddingProvider(),
             vector_store=RecordingVectorStore(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# backlog #86: content-fingerprint skip for unchanged documents
+# ---------------------------------------------------------------------------
+
+
+def _request(document: Path) -> IngestionRequest:
+    return IngestionRequest(
+        path=document,
+        collection=RagCollection.CANON_LORE,
+        source_type="lore",
+        visibility=Visibility.PLAYER,
+    )
+
+
+def test_ingest_document_second_call_with_unchanged_content_is_skipped(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers gather around mirrored columns.", encoding="utf-8"
+    )
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+
+    first = ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+    second = ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+
+    assert first.skipped is False
+    assert second.skipped is True
+    assert second.chunk_count == first.chunk_count
+    assert second.source == first.source
+    # embed_batch ran exactly once -- the second, unchanged-content call never re-embedded.
+    assert len(embedding_provider.batches) == 1
+
+
+def test_ingest_document_changed_content_reingests(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers gather.", encoding="utf-8")
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+
+    ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers gather near the fountain now.", encoding="utf-8"
+    )
+    second = ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+
+    assert second.skipped is False
+    assert len(embedding_provider.batches) == 2
+
+
+def test_ingest_document_force_reingests_despite_identical_content(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers gather.", encoding="utf-8")
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+
+    ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+    forced = ingest_document(
+        _request(document),
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        force=True,
+    )
+
+    assert forced.skipped is False
+    assert len(embedding_provider.batches) == 2
+
+
+def test_ingest_document_store_read_failure_falls_back_to_full_ingest(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers gather.", encoding="utf-8")
+    embedding_provider = FakeEmbeddingProvider()
+
+    class RaisingListVectorStore(InMemoryVectorStore):
+        def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+            raise RuntimeError("simulated store-read failure")
+
+    vector_store = RaisingListVectorStore()
+
+    result = ingest_document(
+        _request(document), embedding_provider=embedding_provider, vector_store=vector_store
+    )
+
+    assert result.skipped is False
+    assert len(embedding_provider.batches) == 1
+    # The fail-open fallback still completed the real ingest -- the chunk is retrievable.
+    assert vector_store.scroll_points(RagCollection.CANON_LORE)
+
+
+def test_ingest_document_ensure_collection_guards_fire_before_skip_decision(
+    tmp_path: Path,
+) -> None:
+    """ensure_collection's dimension/model-fingerprint guards (P1.4) must run -- and can
+    raise -- before the content-fingerprint skip decision is ever evaluated, even when the
+    document's content (and therefore its chunk-id set) is completely unchanged."""
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers gather.", encoding="utf-8")
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+
+    ingest_document(
+        _request(document),
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        model_key="model-a",
+    )
+
+    with pytest.raises(VectorStoreModelMismatch):
+        ingest_document(
+            _request(document),
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+            model_key="model-b",
         )

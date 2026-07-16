@@ -1,6 +1,6 @@
 # RoleRAG POC — Working Backlog
 
-> Reviewed: 2026-07-15 @ c69baf0
+> Reviewed: 2026-07-16 @ f5d4ab1
 
 Source: 10-agent deep analysis (47 improvements + side projects). This file is the durable
 record — git commit subjects tag shipped items as `(#N)`. Keep it in sync as items land.
@@ -986,6 +986,80 @@ probe first.
   server-enforced hidden-text redaction (`include_hidden` opt-in). New vector-store read paths
   (`scroll_points`/`get_chunks`, InMemory↔Qdrant parity-tested); persisted diagnostics stay
   metadata-only. [docs/28](28_rag_debug_and_vector_map.md).
+
+## Review 2026-07-16 — ingest lifecycle (cloud session)
+
+Two verified improvements to the ingest lifecycle, from the *Chunking/ingestion* bullet under
+[docs/22's unverified candidates](22_rag_scaling_roadmap.md#unverified-candidates-from-the-2026-07-07-sweep-verify-before-building)
+(2026-07-07 sweep). Both anchors were verified first-hand before building: `ingest_document`
+(`app/rag/ingestion.py:70`, pre-change) called `embed_batch` unconditionally, and
+`auto_ingest_scenario_lore` (`app/composition.py:223`) runs it for every manifest document on
+every CLI `start-session` (`app/cli.py:345`) and `POST /sessions` (`app/api/routes.py:270`) --
+the whole corpus was re-embedded on every session start; separately, nothing ever swept
+chunks whose source document was removed/renamed from a manifest -- the store only had
+`replace_source` (per-path), `delete_session_points`, `delete_points`.
+
+- [x] **#86** *(perf, M)* **Content-fingerprint skip for unchanged documents.** Default ON,
+  pure fast-path, end state byte-identical. Mechanism: chunk ids are
+  `sha256(f"{source}:{index}:{text}")[:16]` (`app/rag/ingestion.py`'s `_chunk_id`), so an
+  unchanged document always reproduces exactly the same chunk-id set on re-ingest. New
+  `VectorStore.list_source_chunk_ids(collection, source) -> set[str]` (both implementations,
+  InMemory↔Qdrant parity-tested in `tests/unit/test_vector_store_source_ops.py`, sentinel
+  excluded) lets `ingest_document` compare the freshly chunked document's id set against what
+  the store already holds for that source; on an exact match it returns
+  `IngestionResult(skipped=True, ...)` without calling `embed_batch` or `replace_source`.
+  Either-direction mismatch (extra or missing ids) falls through to a full re-ingest via plain
+  set equality -- self-healing: content change -> different ids -> re-ingest; store wiped
+  (`reset-index`) -> empty set -> re-ingest; embedding-model swap -> the P1.4 fingerprint
+  check in `ensure_collection` raises before any skip decision matters (ordering is
+  deliberate: `ensure_collection` now runs *before* the skip check, not after `embed_batch` as
+  before). New `force: bool = False` on `ingest_document`/`ingest_lore_manifest` bypasses the
+  skip unconditionally. Fail-open: an unexpected exception from `list_source_chunk_ids` (e.g.
+  a store-read failure) falls back to the full embed+replace path rather than propagating --
+  the optimization can never break ingest. Side benefit: an unchanged document no longer
+  passes through `replace_source`'s delete-then-upsert at all, so it no longer opens that
+  brief per-re-ingest retrieval-outage window either (see the docs/22 "Qdrant/vector store"
+  unverified-candidates bullet). Surfaces: CLI `ingest`/`ingest-scenario-lore` gain `--force`
+  (bypasses the skip; help text explains it) and per-document colored stderr feedback
+  ("ingested: ..." / "skipped (unchanged): ..."), stdout stays machine-pure JSON;
+  `IngestionResult.skipped` is additive. `LoreAutoIngestOutcome` gains additive
+  `skipped_count`, reflected in the CLI's existing auto-ingest summary line only when nonzero
+  (byte-identical otherwise); the API's `POST /sessions` outcome mapping is untouched (it only
+  ever surfaced `warning`, so there was no success-summary text to extend, and the speedup is
+  silent there by design). Tests: `tests/unit/test_ingestion.py` (unchanged-doc skip without
+  `embed_batch`, changed-content re-ingest, `force=True` re-ingest, store-read-failure
+  fallback, `ensure_collection`'s model-fingerprint guard firing before the skip decision even
+  with identical ids); `tests/unit/test_vector_store_source_ops.py` (InMemory↔Qdrant parity,
+  sentinel exclusion, missing-collection empty set, pagination past 256 points);
+  `tests/integration/test_cli.py` (skip prints "skipped (unchanged)" and doesn't re-embed,
+  `--force` re-embeds despite identical content, for both `ingest` and
+  `ingest-scenario-lore`). `_PAYLOAD_INDEX_FIELDS` (`app/rag/vector_store.py`) gained
+  `"source"` (6 -> 7 fields) since this adds a per-source read path exercised on every ingest;
+  `tests/unit/test_vector_store.py`'s payload-index-field assertion updated to match (an
+  instructed extension, not drift).
+- [x] **#87** *(ops, S)* **`--prune` for `ingest-scenario-lore`.** Opt-in, default OFF --
+  deletion is destructive and never runs automatically. New
+  `VectorStore.delete_source_points(collection, source) -> None` (both implementations,
+  parity-tested alongside #86 in `tests/unit/test_vector_store_source_ops.py`), mirroring
+  `delete_session_points` keyed on `source` instead of `session_id`; the Qdrant
+  implementation factors the delete-by-source filter (`_source_filter`) out of
+  `replace_source`, which already built one inline, so the two delete-by-source call sites
+  can't drift. CLI `ingest-scenario-lore --prune`: after ingesting the manifest, enumerates
+  CANON_LORE sources via `scroll_points` (already sentinel-excluded), computes the orphan set
+  -- sources starting with `<content_root>/documents/` (trailing separator included, so a
+  sibling directory merely sharing the same string prefix, e.g. `documents_old/`, can never
+  match) that are not in the manifest's freshly-ingested source set -- and deletes each
+  orphan, printing it (yellow) plus a final count. The path-prefix scoping is the safety
+  boundary: it guarantees other scenarios' lore (a different `content_root`) and non-lore
+  collections are untouchable, stated in the option's help text. Not wired into
+  `auto_ingest_scenario_lore` or either session-creation path -- silent deletion on session
+  start stays explicitly out of scope. Tests:
+  `tests/integration/test_cli.py::test_cli_ingest_scenario_lore_prune_deletes_only_orphaned_sources`
+  seeds a manifest source, an about-to-be-orphaned source, and an out-of-prefix source from a
+  different content_root in the same shared CANON_LORE collection, then asserts a run without
+  `--prune` deletes nothing, and a run with `--prune` deletes exactly the orphan while the
+  manifest source and the out-of-prefix source both survive; a dedicated `--help` test pins
+  that the safety scoping is documented in the option text.
 
 ## Not doing (personal-use scope)
 

@@ -91,10 +91,14 @@ class FakeLoader:
 class FakeEmbeddingProvider:
     dimension = 2
 
+    def __init__(self) -> None:
+        self.batches: list[list[str]] = []
+
     def embed_text(self, text: str) -> list[float]:
         return [1.0, float(len(text))]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.batches.append(list(texts))
         return [[1.0, float(len(text))] for text in texts]
 
 
@@ -105,6 +109,7 @@ class RecordingVectorStore:
         self.upsert_calls: list[tuple[RagCollection, list[RagChunk], list[list[float]]]] = []
         self.drop_calls: list[RagCollection] = []
         self.delete_session_calls: list[tuple[RagCollection, str]] = []
+        self.delete_source_calls: list[tuple[RagCollection, str]] = []
 
     def ensure_collection(
         self, collection: RagCollection, vector_size: int, model_key: str | None = None
@@ -116,6 +121,15 @@ class RecordingVectorStore:
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         self.delete_session_calls.append((collection, session_id))
+
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        self.delete_source_calls.append((collection, source))
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        # A pure recorder never has anything on file, so ingest_document always takes the
+        # full embed+replace path against this fake -- matching every pre-existing test's
+        # first-time-ingest assertions.
+        return set()
 
     def replace_source(
         self,
@@ -726,6 +740,212 @@ def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None
     assert chunks[0].world_id == "custom_world"
     assert chunks[0].scene_id == "custom-opening"
     assert chunks[0].persona_id == "custom-narrator"
+
+
+# ---------------------------------------------------------------------------
+# backlog #86 (content-fingerprint skip) / #87 (--prune) -- real InMemoryVectorStore is used
+# here instead of RecordingVectorStore, since these scenarios need genuine store semantics
+# (persisted chunk ids across repeated ingests, real deletion) that a hand-rolled recorder
+# can't fake without reimplementing the feature under test.
+# ---------------------------------------------------------------------------
+
+
+def test_cli_ingest_skips_reembedding_unchanged_document(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers drift between mirrors and roses.",
+        encoding="utf-8",
+    )
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+    ingest_args = [
+        "ingest",
+        str(document),
+        "--visibility",
+        Visibility.PLAYER.value,
+        "--source-type",
+        "lore",
+    ]
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        first = runner.invoke(app, ingest_args)
+        second = runner.invoke(app, ingest_args)
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert '"skipped": false' in first.stdout
+    assert '"skipped": true' in second.stdout
+    assert "skipped (unchanged)" in second.output
+    # The second, unchanged-content call never re-embedded.
+    assert len(embedding_provider.batches) == 1
+
+
+def test_cli_ingest_force_reembeds_unchanged_document(tmp_path: Path) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text("# Rose Gallery\n\nCourtiers drift.", encoding="utf-8")
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+    base_args = [
+        "ingest",
+        str(document),
+        "--visibility",
+        Visibility.PLAYER.value,
+        "--source-type",
+        "lore",
+    ]
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, base_args)
+        forced = runner.invoke(app, [*base_args, "--force"])
+
+    assert forced.exit_code == 0
+    assert '"skipped": false' in forced.stdout
+    assert len(embedding_provider.batches) == 2
+
+
+def test_cli_ingest_scenario_lore_reports_skipped_documents_on_second_run(
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+        second = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root)]
+        )
+
+    assert second.exit_code == 0
+    assert "skipped (unchanged)" in second.output
+    payload = json.loads(second.stdout)
+    assert payload["documents"][0]["skipped"] is True
+    # Only the first run embedded; the second was a full skip.
+    assert len(embedding_provider.batches) == 1
+
+
+def test_cli_ingest_scenario_lore_force_reingests_unchanged_documents(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+        forced = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root), "--force"]
+        )
+
+    assert forced.exit_code == 0
+    payload = json.loads(forced.stdout)
+    assert payload["documents"][0]["skipped"] is False
+    assert len(embedding_provider.batches) == 2
+
+
+def test_cli_ingest_scenario_lore_prune_deletes_only_orphaned_sources(tmp_path: Path) -> None:
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    (pack_root / "documents" / "old_lore.md").write_text(
+        "# Old Lore\n\nA forgotten passage once led to the cellar.", encoding="utf-8"
+    )
+    manifest_path = pack_root / "documents" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["documents"].append(
+        {
+            "path": "old_lore.md",
+            "visibility": Visibility.PLAYER.value,
+            "source_type": "lore",
+            "tags": [],
+            "world_id": "custom_world",
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    vector_store = InMemoryVectorStore()
+    embedding_provider = FakeEmbeddingProvider()
+
+    # Seed a chunk from a totally different scenario pack in the same shared CANON_LORE
+    # collection, to prove prune never touches lore outside this content_root's prefix.
+    vector_store.ensure_collection(RagCollection.CANON_LORE, embedding_provider.dimension)
+    other_pack_source = str(tmp_path / "other-pack" / "documents" / "unrelated.md")
+    vector_store.upsert_chunks(
+        RagCollection.CANON_LORE,
+        [
+            RagChunk(
+                id="other-scenario-chunk",
+                source=other_pack_source,
+                source_type="lore",
+                text="Unrelated scenario lore that must survive pruning.",
+                visibility=Visibility.PLAYER,
+            )
+        ],
+        [[1.0, 1.0]],
+    )
+
+    old_lore_source = str(pack_root / "documents" / "old_lore.md")
+    lore_source = str(pack_root / "documents" / "lore.md")
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=embedding_provider),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        # First run: both lore.md and old_lore.md land in the store.
+        first = runner.invoke(app, ["ingest-scenario-lore", "--content-root", str(pack_root)])
+
+        # Remove old_lore.md from the manifest (simulating a renamed/removed doc) and re-run
+        # WITHOUT --prune -- the orphan must survive untouched.
+        manifest["documents"].pop()
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        no_prune_result = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root)]
+        )
+        stored_after_no_prune = {
+            point.chunk.source for point in vector_store.scroll_points(RagCollection.CANON_LORE)
+        }
+
+        # Re-run WITH --prune -- only the orphan is removed.
+        prune_result = runner.invoke(
+            app, ["ingest-scenario-lore", "--content-root", str(pack_root), "--prune"]
+        )
+
+    assert first.exit_code == 0
+    assert no_prune_result.exit_code == 0
+    assert prune_result.exit_code == 0
+    assert old_lore_source in stored_after_no_prune  # no --prune => no deletion
+
+    assert "pruned" in prune_result.output
+    assert old_lore_source in prune_result.output
+    prune_payload = json.loads(prune_result.stdout)
+    assert prune_payload["pruned_sources"] == [old_lore_source]
+
+    stored_after_prune = {
+        point.chunk.source for point in vector_store.scroll_points(RagCollection.CANON_LORE)
+    }
+    assert old_lore_source not in stored_after_prune
+    assert lore_source in stored_after_prune  # still-manifest source untouched
+    assert other_pack_source in stored_after_prune  # out-of-prefix source untouched
+
+
+def test_cli_ingest_scenario_lore_help_documents_prune_safety_scope() -> None:
+    result = runner.invoke(app, ["ingest-scenario-lore", "--help"])
+
+    assert result.exit_code == 0
+    assert "--prune" in result.output
+    assert "--force" in result.output
+    assert "content_root" in result.output
 
 
 def test_cli_turn_uses_in_memory_retrieval_and_excludes_hidden_or_isolated_chunks(

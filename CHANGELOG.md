@@ -7,6 +7,26 @@ records; this file is the quick delta between versions.
 
 ### Added
 
+- **Ingest content-fingerprint skip** (#86, default on, byte-identical end state):
+  `ingest_document`/`ingest_lore_manifest` now skip re-embedding a document whose content is
+  unchanged since its last ingest. Chunk ids are deterministic hashes of `(source, index,
+  text)`, so comparing the freshly chunked document's id set against a new
+  `VectorStore.list_source_chunk_ids` read (InMemory↔Qdrant parity-tested) is enough to prove
+  nothing changed, skipping both `embed_batch` and `replace_source`. `ensure_collection`'s
+  dimension/model-fingerprint guards still run before the skip decision, so a mismatched
+  embedding model still fails loud. New `force: bool = False` parameter (CLI
+  `ingest`/`ingest-scenario-lore --force`) bypasses the skip; a store-read failure fails open
+  to a full re-ingest rather than breaking. Every `start-session`/`POST /sessions` auto-ingest
+  gets this for free, since the whole manifest corpus was previously re-embedded on every
+  session start regardless of whether anything changed.
+- **`ingest-scenario-lore --prune`** (#87, opt-in, default off): deletes CANON_LORE chunks
+  whose source path is under `<content_root>/documents/` but no longer referenced by the
+  manifest (e.g. a removed or renamed lore file), via a new
+  `VectorStore.delete_source_points`. The path-prefix scoping is the safety boundary -- other
+  scenarios' lore (a different content_root) and non-lore collections are never touched.
+  Never wired into `auto_ingest_scenario_lore` -- silent deletion on session start stays out
+  of scope.
+
 - **RAG debug panel + vector map** (#85): live per-turn debug panel on the Play page
   (retrieval candidates with `original → adjusted` score and per-boost breakdown, lexical-slice
   labels, lazy chunk-text drill-down, new-memory diff, Inspector deep link — fed by the SSE

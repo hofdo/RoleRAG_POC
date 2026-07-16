@@ -18,7 +18,9 @@ from app.rag.vector_store import (
     _search_qdrant_points,
 )
 
-# P2.1 (docs/22): the keyword payload-index fields every search filters on.
+# P2.1 (docs/22): the keyword payload-index fields every search filters on. "source" was
+# added for backlog #86/#87 -- delete-by-source and the new list-by-source read both filter
+# on it (see app/rag/vector_store.py's _PAYLOAD_INDEX_FIELDS).
 _EXPECTED_PAYLOAD_INDEX_FIELDS: set[str] = {
     "visibility",
     "world_id",
@@ -26,6 +28,7 @@ _EXPECTED_PAYLOAD_INDEX_FIELDS: set[str] = {
     "persona_id",
     "scene_id",
     "tags",
+    "source",
 }
 
 

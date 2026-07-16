@@ -55,6 +55,9 @@ class FakeVectorStore:
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         raise AssertionError("delete_session_points should not be called during retrieval")
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        raise AssertionError("delete_source_points should not be called during retrieval")
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
         raise AssertionError("delete_points should not be called during retrieval")
 
@@ -73,6 +76,9 @@ class FakeVectorStore:
 
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         raise AssertionError("get_chunks should not be called during retrieval")
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        raise AssertionError("list_source_chunk_ids should not be called during retrieval")
 
 
 def test_retriever_filters_out_non_player_visible_chunks() -> None:

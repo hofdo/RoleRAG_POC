@@ -62,6 +62,9 @@ class RecordingVectorStore:
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None:
         raise AssertionError("delete_session_points should not be used for memory indexing")
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        raise AssertionError("delete_source_points should not be used for memory indexing")
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
         self.deleted_ids.extend(chunk_ids)
 
@@ -79,6 +82,9 @@ class RecordingVectorStore:
 
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         raise AssertionError("get_chunks should not be used for memory indexing")
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        raise AssertionError("list_source_chunk_ids should not be used for memory indexing")
 
 
 def _episode() -> MemoryEpisode:

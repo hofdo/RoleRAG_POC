@@ -58,11 +58,14 @@ class LoreAutoIngestOutcome:
     nothing to index, and callers should treat this as a silent no-op (not a warning). When
     ``attempted`` is ``True``, either ``warning`` is set (the ingest failed; session creation
     must proceed anyway) or ``document_count``/``chunk_count`` describe what was indexed.
+    ``skipped_count`` (backlog #86, additive) counts how many of those documents were
+    unchanged since their last ingest and so skipped re-embedding entirely.
     """
 
     attempted: bool
     document_count: int = 0
     chunk_count: int = 0
+    skipped_count: int = 0
     warning: str | None = None
 
 
@@ -239,6 +242,10 @@ def auto_ingest_scenario_lore(
     Idempotent: re-running this for the same content_root re-indexes the same lore without
     duplicating it -- ``ingest_document`` replaces a source's chunks by path (see
     ``ingest_lore_manifest``), so re-creating a session in the same world/content_root is safe.
+    Cheap on repeat contact (backlog #86): a document whose content hasn't changed since its
+    last ingest is skipped without re-embedding -- every ``start-session``/``POST /sessions``
+    call re-indexes the manifest, so this keeps repeat session creation on an unchanged
+    scenario from re-embedding the whole corpus every time.
     """
     root = Path(content_root)
     if not (root / "documents" / "manifest.json").exists():
@@ -263,6 +270,7 @@ def auto_ingest_scenario_lore(
         attempted=True,
         document_count=len(results),
         chunk_count=sum(result.chunk_count for result in results),
+        skipped_count=sum(1 for result in results if result.skipped),
     )
 
 

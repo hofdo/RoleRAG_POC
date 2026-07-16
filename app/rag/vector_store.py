@@ -40,6 +40,9 @@ _PAYLOAD_INDEX_FIELDS: tuple[str, ...] = (
     "persona_id",
     "scene_id",
     "tags",
+    # backlog #86/#87: delete-by-source (replace_source/delete_source_points) and the new
+    # list-by-source read (list_source_chunk_ids) both filter on this field.
+    "source",
 )
 
 
@@ -120,6 +123,15 @@ class VectorStore(Protocol):
 
     def delete_session_points(self, collection: RagCollection, session_id: str) -> None: ...
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        """Delete every chunk whose ``source`` payload field equals ``source`` exactly.
+
+        Mirrors ``delete_session_points``, keyed on ``source`` instead of ``session_id``.
+        Used by ``ingest-scenario-lore --prune`` (backlog #87) to remove chunks whose source
+        document was removed or renamed out of a manifest.
+        """
+        ...
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None: ...
 
     def scroll_points(self, collection: RagCollection) -> list[StoredPoint]:
@@ -128,6 +140,17 @@ class VectorStore(Protocol):
 
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         """Fetch chunks by chunk id. Missing ids are silently absent from the result."""
+        ...
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        """Return the set of chunk ids currently stored for ``source`` in ``collection``.
+
+        Chunk ids are deterministic hashes of ``(source, index, text)`` (see
+        ``ingestion._chunk_id``), so an unchanged document always reproduces exactly the same
+        id set on re-ingest. ``ingest_document``'s content-fingerprint skip (backlog #86)
+        compares this set against the freshly chunked document to decide whether embedding +
+        ``replace_source`` are redundant work. Excludes the P1.4 fingerprint sentinel.
+        """
         ...
 
 
@@ -210,6 +233,13 @@ class InMemoryVectorStore:
             if chunk.session_id != session_id
         ]
 
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        self._entries[collection] = [
+            (chunk, vector)
+            for chunk, vector in self._entries[collection]
+            if chunk.source != source
+        ]
+
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
         drop = set(chunk_ids)
         if not drop:
@@ -268,6 +298,11 @@ class InMemoryVectorStore:
     def get_chunks(self, collection: RagCollection, chunk_ids: Sequence[str]) -> list[RagChunk]:
         by_id = {chunk.id: chunk for chunk, _ in self._entries[collection]}
         return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        return {
+            chunk.id for chunk, _ in self._entries[collection] if chunk.source == source
+        }
 
 
 class QdrantVectorStore:
@@ -419,16 +454,7 @@ class QdrantVectorStore:
 
         self.client.delete(
             collection_name=collection.value,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="source",
-                            match=models.MatchValue(value=source),
-                        )
-                    ]
-                )
-            ),
+            points_selector=models.FilterSelector(filter=_source_filter(models, source)),
         )
 
         if not chunks:
@@ -481,6 +507,15 @@ class QdrantVectorStore:
                     ]
                 )
             ),
+        )
+
+    def delete_source_points(self, collection: RagCollection, source: str) -> None:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return
+        models = _require_qdrant_models()
+        self.client.delete(
+            collection_name=collection.value,
+            points_selector=models.FilterSelector(filter=_source_filter(models, source)),
         )
 
     def delete_points(self, collection: RagCollection, chunk_ids: Sequence[str]) -> None:
@@ -579,6 +614,62 @@ class QdrantVectorStore:
             chunk = _payload_to_rag_chunk(payload)
             by_chunk_id[chunk.id] = chunk
         return [by_chunk_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_chunk_id]
+
+    def list_source_chunk_ids(self, collection: RagCollection, source: str) -> set[str]:
+        if not self.client.collection_exists(collection_name=collection.value):
+            return set()
+        models = _require_qdrant_models()
+        scroll_filter = models.Filter(
+            must=[_source_condition(models, source)],
+            must_not=[
+                models.FieldCondition(
+                    key=_SENTINEL_PAYLOAD_KEY,
+                    match=models.MatchValue(value=True),
+                )
+            ],
+        )
+        chunk_ids: set[str] = set()
+        offset: Any = None
+        while True:
+            # Deliberate deviation from a literal with_payload=False: the app-level chunk id
+            # (what this method must return) lives only in the payload's "id" key -- Qdrant's
+            # own point id is a one-way uuid5 hash of it (_qdrant_point_id) and cannot be
+            # inverted. Projecting to just ["id"] keeps the read cheap (skips "text" and
+            # everything else) while still being correct.
+            records, next_offset = self.client.scroll(
+                collection_name=collection.value,
+                limit=256,
+                offset=offset,
+                with_payload=["id"],
+                with_vectors=False,
+                scroll_filter=scroll_filter,
+            )
+            for record in records:
+                payload = record.payload or {}
+                chunk_id = payload.get("id")
+                if chunk_id is not None:
+                    chunk_ids.add(str(chunk_id))
+            if next_offset is None:
+                break
+            offset = next_offset
+        return chunk_ids
+
+
+def _source_condition(models: Any, source: str) -> Any:
+    """``FieldCondition`` matching points whose ``source`` payload field equals ``source``."""
+    return models.FieldCondition(
+        key="source",
+        match=models.MatchValue(value=source),
+    )
+
+
+def _source_filter(models: Any, source: str) -> Any:
+    """Filter matching every point whose ``source`` payload field equals ``source`` exactly.
+
+    Shared by ``replace_source``'s delete-then-upsert and ``delete_source_points`` so the two
+    delete-by-source call sites can't drift.
+    """
+    return models.Filter(must=[_source_condition(models, source)])
 
 
 def _build_qdrant_filter(filters: RetrievalFilter) -> Any:
