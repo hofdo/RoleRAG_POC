@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections import Counter
 from uuid import UUID
 
 import pytest
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
 
 from app.domain import Visibility
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
@@ -14,6 +17,16 @@ from app.rag.vector_store import (
     _qdrant_point_id,
     _search_qdrant_points,
 )
+
+# P2.1 (docs/22): the keyword payload-index fields every search filters on.
+_EXPECTED_PAYLOAD_INDEX_FIELDS: set[str] = {
+    "visibility",
+    "world_id",
+    "session_id",
+    "persona_id",
+    "scene_id",
+    "tags",
+}
 
 
 def test_in_memory_delete_points_removes_only_listed_chunks() -> None:
@@ -303,6 +316,7 @@ class _FakeQdrantClient:
         self._existing_size = existing_size
         self.deleted: list[str] = []
         self.created: list[dict[str, object]] = []
+        self.payload_indexes: list[dict[str, object]] = []
 
     def collection_exists(self, *, collection_name: str) -> bool:
         return self._existing_size is not None
@@ -316,6 +330,9 @@ class _FakeQdrantClient:
 
     def delete_collection(self, *, collection_name: str) -> None:
         self.deleted.append(collection_name)
+
+    def create_payload_index(self, **kwargs: object) -> None:
+        self.payload_indexes.append(kwargs)
 
 
 def test_qdrant_ensure_collection_raises_dimension_mismatch_on_existing_collection() -> None:
@@ -339,3 +356,94 @@ def test_qdrant_drop_collection_calls_delete() -> None:
     store.drop_collection(RagCollection.SESSION_MEMORY)
 
     assert client.deleted == ["session_memory"]
+
+
+# ---------------------------------------------------------------------------
+# P2.1: payload indexes + opt-in scalar quantization
+# ---------------------------------------------------------------------------
+
+
+def test_qdrant_ensure_collection_creates_payload_indexes_on_new_collection() -> None:
+    store = QdrantVectorStore(url="http://localhost:6333")
+    client = _FakeQdrantClient(existing_size=None)
+    store._client = client
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3)
+
+    assert len(client.created) == 1  # went through the create-collection path
+    field_counts = Counter(call["field_name"] for call in client.payload_indexes)
+    assert field_counts == Counter(dict.fromkeys(_EXPECTED_PAYLOAD_INDEX_FIELDS, 1))
+
+
+def test_qdrant_ensure_collection_indexes_already_existing_collection_on_repeat_contact() -> None:
+    # docs/22 P2.1 explicitly calls this out: the early-return path for an already-existing
+    # collection must also (re-)create indexes, or a pre-P2.1 collection would never get
+    # them. existing_size makes every call here -- including the first -- take the
+    # early-return branch, never the create-collection branch.
+    store = QdrantVectorStore(url="http://localhost:6333")
+    client = _FakeQdrantClient(existing_size=3)
+    store._client = client
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3)
+    store.ensure_collection(RagCollection.CANON_LORE, 3)  # idempotency: must not raise
+
+    assert client.created == []  # never touched the create-collection path
+    field_counts = Counter(call["field_name"] for call in client.payload_indexes)
+    assert field_counts == Counter(dict.fromkeys(_EXPECTED_PAYLOAD_INDEX_FIELDS, 2))
+
+
+def test_qdrant_create_collection_passes_int8_quantization_when_enabled() -> None:
+    store = QdrantVectorStore(url="http://localhost:6333", scalar_quantization=True)
+    client = _FakeQdrantClient(existing_size=None)
+    store._client = client
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3)
+
+    assert len(client.created) == 1
+    quantization_config = client.created[0]["quantization_config"]
+    assert isinstance(quantization_config, qdrant_models.ScalarQuantization)
+    assert quantization_config.scalar.type == qdrant_models.ScalarType.INT8
+
+
+def test_qdrant_create_collection_omits_quantization_by_default() -> None:
+    store = QdrantVectorStore(url="http://localhost:6333")  # scalar_quantization defaults False
+    client = _FakeQdrantClient(existing_size=None)
+    store._client = client
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3)
+
+    assert len(client.created) == 1
+    # Byte-identical to the pre-P2.1 call: no quantization_config key at all, not just None.
+    assert "quantization_config" not in client.created[0]
+
+
+def test_qdrant_payload_index_failure_is_non_fatal_and_store_stays_usable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = QdrantVectorStore(url="local")
+    store._client = QdrantClient(":memory:")
+
+    def _raise(**_kwargs: object) -> None:
+        raise RuntimeError("simulated create_payload_index failure")
+
+    monkeypatch.setattr(store._client, "create_payload_index", _raise)
+
+    store.ensure_collection(RagCollection.CANON_LORE, 3)  # must not raise
+
+    chunk = RagChunk(
+        id="lore-1",
+        source="lore.md",
+        source_type="lore",
+        text="canon fact",
+        visibility=Visibility.PLAYER,
+        world_id="w1",
+    )
+    store.upsert_chunks(RagCollection.CANON_LORE, [chunk], [[1.0, 0.0, 0.0]])
+
+    results = store.search(
+        RagCollection.CANON_LORE,
+        [1.0, 0.0, 0.0],
+        RetrievalFilter.player_visible(world_id="w1"),
+        limit=10,
+    )
+    assert [result.id for result in results] == ["lore-1"]

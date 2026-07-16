@@ -21,8 +21,8 @@ orchestrators wired with the same collaborators, not just the same config values
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.cli import _build_services
-from app.composition import build_orchestrator_config, build_services
+from app.cli import _build_services, _build_vector_store
+from app.composition import build_orchestrator_config, build_services, build_vector_store
 from app.config import Settings
 
 
@@ -153,3 +153,14 @@ def test_cli_and_api_wire_canon_tag_pinning_into_session_and_consolidator(
         assert orchestrator.memory_stage._consolidator.canon_tag_pinning is True, (
             f"{label}: canon_tag_pinning not wired into memory_stage's consolidator"
         )
+
+
+def test_cli_vector_store_builder_is_the_composition_root_function() -> None:
+    """P2.1 (docs/22): settings.qdrant_scalar_quantization (and any future
+    QdrantVectorStore-construction knob) must reach both composition roots identically.
+    Unlike the collaborator-wiring drift #67 fixed, the CLI never re-assembles
+    QdrantVectorStore at all -- ``app.cli._build_vector_store`` is a direct alias of
+    ``app.composition.build_vector_store``, not an independent construction path. This pins
+    that alias so a future refactor can't reintroduce the #48/#67 drift class here without
+    failing a test."""
+    assert _build_vector_store is build_vector_store

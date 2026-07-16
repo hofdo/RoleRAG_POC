@@ -131,6 +131,21 @@ records; this file is the quick delta between versions.
   `LIVE_FAIL_ON_STRUCTURED_WARNINGS`. New docs/25 Phase E runbook section. +10 unit tests
   pinning the offset/retry mechanics. The live 100-turn validation runs and any resulting
   default flip remain on the owner's machine (#80 stays open in docs/BACKLOG.md).
+- **Qdrant payload indexes + opt-in scalar quantization** (docs/22 P2.1): `ensure_collection`
+  now creates keyword payload indexes for the six fields every search filters on
+  (`visibility`, `world_id`, `session_id`, `persona_id`, `scene_id`, `tags`) on both the
+  freshly-created-collection path and the already-exists early-return path, so pre-P2.1
+  collections get indexed too, not just new ones; idempotent, and an unexpected
+  `create_payload_index` failure is caught around the index loop so it can never break
+  collection creation/use. New opt-in `QDRANT_SCALAR_QUANTIZATION` Settings field
+  (`qdrant_scalar_quantization`, default `false`) threads through `build_vector_store`
+  (`app.cli._build_vector_store` is a plain alias, pinned by a new identity test against the
+  #48/#67 drift class); when enabled, new collections are created with INT8
+  `ScalarQuantization`, otherwise the `create_collection` call is byte-identical to before.
+  Applies only at first collection creation (`rolerag reset-index` + re-ingest to apply to an
+  existing collection). `InMemoryVectorStore` unchanged (parity holds -- indexes/quantization
+  are pure Qdrant-side storage details). Live latency numbers on a real Qdrant server at scale
+  remain owner-side.
 
 ## 1.3.0 — 2026-07-12
 

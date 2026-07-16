@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-14 @ 747bbd2
+> Reviewed: 2026-07-16 @ a82f711
 >
 > **Update 2026-07-14 (docs/26 synthesis).** The four Phase D live failures recorded under
 > [§ P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence) were
@@ -416,6 +416,43 @@ Effort M. — [ ]
 
 ### P2.1 Qdrant payload indexes (and optional quantization)
 
+> **Shipped 2026-07-16.** `QdrantVectorStore.ensure_collection` now creates keyword payload
+> indexes for all six fields every search filters on (`visibility`, `world_id`, `session_id`,
+> `persona_id`, `scene_id`, `tags`) via the existing `_require_qdrant_models()` lazy-import
+> pattern -- on **both** the freshly-created-collection path and the already-exists
+> early-return path, so a pre-P2.1 collection gets indexed on its next `ensure_collection`
+> contact, not just brand-new ones (the roadmap's own callout). Idempotent -- repeat contact
+> re-requests the same six indexes, which Qdrant accepts as a no-op -- and fail-open for the
+> index step specifically: an unexpected `create_payload_index` error is caught around the
+> whole per-collection loop (index creation is a query-speed optimization, not a correctness
+> requirement -- filtering still works without an index -- so it can never break collection
+> creation/use). Opt-in INT8 scalar quantization shipped alongside: new Settings field
+> `qdrant_scalar_quantization` (`QDRANT_SCALAR_QUANTIZATION`, default `false`) threads
+> through `app.composition.build_vector_store`, the single function that actually
+> constructs `QdrantVectorStore` -- `app.cli._build_vector_store` is a plain alias of that
+> same function, not an independent construction path, now pinned by an identity test in
+> `tests/unit/test_composition_config_parity.py` against the #48/#67 drift class. When
+> enabled, `create_collection` receives `quantization_config=ScalarQuantization(scalar=
+> ScalarQuantizationConfig(type=ScalarType.INT8))`; when off (default) the call is
+> byte-identical to pre-P2.1 -- no `quantization_config` key at all, not even `None`. Applies
+> only at first collection creation, as documented on the setting (`rolerag reset-index` +
+> re-ingest to apply it to an existing collection). `InMemoryVectorStore` unchanged, as
+> anticipated -- indexes/quantization are pure Qdrant-side filtering/storage details, so
+> search semantics and the existing parity tests are unaffected. Unit-tested: both
+> `ensure_collection` paths call `create_payload_index` for all six fields (incl. idempotent
+> repeat contact on the already-exists path); the quantization kwarg is present with INT8
+> when enabled and entirely absent when off; a monkeypatched `create_payload_index` failure
+> leaves `ensure_collection` succeeding and the store usable (upsert + search still work
+> afterward). Validated: full deterministic gate (`ruff`, `mypy --strict`, pytest, regression
+> runner) green. Caveat: qdrant-client's embedded local mode (`QdrantClient(":memory:")`,
+> used by every test here, including the filter-parity suites) accepts `create_payload_index`
+> as a no-op with a `UserWarning`, so the fail-open fallback is exercised only by the
+> dedicated monkeypatched-failure test, not incidentally by the others. **Still open
+> (owner-side):** live latency numbers on a real Qdrant server at the P0.4 corpus scale --
+> this doc's own validation ask -- since payload indexes only pay off against a real
+> server's query planner, not the embedded local-mode client the deterministic suite runs
+> against.
+
 **Problem.** Collections are created with vectors only
 ([vector_store.py `ensure_collection`](../app/rag/vector_store.py)); every search filters
 on `visibility` + a scope id without payload indexes — fine at POC scale, a full-scan
@@ -429,7 +466,7 @@ config, default off. `InMemoryVectorStore` needs no change (indexes are an imple
 detail of filtering, semantics identical — parity holds).
 
 **Validate.** Existing tests (semantics unchanged); latency numbers on the P0.4 corpus.
-Effort S. — [ ]
+Effort S. — [x]
 
 ### P2.2 Long-campaign preset (enable the shipped-but-off machinery, with evidence)
 

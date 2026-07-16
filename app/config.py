@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     cloud_llm_max_retries: int = Field(default=1, ge=0)
 
     qdrant_url: str = "http://localhost:6333"
+    # Opt-in INT8 scalar quantization for Qdrant collections (P2.1, docs/22). Applies only
+    # when a collection is first CREATED -- run `rolerag reset-index` + re-ingest to apply
+    # it to existing collections. Trades a little recall precision for memory at large point
+    # counts. Default false = byte-identical behavior (no quantization_config sent at all).
+    qdrant_scalar_quantization: bool = False
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     rag_default_top_k: int = Field(default=5, ge=1)
     rag_chunk_size_chars: int = Field(default=1000, ge=1)

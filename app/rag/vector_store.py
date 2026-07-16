@@ -29,6 +29,19 @@ _FINGERPRINT_SENTINEL_ID = str(uuid5(NAMESPACE_URL, "rolerag:__embedding_model_f
 _SENTINEL_PAYLOAD_KEY = "__rolerag_sentinel__"
 _FINGERPRINT_PAYLOAD_KEY = "embedding_model"
 
+# Payload fields every search filters on (_build_qdrant_filter / _chunk_to_payload), indexed
+# for query speed at scale (P2.1, docs/22): a full collection scan per filtered search is fine
+# at POC scale but not at 10k-1M points. Keyword schema matches how each field is queried
+# (MatchValue/MatchAny equality, never a range).
+_PAYLOAD_INDEX_FIELDS: tuple[str, ...] = (
+    "visibility",
+    "world_id",
+    "session_id",
+    "persona_id",
+    "scene_id",
+    "tags",
+)
+
 
 @dataclass(frozen=True)
 class StoredPoint:
@@ -258,9 +271,13 @@ class InMemoryVectorStore:
 
 
 class QdrantVectorStore:
-    def __init__(self, *, url: str) -> None:
+    def __init__(self, *, url: str, scalar_quantization: bool = False) -> None:
         self._url = url
         self._client: Any | None = None
+        # Opt-in INT8 scalar quantization (P2.1, docs/22), default off. Only affects the
+        # `create_collection` call below -- an already-existing collection keeps whatever
+        # quantization it was created with regardless of this flag's current value.
+        self._scalar_quantization = scalar_quantization
 
     @property
     def client(self) -> Any:
@@ -281,15 +298,48 @@ class QdrantVectorStore:
             if existing != vector_size:
                 raise VectorStoreDimensionMismatch(collection, existing, vector_size)
             self._check_or_adopt_fingerprint(collection, vector_size, model_key)
+            # P2.1: also run on the already-exists path so a pre-P2.1 collection (or one
+            # created before indexes existed) gets indexed on its next contact, not just
+            # brand-new collections.
+            self._ensure_payload_indexes(collection, models)
             return
-        self.client.create_collection(
-            collection_name=collection.value,
-            vectors_config=models.VectorParams(
+        create_kwargs: dict[str, Any] = {
+            "collection_name": collection.value,
+            "vectors_config": models.VectorParams(
                 size=vector_size,
                 distance=models.Distance.COSINE,
             ),
-        )
+        }
+        if self._scalar_quantization:
+            create_kwargs["quantization_config"] = models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(type=models.ScalarType.INT8)
+            )
+        self.client.create_collection(**create_kwargs)
         self._check_or_adopt_fingerprint(collection, vector_size, model_key)
+        self._ensure_payload_indexes(collection, models)
+
+    def _ensure_payload_indexes(self, collection: RagCollection, models: Any) -> None:
+        """Create keyword payload indexes for the fields every search filters on (P2.1).
+
+        Index creation is a query-speed optimization, not a correctness requirement --
+        filtering already works correctly without an index (Qdrant falls back to an
+        unindexed scan) -- so an unexpected failure here (e.g. a transient server error)
+        must never break collection creation/use; it's swallowed rather than propagated,
+        matching the repo's fail-open-for-optimizations stance. Idempotent: repeat calls
+        (every ensure_collection contact) re-request the same indexes, which Qdrant accepts
+        as a no-op. In qdrant-client's embedded local mode (``QdrantClient(":memory:")``,
+        used by the deterministic test suite) create_payload_index is itself already a
+        no-op, so this fallback is not exercised by those tests.
+        """
+        try:
+            for field_name in _PAYLOAD_INDEX_FIELDS:
+                self.client.create_payload_index(
+                    collection_name=collection.value,
+                    field_name=field_name,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
+        except Exception:  # optimization only -- never break collection creation/use
+            pass
 
     def drop_collection(self, collection: RagCollection) -> None:
         if self.client.collection_exists(collection_name=collection.value):

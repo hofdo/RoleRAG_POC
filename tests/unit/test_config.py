@@ -244,6 +244,21 @@ def test_settings_reject_negative_slice_quota(tmp_path: Path) -> None:
         Settings(_env_file=env_file)  # type: ignore[call-arg]
 
 
+def test_settings_qdrant_scalar_quantization_defaults_to_false(tmp_path: Path) -> None:
+    settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
+
+    assert settings.qdrant_scalar_quantization is False
+
+
+def test_settings_accept_qdrant_scalar_quantization_override(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("QDRANT_SCALAR_QUANTIZATION=true\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.qdrant_scalar_quantization is True
+
+
 def test_settings_canon_and_index_floor_defaults(tmp_path: Path) -> None:
     settings = Settings(_env_file=tmp_path / ".missing")  # type: ignore[call-arg]
 

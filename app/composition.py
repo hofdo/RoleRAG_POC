@@ -145,12 +145,12 @@ def build_embedding_provider(settings: Settings) -> EmbeddingProvider:
 
 
 @lru_cache(maxsize=4)
-def _cached_vector_store(url: str) -> QdrantVectorStore:
-    return QdrantVectorStore(url=url)
+def _cached_vector_store(url: str, scalar_quantization: bool) -> QdrantVectorStore:
+    return QdrantVectorStore(url=url, scalar_quantization=scalar_quantization)
 
 
 def build_vector_store(settings: Settings) -> VectorStore:
-    return _cached_vector_store(settings.qdrant_url)
+    return _cached_vector_store(settings.qdrant_url, settings.qdrant_scalar_quantization)
 
 
 def build_ranking_weights(settings: Settings) -> RankingWeights:
