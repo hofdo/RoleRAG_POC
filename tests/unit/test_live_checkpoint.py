@@ -372,6 +372,100 @@ def test_build_event_attribution_records_retrieval_miss_rank() -> None:
 # is exactly what the two tests above already exercise.
 
 
+def test_build_event_attribution_contract_tier_consolidation_split() -> None:
+    # docs/26 §8 Q1 contract-tier semantics (owner decision 2026-07-16, Phase E run 1
+    # finding): a folded original whose roll-up carries the probe match is "carried";
+    # a folded original whose roll-up lost it is recorded loss -- gating only for
+    # guarantee-tier (canon-family) tags; missing WITHOUT the consolidated tag stays
+    # a real indexing defect.
+    from app.diagnostics.live_checkpoint import _validate_attribution
+    from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
+
+    event = StoryEvent(
+        key="contract_probe",
+        definition_turn=1,
+        callback_turn=2,
+        term_groups=(("bookend",), ("note",)),
+    )
+
+    def _memory(memory_id: str, summary: str, tags: list[str]) -> MemoryEpisode:
+        return MemoryEpisode(
+            id=memory_id,
+            session_id="session",
+            scene_id="rose-gallery",
+            summary=summary,
+            importance=2,
+            visibility=Visibility.PLAYER,
+            tags=tags,
+        )
+
+    # Case A -- carried: roll-up retains the fact and is indexed.
+    folded = _memory("folded", "A note hides in the hollow bookend.", [CONSOLIDATED_TAG])
+    carrying = _memory(
+        "roll-up",
+        "Among other findings, a note stays hidden in the bronze bookend.",
+        [SUMMARY_TAG, "source_ids:folded,unrelated"],
+    )
+    carried = build_event_attribution(
+        event=event,
+        query="q",
+        memories=[folded, carrying],
+        indexed_memory_ids=["roll-up"],
+        selected=[{"id": "roll-up", "collection": "session_memory", "visibility": "player"}],
+    )
+    assert carried.folded_carried_ids == ("folded",)
+    assert carried.folded_lost_ids == ()
+    assert carried.unindexed_memory_ids == ()
+    _validate_attribution(carried, strict=True)  # must not raise
+
+    # Case B -- best-effort loss: roll-up dropped the fact; recorded, not gating,
+    # and the selection assertion is vacuous (nothing retrievable matches).
+    losing = _memory(
+        "roll-up-lost",
+        "The player investigated the gallery and spoke with Iria.",
+        [SUMMARY_TAG, "source_ids:folded"],
+    )
+    lost = build_event_attribution(
+        event=event,
+        query="q",
+        memories=[folded, losing],
+        indexed_memory_ids=["roll-up-lost"],
+        selected=[],
+    )
+    assert lost.folded_lost_ids == ("folded",)
+    assert lost.folded_lost_guarantee_ids == ()
+    _validate_attribution(lost, strict=True)  # recorded loss, must not raise
+
+    # Case C -- guarantee-tier loss: same shape but the folded fact carries a
+    # durable-commitment family tag; the run must fail, named.
+    folded_rule = _memory(
+        "folded-rule", "A note hides in the hollow bookend.", [CONSOLIDATED_TAG, "rule"]
+    )
+    lost_guarantee = build_event_attribution(
+        event=event,
+        query="q",
+        memories=[folded_rule, losing],
+        indexed_memory_ids=["roll-up-lost"],
+        selected=[],
+    )
+    assert lost_guarantee.folded_lost_guarantee_ids == ("folded-rule",)
+    with pytest.raises(CheckpointError, match="guarantee-tier"):
+        _validate_attribution(lost_guarantee, strict=True)
+
+    # Case D -- missing without a consolidation explanation: unchanged hard failure.
+    plain = _memory("plain", "A note hides in the hollow bookend.", [])
+    defect = build_event_attribution(
+        event=event,
+        query="q",
+        memories=[plain],
+        indexed_memory_ids=[],
+        selected=[],
+    )
+    assert defect.unindexed_memory_ids == ("plain",)
+    with pytest.raises(CheckpointError, match="missing from Qdrant"):
+        _validate_attribution(defect, strict=False)
+
+
 def test_build_event_attribution_matches_via_provenance_when_phrasing_fails() -> None:
     # The curator's paraphrase drifted far enough that semantic_match fails, but the
     # episode still carries the probe's definition-turn provenance -- this is the
@@ -503,8 +597,17 @@ def test_extraction_miss_fails_strict_checkpoint() -> None:
 
 
 def test_indexing_miss_is_application_failure() -> None:
+    # Contract-tier (2026-07-16): the gate reads the classifier's unindexed field --
+    # build_event_attribution sets it for any matching memory absent from Qdrant
+    # without a consolidation explanation (pinned by
+    # test_build_event_attribution_contract_tier_consolidation_split case D).
     with pytest.raises(CheckpointError, match="missing from Qdrant"):
-        _run(attribution=_attribution(indexed_memory_ids=()))
+        _run(
+            attribution=_attribution(
+                indexed_memory_ids=(),
+                unindexed_memory_ids=("memory-1",),
+            )
+        )
 
 
 def test_retrieval_miss_is_report_only_when_not_strict() -> None:

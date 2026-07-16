@@ -432,6 +432,23 @@ produced a wrong number. Beyond exit code: the pinning/slice/retry evidence abov
 - **Add a row to the [Recording matrix](#recording-matrix)** below, matching the existing
   rows' shape (Phase, Issue(s), On success update).
 
+### Contract-tier attribution semantics (owner decision 2026-07-16)
+
+Phase E run 1 (94 turns, 7/7 prior inspections green) failed at the turn-95 long-gap
+probe on exactly the consolidation question Phase D names above: the preset folded the
+turn-17 memory and the 15→1 roll-up dropped the fact. Per the owner's decision (recorded
+in [docs/22 § P2.2](22_rag_scaling_roadmap.md)), `_validate_attribution` now applies the
+docs/26 §8 Q1 contract tiers instead of blanket index-set equality: a matching memory
+absent from Qdrant **without** a `consolidated` tag is still a hard failure (unchanged);
+a folded original whose roll-up summary carries the probe match (and is indexed) is
+satisfied through the summary; a folded original whose roll-up **lost** the match is a
+hard failure only for guarantee-tier (durable-commitment tag family) facts and a
+**recorded loss** (`quality_metrics.consolidation_lost_matches`, plus the per-event
+`folded_lost_ids`) for best-effort facts — the long-gap probe thereby becomes the
+compression-quality meter for the preset rather than a gate on a promise the docs/26 §8
+Q1 contract deliberately does not make. Read `consolidation_lost_matches` on every run
+and judge it; a non-empty value is evidence to weigh, not noise.
+
 ### No loosening, and a retry-consumed run is not a re-roll
 
 The [no-loosening rule](#if-something-fails) applies here exactly as in Phases A–D: a Phase E

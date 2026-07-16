@@ -20,6 +20,7 @@ from app.config import Settings
 from app.diagnostics.retrieval_miss import summarize_retrieval_miss
 from app.domain import MemoryEpisode, StoredTurn, Visibility
 from app.memory.consolidation import CONSOLIDATED_TAG, SUMMARY_TAG
+from app.orchestration.canon_builder import CANON_TAGS, effective_canon_tags
 from app.persistence import SQLiteMemoryRepository, SQLiteTurnRepository, connect_sqlite
 from app.rag.lexical import LexicalHit, score_memories_lexical
 from app.rag.models import RagCollection
@@ -271,6 +272,17 @@ class EventAttribution:
     # rank across the candidate set — the actionable "how far off" tuning signal.
     missed_memory_ids: tuple[str, ...] = ()
     missed_memory_ranks: tuple[int, ...] = ()
+    # Contract-tier consolidation split (docs/26 §8 Q1; owner decision 2026-07-16,
+    # Phase E run 1 finding). A matching memory absent from Qdrant is classified,
+    # not failed wholesale: a consolidation-folded original whose roll-up summary
+    # still carries the probe match (and is itself indexed) is "carried"; a folded
+    # original whose roll-up lost the match is recorded loss — gating only when the
+    # fact carries a guarantee-tier (durable-commitment family) tag; anything
+    # missing WITHOUT the consolidated tag is a real indexing defect, as before.
+    folded_carried_ids: tuple[str, ...] = ()
+    folded_lost_ids: tuple[str, ...] = ()
+    folded_lost_guarantee_ids: tuple[str, ...] = ()
+    unindexed_memory_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -343,6 +355,7 @@ def build_event_attribution(
     selected: Sequence[Mapping[str, Any]],
     rejected: Sequence[Mapping[str, Any]] = (),
     definition_turn_id: int | None = None,
+    guarantee_tags: frozenset[str] = CANON_TAGS,
 ) -> EventAttribution:
     """Build attribution for one probe event.
 
@@ -371,6 +384,44 @@ def build_event_attribution(
         or (definition_turn_id is not None and memory.source_turn_id == definition_turn_id)
     )
     matching_set = set(matching_ids)
+    # Contract-tier classification of matching-but-unindexed memories (docs/26 §8
+    # Q1; owner decision 2026-07-16). Roll-up lookup uses the consolidation pass's
+    # own `source_ids:` audit tag (#76) — no new schema.
+    memories_by_id = {memory.id: memory for memory in memories}
+    indexed_set = set(indexed_memory_ids)
+    roll_up_summaries = [memory for memory in memories if SUMMARY_TAG in memory.tags]
+
+    def _roll_up_for(memory_id: str) -> MemoryEpisode | None:
+        for summary in roll_up_summaries:
+            for tag in summary.tags:
+                if tag.startswith("source_ids:") and memory_id in tag.removeprefix(
+                    "source_ids:"
+                ).split(","):
+                    return summary
+        return None
+
+    folded_carried: list[str] = []
+    folded_lost: list[str] = []
+    folded_lost_guarantee: list[str] = []
+    unindexed: list[str] = []
+    for memory_id in matching_ids:
+        if memory_id in indexed_set:
+            continue
+        memory = memories_by_id[memory_id]
+        if CONSOLIDATED_TAG not in memory.tags:
+            unindexed.append(memory_id)
+            continue
+        roll_up = _roll_up_for(memory_id)
+        if (
+            roll_up is not None
+            and roll_up.id in indexed_set
+            and semantic_match(roll_up.summary, event.term_groups)
+        ):
+            folded_carried.append(memory_id)
+        elif set(memory.tags) & guarantee_tags:
+            folded_lost_guarantee.append(memory_id)
+        else:
+            folded_lost.append(memory_id)
     selected_memory_ids = tuple(
         str(item["id"])
         for item in selected
@@ -392,12 +443,16 @@ def build_event_attribution(
         query=query,
         matching_memory_ids=matching_ids,
         indexed_memory_ids=tuple(
-            memory_id for memory_id in matching_ids if memory_id in set(indexed_memory_ids)
+            memory_id for memory_id in matching_ids if memory_id in indexed_set
         ),
         selected_memory_ids=selected_memory_ids,
         selected_visibilities=tuple(str(item.get("visibility")) for item in selected),
         missed_memory_ids=miss.missed_ids,
         missed_memory_ranks=missed_memory_ranks,
+        folded_carried_ids=tuple(folded_carried),
+        folded_lost_ids=tuple(folded_lost),
+        folded_lost_guarantee_ids=tuple(folded_lost_guarantee),
+        unindexed_memory_ids=tuple(unindexed),
     )
 
 
@@ -762,9 +817,14 @@ def run_checkpoint(
         {
             **attribution.__dict__,
             "extracted": bool(attribution.matching_memory_ids),
+            # Contract-tier (2026-07-16): index integrity holds when nothing is
+            # missing WITHOUT a consolidation explanation and no guarantee-tier
+            # fact was lost; best-effort folded loss stays visible separately in
+            # folded_lost_ids / quality_metrics.consolidation_lost_matches.
             "indexed": (
                 bool(attribution.matching_memory_ids)
-                and attribution.indexed_memory_ids == attribution.matching_memory_ids
+                and not attribution.unindexed_memory_ids
+                and not attribution.folded_lost_guarantee_ids
             ),
             "selected": bool(attribution.selected_memory_ids),
             "recalled": bool(turn_by_step[event.callback_turn]["callback_recalled"]),
@@ -810,6 +870,14 @@ def run_checkpoint(
             "retrieval_miss_ranks": sorted(
                 rank for event in event_payloads for rank in event["missed_memory_ranks"]
             ),
+            # Contract-tier consolidation loss (docs/26 §8 Q1, 2026-07-16): report-only
+            # for best-effort facts -- guarantee-tier loss fails the run outright in
+            # _validate_attribution instead of appearing here.
+            "consolidation_lost_matches": {
+                event["event_key"]: list(event["folded_lost_ids"])
+                for event in event_payloads
+                if event["folded_lost_ids"]
+            },
             "response_chars": [turn["response_chars"] for turn in turns],
             "novel_proper_noun_candidates": sorted(
                 {
@@ -892,11 +960,29 @@ def _validate_attribution(attribution: EventAttribution, *, strict: bool) -> Non
             f"event {attribution.event_key} has no persisted matching memory",
         )
     if attribution.matching_memory_ids:
+        # Contract-tier semantics (docs/26 §8 Q1; owner decision 2026-07-16): only a
+        # NON-consolidated matching memory absent from Qdrant is an indexing defect.
+        # A folded original whose roll-up carries the match is satisfied through the
+        # summary; a folded original whose roll-up LOST the match gates the run only
+        # for guarantee-tier (durable-commitment family) facts — best-effort loss is
+        # recorded in the attribution and quality metrics, never asserted away and
+        # never a gate. Mirrors the 2026-07-11 SQLite/Qdrant count-parity correction.
         _require(
-            attribution.indexed_memory_ids == attribution.matching_memory_ids,
+            not attribution.unindexed_memory_ids,
             f"event {attribution.event_key} has extracted memories missing from Qdrant",
         )
-        if strict:
+        _require(
+            not attribution.folded_lost_guarantee_ids,
+            f"event {attribution.event_key} lost a guarantee-tier fact to a consolidation "
+            "roll-up that does not carry it",
+        )
+        folded_away = {*attribution.folded_lost_ids, *attribution.folded_carried_ids}
+        retrievable_matching = tuple(
+            memory_id
+            for memory_id in attribution.matching_memory_ids
+            if memory_id not in folded_away
+        )
+        if strict and retrievable_matching:
             _require(
                 bool(attribution.selected_memory_ids),
                 f"event {attribution.event_key} was not selected by callback retrieval",
@@ -1086,6 +1172,7 @@ def inspect_story_event(
         selected=diagnostics["selected"],
         rejected=diagnostics["rejected"],
         definition_turn_id=definition_turn_id,
+        guarantee_tags=effective_canon_tags(canon_tag_pinning=settings.canon_tag_pinning),
     )
 
 

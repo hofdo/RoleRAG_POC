@@ -697,6 +697,15 @@ Effort S. — [x]
 > and give up in-run consolidation evidence; (d) decouple: validate Lanes A+B with
 > consolidation off, consolidation preset separately. Recorded here pending the owner call —
 > no assertion, threshold, or preset value was changed to route around the failure.
+> **Owner decision 2026-07-16: (b) contract-tier assertion.** `_validate_attribution` now
+> classifies matching-but-unindexed memories via `build_event_attribution`: non-consolidated
+> missing = hard fail (unchanged); folded + roll-up carries the match = satisfied through
+> the summary; folded + roll-up lost it = hard fail for guarantee-tier (durable-commitment
+> family, `effective_canon_tags`) facts, recorded loss
+> (`quality_metrics.consolidation_lost_matches`) for best-effort facts. The long-gap probe
+> becomes the preset's compression-quality meter. Semantics + the four-case split pinned by
+> `test_build_event_attribution_contract_tier_consolidation_split`; docs/25 Phase E carries
+> the same note. Phase E runs restart under these semantics.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
