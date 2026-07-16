@@ -719,6 +719,19 @@ Effort S. — [x]
 > step-keyed). 55 prior turns: all success, 5/5 inspections passed. Artifact preserved
 > (scratchpad E1-attempt5). Not a preset or lane defect — the known ~6.7% fail-closed
 > rate landing on a probe definition turn twice; rerun follows, each attempt recorded.
+> **Second occurrence same day (post-rebase run): identical correlated double
+> controlled_failure on the same turn — 5 of 7 historical attempts on this line have now
+> fail-closed (~70% observed vs ~6.7% global).** A definition line with a ~70% fail-closed
+> rate measures critic strictness on that draft class ("press a ring into her palm and
+> tell her to wear it as a sign of my word"), not recall, and no retry budget rescues it.
+> **Owner decision 2026-07-16: probe-repair reword** to the silver_compass-shaped
+> declarative gift ("I give Iria an amber ring as a token of my promise to return."),
+> same fact/term-groups/callback — per the run-1 vocabulary-widening precedent (probe
+> false-negative repair, not an assertion or threshold change). The critic-rejection
+> root cause on the original phrasing stays unknown by design (drafts are never
+> persisted, invariant #4); a critic-reason diagnostics field was considered and
+> deferred — reopen if the reworded line ever fail-closes again. Retry-delta ledger so
+> far: N=2 consumed retries, both correlated double failures, zero rescues.
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index

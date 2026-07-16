@@ -87,7 +87,15 @@ ROSE_GALLERY_MESSAGES = (
     "I trace the conservatory passage behind the roses and ask where it ends.",
     "I ask which neutral courtier might be swayed by the ledger's contents.",
     "I tell Iria to watch the eastern stair while I approach the archive.",
-    "I press an amber ring into Iria's palm and tell her to wear it as a sign of my word.",
+    # Reworded 2026-07-16 (owner decision): the original line -- "I press an amber
+    # ring into Iria's palm and tell her to wear it as a sign of my word." --
+    # controlled-failed 5 of 7 historical attempts (~70% vs the ~6.7% global
+    # fail-closed rate; docs/22 P2.2), so the probe measured critic strictness on
+    # that draft class instead of recall, and no retry budget rescues 70%. Same
+    # fact, same term groups, same callback; shape matches silver_compass's
+    # proven-safe declarative gift (turn 21, passes every run). Probe-repair per
+    # the docs/22 run-1 vocabulary precedent, not an assertion change.
+    "I give Iria an amber ring as a token of my promise to return.",
     "I test the west door with three soft taps and wait for her answer.",
     "I ask Iria to confirm the blue wax seal on the note just delivered.",
     "I ask how long the guards' midnight rotation leaves the corridor empty.",
