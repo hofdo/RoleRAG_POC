@@ -7,6 +7,7 @@ import pytest
 
 from app.content.validator import LoreDocumentMetadata, LoreManifest
 from app.domain import RetrievedChunk, Visibility
+from app.rag.chunking import ChunkingConfig
 from app.rag.ingestion import IngestionRequest, ingest_document, ingest_lore_manifest
 from app.rag.models import RagChunk, RagCollection, RetrievalFilter
 from app.rag.vector_store import InMemoryVectorStore, StoredPoint, VectorStoreModelMismatch
@@ -331,3 +332,141 @@ def test_ingest_document_ensure_collection_guards_fire_before_skip_decision(
             vector_store=vector_store,
             model_key="model-b",
         )
+
+
+# ---------------------------------------------------------------------------
+# docs/22 P1.3: structure-aware chunking + contextual chunk headers (opt-in)
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_document_structure_aware_header_uses_first_h1_as_doc_title(
+    tmp_path: Path,
+) -> None:
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers gather around mirrored columns.", encoding="utf-8"
+    )
+    vector_store = RecordingVectorStore()
+
+    ingest_document(
+        _request(document),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        chunking_config=ChunkingConfig(structure_aware=True),
+    )
+
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    # The document's own H1 ("Rose Gallery") is both the derived doc_title AND the first
+    # (only) heading's section path; _section_header deduplicates the shared root segment
+    # so the header reads "Rose Gallery", never "Rose Gallery › Rose Gallery".
+    assert chunks[0].text == "Rose Gallery\n\nCourtiers gather around mirrored columns."
+
+
+def test_ingest_document_structure_aware_header_falls_back_to_filename_stem(
+    tmp_path: Path,
+) -> None:
+    # No H1 in the document at all -- doc_title falls back to the path stem.
+    document = tmp_path / "archive_notes.md"
+    document.write_text("Just prose, no headings anywhere in this file.", encoding="utf-8")
+    vector_store = RecordingVectorStore()
+
+    ingest_document(
+        _request(document),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        chunking_config=ChunkingConfig(structure_aware=True),
+    )
+
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert chunks[0].text == (
+        "archive_notes\n\nJust prose, no headings anywhere in this file."
+    )
+
+
+def test_ingest_document_legacy_path_ignores_derived_doc_title(tmp_path: Path) -> None:
+    # structure_aware=False (the default): doc_title is still derived and passed, but
+    # chunk_text must ignore it entirely -- the chunk text carries no header at all.
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers gather around mirrored columns.", encoding="utf-8"
+    )
+    vector_store = RecordingVectorStore()
+
+    ingest_document(
+        _request(document),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+    )
+
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert chunks[0].text == "# Rose Gallery\n\nCourtiers gather around mirrored columns."
+
+
+def test_ingest_document_structure_aware_does_not_add_section_tags(tmp_path: Path) -> None:
+    """Deviation from docs/22 P1.3's suggestion to also tag chunks with their section path
+    (docs/22 shipped-note): app.rag.ranking._lexical_overlap_boost reads chunk.tags for
+    EVERY retrieved chunk (``content_terms(chunk.text) | content_terms(" ".join(chunk.tags))``,
+    ranking.py) with no filter gate, so a section-path tag would silently perturb rerank
+    scores for any structure-aware-ingested lore chunk that happens to share vocabulary with
+    a section title -- not the inert metadata the roadmap assumed. This test pins the
+    deliberate decision to skip the tag: request tags pass through unchanged, and no
+    ``section:...`` tag is ever added, with or without the flag."""
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\n## Archivists\n\nCourtiers gather around mirrored columns.",
+        encoding="utf-8",
+    )
+    vector_store = RecordingVectorStore()
+
+    ingest_document(
+        IngestionRequest(
+            path=document,
+            collection=RagCollection.CANON_LORE,
+            source_type="lore",
+            visibility=Visibility.PLAYER,
+            tags=["existing-tag"],
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=vector_store,
+        chunking_config=ChunkingConfig(structure_aware=True),
+    )
+
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert all(chunk.tags == ["existing-tag"] for chunk in chunks)
+    assert all(not any(tag.startswith("section:") for tag in chunk.tags) for chunk in chunks)
+
+
+def test_ingest_document_structure_aware_flag_flip_changes_chunk_ids_and_reingests(
+    tmp_path: Path,
+) -> None:
+    """docs/22 P1.3 interplay with backlog #86: flipping structure_aware changes the
+    chunk text (the contextual header), which changes the chunk ids (sha256 of
+    source:index:text), so the #86 unchanged-document skip sees a different id set on the
+    next ingest and correctly falls through to a full re-ingest instead of skipping."""
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers gather around mirrored columns.", encoding="utf-8"
+    )
+    embedding_provider = FakeEmbeddingProvider()
+    vector_store = InMemoryVectorStore()
+
+    legacy = ingest_document(
+        _request(document),
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        chunking_config=ChunkingConfig(structure_aware=False),
+    )
+    flipped = ingest_document(
+        _request(document),
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        chunking_config=ChunkingConfig(structure_aware=True),
+    )
+
+    assert legacy.skipped is False
+    assert flipped.skipped is False
+    assert len(embedding_provider.batches) == 2
+    stored_ids = list(vector_store.list_source_chunk_ids(RagCollection.CANON_LORE, str(document)))
+    stored_chunks = vector_store.get_chunks(RagCollection.CANON_LORE, stored_ids)
+    assert len(stored_chunks) == 1
+    assert stored_chunks[0].text == "Rose Gallery\n\nCourtiers gather around mirrored columns."

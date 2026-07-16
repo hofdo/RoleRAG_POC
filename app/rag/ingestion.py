@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from hashlib import sha256
 from pathlib import Path
 
@@ -12,6 +13,11 @@ from app.rag.models import RagChunk, RagCollection
 from app.rag.vector_store import VectorStore
 
 SUPPORTED_DOCUMENT_SUFFIXES = {".md", ".txt"}
+
+# First markdown H1 line (docs/22 P1.3 contextual chunk header doc_title). Deliberately
+# just the H1 level -- app.rag.chunking's own ATX heading regex (levels 1-6) is a
+# separate, section-splitting concern.
+_FIRST_H1_RE = re.compile(r"^# (.+)$", re.MULTILINE)
 
 
 class IngestionRequest(BaseModel):
@@ -49,7 +55,12 @@ def ingest_document(
         raise ValueError(f"unsupported document type: {path.suffix}")
 
     text = path.read_text(encoding="utf-8")
-    chunks_text = chunk_text(text, config=chunking_config)
+    # Always derived and always passed: chunk_text ignores doc_title entirely on the
+    # legacy (structure_aware=False, default) path, so this is harmless when the flag is
+    # off and gives the structure-aware path (docs/22 P1.3) its contextual header for free
+    # when it's on -- no branch needed here on the flag itself.
+    doc_title = _derive_doc_title(text, path)
+    chunks_text = chunk_text(text, config=chunking_config, doc_title=doc_title)
     if not chunks_text:
         raise ValueError(f"empty document: {path}")
 
@@ -159,3 +170,14 @@ def ingest_lore_manifest(
 def _chunk_id(*, source: str, text: str, index: int) -> str:
     digest = sha256(f"{source}:{index}:{text}".encode("utf-8")).hexdigest()
     return f"chunk-{digest[:16]}"
+
+
+def _derive_doc_title(text: str, path: Path) -> str:
+    """docs/22 P1.3 contextual-header doc_title: the document's first markdown H1 line's
+    text, or the filename stem when it has none."""
+    match = _FIRST_H1_RE.search(text.replace("\r\n", "\n"))
+    if match:
+        title = match.group(1).strip()
+        if title:
+            return title
+    return path.stem

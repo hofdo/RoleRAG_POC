@@ -485,6 +485,7 @@ def ingest(
             chunking_config=ChunkingConfig(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+                structure_aware=settings.rag_structure_aware_chunking,
             ),
             model_key=settings.embedding_model,
             force=force,
@@ -540,6 +541,7 @@ def ingest_scenario_lore(
             chunking_config=ChunkingConfig(
                 chunk_size_chars=settings.rag_chunk_size_chars,
                 chunk_overlap_chars=settings.rag_chunk_overlap_chars,
+                structure_aware=settings.rag_structure_aware_chunking,
             ),
             model_key=settings.embedding_model,
             force=force,

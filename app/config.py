@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     rag_default_top_k: int = Field(default=5, ge=1)
     rag_chunk_size_chars: int = Field(default=1000, ge=1)
     rag_chunk_overlap_chars: int = Field(default=120, ge=0)
+    # Opt-in structure-aware chunking (docs/22 P1.3): heading-aware sections + sentence-
+    # boundary splits + a "<doc title> › <section path>" header line on every chunk.
+    # Changes chunk text -> chunk ids, so flipping this triggers a natural full re-ingest
+    # per source (the #86 unchanged-document skip sees a different id set). Default false
+    # = byte-identical chunking; flip only after the owner-side semantic benchmark
+    # (docs/24) shows flag-on helps recall/nDCG.
+    rag_structure_aware_chunking: bool = False
     rag_max_retrieved_chunk_chars: int = Field(default=800, ge=1)
 
     # Retrieval reranking weights. Defaults mirror the canonical Final constants

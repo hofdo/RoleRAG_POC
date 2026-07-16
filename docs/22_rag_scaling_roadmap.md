@@ -394,6 +394,70 @@ the runbook bricks on a stale one. Effort S–M. — [x]
 
 ### P1.3 Structure-aware chunking + contextual chunk headers
 
+> **Shipped 2026-07-16 — offline half (opt-in, default off).** `ChunkingConfig` gained
+> `structure_aware: bool = False` (`app/rag/chunking.py`), paired with
+> `Settings.rag_structure_aware_chunking` / `RAG_STRUCTURE_AWARE_CHUNKING=false`
+> (`app/config.py`, `.env.example`) and threaded into every Settings-driven
+> `ChunkingConfig(...)` construction site (`app/composition.py`'s
+> `auto_ingest_scenario_lore` -- the composition root shared by the CLI's `start-session`
+> and the API's `POST /sessions` -- both CLI `ingest`/`ingest-scenario-lore` commands, and
+> the deterministic smoke runner). `chunk_text` gained a keyword-only
+> `doc_title: str | None = None`, ignored entirely on the legacy path -- proven by a
+> golden-baseline test that hardcodes the exact output of the PRE-P1.3 chunker on three
+> fixtures (nested headings, an oversized paragraph, plain multi-paragraph), captured
+> before `chunking.py` was touched, including regardless-of-doc_title byte-identity.
+> Flag on: the document splits on markdown ATX headings (levels 1-6) into sections with a
+> hierarchy-aware path (`A › B › C`; a new heading pops every stack entry at its level or
+> deeper first); paragraphs accumulate within a section only -- chunks never straddle a
+> heading boundary, and overlap seeding resets per section. An oversized block now
+> cascades sentence-boundary packing -> word-boundary packing -> the original fixed-window
+> hard split (last resort only, e.g. a single unbroken token) -- never a mid-word cut while
+> any boundary exists at some tier. Every emitted chunk gets a first line
+> `<doc title> › <section path>` plus a blank line, skipping whichever part is absent (no
+> header line at all if both are absent), and deduplicating the common lore shape whose
+> only H1 is the document's own title -- when the section path's root segment already IS
+> the doc title, the title is not repeated (`Title › Sub`, never `Title › Title › Sub`);
+> the header is free budget-wise (a chunk may
+> exceed `chunk_size_chars` by the header's length -- documented on `chunk_text`, simpler
+> and more predictable than shrinking the body budget). `ingest_document` derives
+> `doc_title` from the document's first `# ` (H1) line, else the filename stem, and passes
+> it unconditionally (harmless on the legacy path).
+>
+> **Tag decision -- deviation from this section's original "store section path in chunk
+> metadata/tags" text, with evidence.** Did NOT add a `section:<path>` chunk tag. Before
+> adding it, checked every reader of `chunk.tags` at retrieval/ranking time as this item's
+> own validate step implies: `app/rag/ranking.py`'s `_lexical_overlap_boost` folds
+> `content_terms(" ".join(chunk.tags))` into the lexical rerank score of **every** chunk
+> with no filter gate (`ranking.py:294`) -- so a section-path tag is not inert metadata, it
+> would silently perturb rerank scores for any structure-aware-ingested lore chunk whose
+> section title happens to share vocabulary with a query. That is exactly the kind of
+> semantic-quality effect this whole feature is gated on measuring before shipping, not
+> something to introduce as an unmeasured side effect of a "diagnostics-only" tag. (Tag
+> *filtering* is separately confirmed inert on this path -- actor retrieval never sets
+> `RetrievalFilter.tags`, and `app/rag/lexical.py`'s Lane B scores `MemoryEpisode.tags` for
+> session-memory lexical slicing, never lore `RagChunk.tags` -- but ranking's unconditional
+> read is the one that actually matters here.) Section identity still reaches the embedded
+> text via the contextual header itself, which is this item's core ask regardless of the
+> tag question. Pinned by
+> `test_ingest_document_structure_aware_does_not_add_section_tags`.
+>
+> **#86 interplay.** Flipping the flag changes chunk text -> chunk ids
+> (`sha256(source:index:text)`), so the content-fingerprint skip (backlog #86) sees a
+> different id set on the next ingest per source and correctly falls through to a full
+> re-ingest rather than skipping -- pinned by
+> `test_ingest_document_structure_aware_flag_flip_changes_chunk_ids_and_reingests`.
+>
+> **Validation status (mirrors § P0.4's own honesty pattern).** Offline half only.
+> Deterministic chunking/ingestion/config/wiring tests are green
+> (`tests/unit/test_chunking.py`, `test_ingestion.py`, `test_config.py`,
+> `tests/integration/test_cli.py`) -- but per this doc's own measure-first workflow, a
+> keyword-embedding suite cannot show whether the contextual header actually helps
+> recall/nDCG; it only proves the mechanism is wired and byte-identical when off. Semantic
+> validation is pending owner-side: `rolerag semantic-benchmark --model
+> sentence-transformers/all-MiniLM-L6-v2` with the flag on vs off against the docs/24
+> calibrated floors (recall@10 >= 0.75, nDCG@10 >= 0.70, German recall@10 >= 0.55), then
+> live-smoke, before any default flip.
+
 **Problem.** Chunking is blind paragraph accumulation
 ([app/rag/chunking.py](../app/rag/chunking.py)): chunks straddle markdown section
 boundaries; oversized blocks split at fixed character offsets (mid-word,
@@ -408,7 +472,7 @@ it aids the model too); store section path in chunk metadata/tags for diagnostic
 Chunk ids already hash `source:index:text`, so re-ingest replaces cleanly.
 
 **Validate.** Chunking unit tests; P0.4 recall (headers typically help both legs of P1.1).
-Effort M. — [ ]
+Effort M. — [~]
 
 ---
 

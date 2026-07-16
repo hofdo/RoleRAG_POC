@@ -571,6 +571,52 @@ def test_cli_start_session_auto_ingests_scenario_lore(tmp_path: Path) -> None:
     assert source.endswith("documents/lore.md")
 
 
+def test_cli_start_session_auto_ingest_honors_structure_aware_chunking_setting(
+    tmp_path: Path,
+) -> None:
+    # docs/22 P1.3. auto_ingest_scenario_lore (app/composition.py) is the composition root
+    # shared by the CLI's start-session and the API's POST /sessions -- proving the flag
+    # reaches ChunkingConfig here is proof for both surfaces, matching the #48/#67 drift
+    # concern this file's sibling tests guard against for orchestrator wiring.
+    pack_root = tmp_path / "pack"
+    _write_scenario_pack(pack_root)
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.composition.build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.composition.build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "start-session",
+                "--session-id",
+                "structure-aware-session",
+                "--content-root",
+                str(pack_root),
+                "--world-id",
+                "custom_world",
+                "--scene-id",
+                "custom-opening",
+                "--active-persona-id",
+                "custom-narrator",
+            ],
+            env={
+                "DATABASE_PATH": str(tmp_path / "sessions.db"),
+                "RAG_STRUCTURE_AWARE_CHUNKING": "true",
+            },
+        )
+
+    assert result.exit_code == 0
+    assert len(vector_store.replace_calls) == 1
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    # The pack's lore.md is "# Custom Lore\n\nA custom banner hangs in the hall." -- its own
+    # H1 is both the derived doc_title and the only heading's section path, so
+    # _section_header deduplicates the shared root segment: "Custom Lore", never
+    # "Custom Lore › Custom Lore".
+    assert chunks[0].text == "Custom Lore\n\nA custom banner hangs in the hall."
+
+
 def test_cli_resume_prints_session_metadata(tmp_path: Path) -> None:
     with (
         patch("app.composition.build_local_provider", return_value=FakeProvider()),
@@ -713,6 +759,42 @@ def test_cli_ingest_uses_fake_embedding_provider_and_vector_store(tmp_path: Path
     assert chunks[0].visibility == Visibility.PLAYER
     assert chunks[0].tags == ["palace"]
     assert chunks[0].world_id == "demo_world"
+
+
+def test_cli_ingest_honors_structure_aware_chunking_setting(tmp_path: Path) -> None:
+    # docs/22 P1.3: RAG_STRUCTURE_AWARE_CHUNKING must reach the ChunkingConfig built
+    # inline in app.cli's own `ingest` command -- a separate construction site from
+    # app.composition.auto_ingest_scenario_lore (see the start-session sibling test).
+    document = tmp_path / "demo_lore.md"
+    document.write_text(
+        "# Rose Gallery\n\nCourtiers drift between mirrors and roses.",
+        encoding="utf-8",
+    )
+    vector_store = RecordingVectorStore()
+
+    with (
+        patch("app.cli._build_embedding_provider", return_value=FakeEmbeddingProvider()),
+        patch("app.cli._build_vector_store", return_value=vector_store),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "ingest",
+                str(document),
+                "--visibility",
+                Visibility.PLAYER.value,
+                "--source-type",
+                "lore",
+                "--world-id",
+                "demo_world",
+            ],
+            env={"RAG_STRUCTURE_AWARE_CHUNKING": "true"},
+        )
+
+    assert result.exit_code == 0
+    assert len(vector_store.replace_calls) == 1
+    _, _, chunks, _ = vector_store.replace_calls[0]
+    assert chunks[0].text == "Rose Gallery\n\nCourtiers drift between mirrors and roses."
 
 
 def test_cli_ingest_scenario_lore_uses_manifest_metadata(tmp_path: Path) -> None:

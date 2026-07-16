@@ -7,6 +7,21 @@ records; this file is the quick delta between versions.
 
 ### Added
 
+- **Structure-aware chunking + contextual chunk headers** (docs/22 P1.3, opt-in, default
+  off, byte-identical when off): new `RAG_STRUCTURE_AWARE_CHUNKING` / `ChunkingConfig.
+  structure_aware` flag. When on, `chunk_text` splits documents on markdown ATX headings
+  into a hierarchy-aware section path (`A › B › C`, never straddling a section boundary),
+  packs oversized blocks at sentence- then word-boundaries before falling back to the
+  original fixed-window hard split, and prepends a `<doc title> › <section path>` header
+  to every chunk's embedded text (`ingest_document` derives `doc_title` from the
+  document's first `# ` line, else the filename stem). Flipping the flag changes chunk
+  text and therefore chunk ids, so the #86 content-fingerprint skip correctly re-ingests
+  on the next contact per source. Deliberately does NOT add a `section:<path>` chunk tag
+  as originally proposed: `app/rag/ranking.py`'s lexical rerank boost reads `chunk.tags`
+  for every chunk unconditionally, so a section-path tag would silently perturb rerank
+  scores rather than stay inert diagnostics metadata. Semantic-quality validation
+  (recall/nDCG with the flag on vs off) is pending an owner-side `rolerag
+  semantic-benchmark` run before any default flip -- see docs/22 P1.3.
 - **Ingest content-fingerprint skip** (#86, default on, byte-identical end state):
   `ingest_document`/`ingest_lore_manifest` now skip re-embedding a document whose content is
   unchanged since its last ingest. Chunk ids are deterministic hashes of `(source, index,
