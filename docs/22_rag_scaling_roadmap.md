@@ -1,6 +1,6 @@
 # 22 — RAG Scaling Roadmap: Larger Scenarios on ~27B Local Models
 
-> Reviewed: 2026-07-16 @ a82f711
+> Reviewed: 2026-07-19 @ 760c9e4
 >
 > **Update 2026-07-14 (docs/26 synthesis).** The four Phase D live failures recorded under
 > [§ P2.2](#p22-long-campaign-preset-enable-the-shipped-but-off-machinery-with-evidence) were
@@ -732,6 +732,39 @@ Effort S. — [x]
 > persisted, invariant #4); a critic-reason diagnostics field was considered and
 > deferred — reopen if the reworded line ever fail-closes again. Retry-delta ledger so
 > far: N=2 consumed retries, both correlated double failures, zero rescues.
+>
+> **Phase E run 1 (E1) — first CLEAN 100-turn pass (2026-07-19, `26b-mtp`, reworded probe,
+> contract-tier semantics in).** All 100 turns success (0 controlled failures — the ~6.7%
+> rate would predict ~7), 8/8 probes attributed, `report.md` all-PASS, `status: pass`. Lane
+> A: 8 pinned facts at cap, **never dropped, zero cap evictions** across 100 turns. Lane B:
+> 184 guaranteed slice selections, summed-IDF score deciles
+> 2.15/3.04/3.47/3.89/4.80/5.60/6.47/7.28/9.29 (run-1 half of the `min_slice_score`
+> derivation set). Consolidation fired hard: 60 folded + 4 roll-up summaries. The two
+> `callback_recall_misses`/`retrieval_selection_misses` both decompose to non-defects:
+> `before_dawn_promise` was SELECTED into the prompt (actor reply paraphrased outside the
+> term groups — response variance, not retrieval); `hollow_bookend_note` is the recorded
+> contract-tier consolidation loss (`consolidation_lost_matches`), metering as designed;
+> `key_hiding_place` had a duplicate extraction, one copy selected and recalled. **E2 did
+> not produce a second clean run** — it was killed after the laptop hibernated on a dead
+> battery mid-run (52 h frozen), an environment failure, not a code result. Per docs/25's
+> two-run bar the default flip stays gated on a genuine second clean run; the harness/probe
+> fixes merged to main byte-identical-at-default in the meantime.
+>
+> **Owner-side extras (2026-07-19, offline, no live run):** both PASS.
+> (1) `semantic-benchmark --model sentence-transformers/all-MiniLM-L6-v2` with
+> `RAG_SLICE_LEXICAL_QUOTA=2 CANON_TAG_PINNING=true` set — reranked production path
+> recall@10 **0.824** / nDCG@10 **0.761** / German recall@10 **0.630**, all clearing the
+> P0.4 floors (0.75 / 0.70 / 0.55) and identical to the docs/24 baseline: Lane B/pinning are
+> post-retriever, so they do not perturb the retriever-level semantic quality the floors
+> gate. (2) D3 pool (`live-validation-D3-2026-07-12.db`, 48 memories) reindexed into a
+> disposable Qdrant (all-MiniLM-L6-v2) + `inspect_story_event` end-to-end, both lanes on:
+> the blue-seal memory `354b8d98` lands in the selected set (`missed=[]`); **lanes OFF, the
+> same query reproduces the original #73 miss end-to-end** (`354b8d98` in `missed`, not
+> selected). This is the #73 acceptance case confirmed against real Qdrant + real
+> embeddings, not just the offline replay — the fact reaches the actor prompt via Lane A
+> pinning / Lane B slice, **not** via a dense-rank improvement (the explicit #73
+> reinterpretation docs/26 §6 Stage 5 requires). Artifact opened via a scratch copy;
+> `docs/artifacts/` untouched (no `-wal`/`-shm` sidecars).
 
 **Problem.** Consolidation, semantic write-dedup, importance floor, and recency boost are
 implemented and OFF (deliberately — offline evals can't prove live benefit; a hard index
